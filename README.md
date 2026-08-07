@@ -1,10 +1,21 @@
 # ILO Board
 
-Touch-first companion software for the Waveshare ESP32-S3-Touch-LCD-5 and macOS.
+Touch-first companion software for the Waveshare ESP32-S3-Touch-LCD-5B and macOS.
+
+## Supported hardware
+
+This firmware targets one exact board profile:
+
+- **Waveshare ESP32-S3-Touch-LCD-5B**
+- Waveshare SKU **28151**
+- **1024×600** 5-inch capacitive-touch RGB display
+- Amazon ASIN **B0DD7N19FT** — [buy the same board on Amazon.de](https://www.amazon.de/dp/B0DD7N19FT)
+
+The no-suffix `ESP32-S3-Touch-LCD-5` (SKU 28117, 800×480) is a different display profile and is not supported by this firmware build.
 
 The repository has two runtime halves:
 
-- `firmware/` — ESP-IDF 5.5.2 firmware for the 800×480 Waveshare board, using LVGL 9.
+- `firmware/` — ESP-IDF 5.5.2 firmware for the 1024×600 Waveshare 5B board (SKU 28151), using LVGL 9.
 - `mac-service/` — a native Swift service that sends a deliberately small task-status model to paired boards.
 
 Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `tools/`.

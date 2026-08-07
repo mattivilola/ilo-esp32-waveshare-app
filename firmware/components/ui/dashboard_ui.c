@@ -63,12 +63,12 @@ static void build_ui(void)
 
     lv_obj_t *rail = lv_obj_create(screen);
     set_clean_box(rail, COLOR_SIGNAL, 0);
-    lv_obj_set_size(rail, 6, 480);
+    lv_obj_set_size(rail, 6, ILO_BOARD_HEIGHT);
     lv_obj_align(rail, LV_ALIGN_LEFT_MID, 0, 0);
 
     lv_obj_t *header = lv_obj_create(screen);
     set_clean_box(header, COLOR_CARBON, 0);
-    lv_obj_set_size(header, 770, 64);
+    lv_obj_set_size(header, ILO_BOARD_WIDTH - 40, 72);
     lv_obj_align(header, LV_ALIGN_TOP_LEFT, 22, 0);
 
     lv_obj_t *eyebrow = lv_label_create(header);
@@ -85,8 +85,8 @@ static void build_ui(void)
 
     lv_obj_t *attention = lv_obj_create(screen);
     set_clean_box(attention, COLOR_SLATE, 18);
-    lv_obj_set_size(attention, 192, 344);
-    lv_obj_align(attention, LV_ALIGN_BOTTOM_LEFT, 22, -24);
+    lv_obj_set_size(attention, 238, 448);
+    lv_obj_align(attention, LV_ALIGN_BOTTOM_LEFT, 22, -28);
     lv_obj_add_flag(attention, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(attention, attention_tapped, LV_EVENT_CLICKED, NULL);
 
@@ -113,13 +113,13 @@ static void build_ui(void)
     lv_label_set_text(work_title, "Active work");
     lv_obj_set_style_text_color(work_title, COLOR_MIST, 0);
     lv_obj_set_style_text_font(work_title, &lv_font_montserrat_20, 0);
-    lv_obj_align(work_title, LV_ALIGN_TOP_LEFT, 238, 78);
+    lv_obj_align(work_title, LV_ALIGN_TOP_LEFT, 286, 94);
 
     for (int i = 0; i < DASHBOARD_MAX_TASKS; ++i) {
         task_rows[i] = lv_obj_create(screen);
         set_clean_box(task_rows[i], COLOR_SLATE, 14);
-        lv_obj_set_size(task_rows[i], 540, 66);
-        lv_obj_align(task_rows[i], LV_ALIGN_TOP_LEFT, 238, 112 + (i * 72));
+        lv_obj_set_size(task_rows[i], 714, 80);
+        lv_obj_align(task_rows[i], LV_ALIGN_TOP_LEFT, 286, 136 + (i * 88));
         lv_obj_add_flag(task_rows[i], LV_OBJ_FLAG_HIDDEN);
 
         task_dots[i] = lv_obj_create(task_rows[i]);
@@ -133,7 +133,7 @@ static void build_ui(void)
         lv_obj_align(task_titles[i], LV_ALIGN_TOP_LEFT, 42, 12);
 
         task_summaries[i] = lv_label_create(task_rows[i]);
-        lv_obj_set_width(task_summaries[i], 470);
+        lv_obj_set_width(task_summaries[i], 640);
         lv_label_set_long_mode(task_summaries[i], LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_color(task_summaries[i], COLOR_FOG, 0);
         lv_obj_set_style_text_font(task_summaries[i], &lv_font_montserrat_14, 0);
@@ -160,11 +160,11 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
         .io_handle = NULL,
         .panel_handle = lcd,
         .control_handle = NULL,
-        .buffer_size = 800 * 480,
+        .buffer_size = ILO_BOARD_WIDTH * ILO_BOARD_HEIGHT,
         .double_buffer = true,
         .trans_size = 0,
-        .hres = 800,
-        .vres = 480,
+        .hres = ILO_BOARD_WIDTH,
+        .vres = ILO_BOARD_HEIGHT,
         .monochrome = false,
         .rotation = { .swap_xy = false, .mirror_x = false, .mirror_y = false },
         .rounder_cb = NULL,

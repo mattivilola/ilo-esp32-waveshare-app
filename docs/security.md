@@ -1,5 +1,7 @@
 # Security model
 
+This model covers the firmware built for the Waveshare ESP32-S3-Touch-LCD-5B (SKU 28151) and its paired macOS user service.
+
 ## Phase-1 capability
 
 The only board capability is `tasks.read`. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, and short summary. Mutating requests fail closed.
@@ -30,4 +32,3 @@ Later decision support requires one-time request IDs, expiry, replay protection,
 - Never pass PSKs or Wi-Fi passwords as command-line arguments, Bonjour TXT values, or logs.
 - Guest and corporate Wi-Fi may block mDNS or peer-to-peer traffic.
 - The macOS service runs as the signed-in user, never as root.
-

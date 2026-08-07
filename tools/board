@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Safe board lifecycle CLI for the Waveshare ESP32-S3-Touch-LCD-5."""
+"""Safe board lifecycle CLI for Waveshare ESP32-S3-Touch-LCD-5B SKU 28151."""
 
 from __future__ import annotations
 

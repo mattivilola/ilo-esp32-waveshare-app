@@ -10,8 +10,10 @@
 extern "C" {
 #endif
 
-#define ILO_BOARD_WIDTH 800
-#define ILO_BOARD_HEIGHT 480
+#define ILO_BOARD_WIDTH 1024
+#define ILO_BOARD_HEIGHT 600
+#define ILO_BOARD_MODEL "Waveshare ESP32-S3-Touch-LCD-5B"
+#define ILO_BOARD_SKU "28151"
 
 esp_err_t board_waveshare_5_init(void);
 esp_lcd_panel_handle_t board_waveshare_5_lcd(void);

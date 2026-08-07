@@ -1,7 +1,7 @@
 # Architecture
 
 ```text
-Waveshare ESP32-S3
+Waveshare ESP32-S3-Touch-LCD-5B (SKU 28151, 1024x600)
   LVGL UI
   board state reducer
   framed JSON over TLS-PSK
@@ -23,12 +23,14 @@ Codex app-server
 - `BoardProtocol` contains transport-neutral status models.
 - `TaskSource` isolates Codex from the board-facing service. The initial source is deterministic mock data.
 - A future Codex source may observe only threads owned by its own documented `codex app-server` connection. It must not label unrelated desktop chats as live.
-- Board-specific LCD, touch, backlight, and IO-expander behavior stays behind `board_waveshare_5`.
+- Board-specific LCD, touch, backlight, and IO-expander behavior for the 1024×600 5B stays behind `board_waveshare_5`.
 - UI components consume a view model and do not perform networking.
 
 ## Why ESP-IDF
 
 Native ESP-IDF gives one supported CLI for Wi-Fi, NVS, TLS, diagnostics, serial monitoring, partitioning, and later signed OTA with rollback. The firmware pins the Waveshare-tested ESP-IDF 5.5.2 and component versions rather than inheriting a moving Arduino or PlatformIO bundle.
+
+The hardware layer is intentionally pinned to Waveshare SKU 28151. The similarly named SKU 28117 uses an 800×480 panel with different timing and is outside this build profile.
 
 ## Why framed JSON
 

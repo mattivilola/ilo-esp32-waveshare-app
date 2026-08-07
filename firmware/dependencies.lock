@@ -1,46 +1,28 @@
 dependencies:
-  espressif/esp-lib-utils:
-    component_hash: 9e81fa27e3a8292bed95d91754ebcb8f27f47117328b0b646446f29fc5a847fb
+  espressif/esp_lcd_touch:
+    component_hash: 3f85a7d95af876f1a6ecca8eb90a81614890d0f03a038390804e5a77e2caf862
     dependencies:
     - name: idf
       require: private
-      version: '>=5.1'
+      version: '>=4.4.2'
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 0.2.3
-  espressif/esp32_display_panel:
-    component_hash: a58d89c4691c84b1a00aa522955f8994d461d3b3dbc4407a85bc91220b9b27fb
+    version: 1.2.1
+  espressif/esp_lcd_touch_gt911:
+    component_hash: 07f678e4202d79bbad917805dcec4134ff08344177720f32ec4898267ad9e394
     dependencies:
-    - name: espressif/esp-lib-utils
+    - name: espressif/esp_lcd_touch
       registry_url: https://components.espressif.com
       require: public
-      version: 0.2.*
-    - name: espressif/esp32_io_expander
-      registry_url: https://components.espressif.com
-      require: public
-      version: 1.*
+      version: ^1.2.0
     - name: idf
       require: private
-      version: '>=5.1'
+      version: '>=5.2'
     source:
       registry_url: https://components.espressif.com/
       type: service
-    version: 1.0.4
-  espressif/esp32_io_expander:
-    component_hash: c34d64ac6022fb351dc8e2a24eff5b60884c91fd8c50f96dd7d1b1728fae16d8
-    dependencies:
-    - name: espressif/esp-lib-utils
-      registry_url: https://components.espressif.com
-      require: public
-      version: 0.2.*
-    - name: idf
-      require: private
-      version: '>=5.1'
-    source:
-      registry_url: https://components.espressif.com
-      type: service
-    version: 1.1.1
+    version: 1.2.0~3
   espressif/esp_lvgl_port:
     component_hash: d3c020b45c3dfc0d1706a83b63a1c34a6eb444a6e935f9afff79f92b7b94dcef
     dependencies:
@@ -67,10 +49,10 @@ dependencies:
       type: service
     version: 9.5.0
 direct_dependencies:
-- espressif/esp32_display_panel
+- espressif/esp_lcd_touch_gt911
 - espressif/esp_lvgl_port
 - idf
 - lvgl/lvgl
-manifest_hash: 670b3de913b26e61f3c0aa56460ea15194774d5b309458d55b3c130dddb61b0f
+manifest_hash: d67ab2db5e84bed4c2558fa720baadbb9a5c7f4560124a11cd4754a3b1d0bcac
 target: esp32s3
 version: 2.0.0

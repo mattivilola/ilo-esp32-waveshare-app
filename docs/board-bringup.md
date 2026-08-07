@@ -1,6 +1,10 @@
 # Board bring-up
 
-Target: Waveshare ESP32-S3-Touch-LCD-5, SKU 28117, 800×480. The `5B` is a different 1024×600 product and must not use this firmware configuration.
+Target: Waveshare ESP32-S3-Touch-LCD-5B, SKU 28151, 1024×600. The purchased Amazon ASIN B0DD7N19FT identifies this exact 5B variant; the no-suffix 800×480 profile must not be flashed.
+
+Reference purchase: [Waveshare ESP32-S3-Touch-LCD-5B on Amazon.de](https://www.amazon.de/dp/B0DD7N19FT).
+
+The firmware profile uses the 5B-specific 21 MHz pixel clock and 1024×600 RGB timings. Shared family features—ESP32-S3-WROOM-1-N16R8, GT911 touch, and CH422G-controlled reset/backlight—do not make the 800×480 firmware interchangeable.
 
 ## Physical connection
 
@@ -50,5 +54,5 @@ Official references:
 
 - [Waveshare board documentation](https://docs.waveshare.com/ESP32-S3-Touch-LCD-5)
 - [Waveshare ESP-IDF setup](https://docs.waveshare.com/ESP32-S3-Touch-LCD-5/Development-Environment-Setup-ESP-IDF)
+- [Waveshare hardware resources, schematic, and component datasheets](https://docs.waveshare.com/ESP32-S3-Touch-LCD-5/Resources-And-Documents)
 - [Espressif serial connection guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/establish-serial-connection.html)
-
