@@ -4,7 +4,7 @@ Touch-first companion software for the Waveshare ESP32-S3-Touch-LCD-5 and macOS.
 
 The repository has two runtime halves:
 
-- `firmware/` — ESP-IDF 5.5.4 firmware for the 800×480 Waveshare board, using LVGL 9.
+- `firmware/` — ESP-IDF 5.5.2 firmware for the 800×480 Waveshare board, using LVGL 9.
 - `mac-service/` — a native Swift service that sends a deliberately small task-status model to paired boards.
 
 Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `tools/`.
@@ -21,6 +21,7 @@ Phase 1 is intentionally read-only. The board may display sanitized task status,
 make mac-test
 make mac-run
 ```
+
 
 Install the pinned ESP-IDF toolchain and build the firmware:
 
@@ -47,4 +48,3 @@ protocol/       Versioned, language-neutral message schemas
 tools/          CLI entry points for setup, build, flash, backup, and recovery
 docs/           Hardware, architecture, UX, and security decisions
 ```
-
