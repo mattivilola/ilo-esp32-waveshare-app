@@ -5,6 +5,7 @@
 #include "esp_check.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
+#include "board_waveshare_5.h"
 
 #define COLOR_CARBON  lv_color_hex(0x0A0F14)
 #define COLOR_SLATE   lv_color_hex(0x131B22)
@@ -21,6 +22,20 @@ static lv_obj_t *task_rows[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_titles[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_summaries[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_dots[DASHBOARD_MAX_TASKS];
+
+static void touch_read(lv_indev_t *input, lv_indev_data_t *data)
+{
+    (void)input;
+    uint16_t x = 0;
+    uint16_t y = 0;
+    if (board_waveshare_5_read_touch(&x, &y)) {
+        data->point.x = x;
+        data->point.y = y;
+        data->state = LV_INDEV_STATE_PRESSED;
+    } else {
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+}
 
 static void set_clean_box(lv_obj_t *object, lv_color_t color, int radius)
 {
@@ -126,9 +141,9 @@ static void build_ui(void)
     }
 }
 
-esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd, esp_lcd_touch_handle_t touch)
+esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
 {
-    if (lcd == NULL || touch == NULL) {
+    if (lcd == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
     const lvgl_port_cfg_t port_config = {
@@ -171,12 +186,15 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd, esp_lcd_touch_handle_t t
         return ESP_FAIL;
     }
 
-    const lvgl_port_touch_cfg_t touch_config = { .disp = display, .handle = touch, .scale = { 1.0f, 1.0f } };
-    if (lvgl_port_add_touch(&touch_config) == NULL) {
+    lvgl_port_lock(0);
+    lv_indev_t *touch = lv_indev_create();
+    if (touch == NULL) {
+        lvgl_port_unlock();
         return ESP_FAIL;
     }
+    lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(touch, touch_read);
 
-    lvgl_port_lock(0);
     build_ui();
     lvgl_port_unlock();
     return ESP_OK;

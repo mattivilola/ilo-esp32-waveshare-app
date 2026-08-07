@@ -20,7 +20,7 @@ extern "C" void app_main()
 
     ESP_LOGI(TAG, "Starting ILO Board protocol v1 (read-only)");
     ESP_ERROR_CHECK(board_waveshare_5_init());
-    ESP_ERROR_CHECK(dashboard_ui_init(board_waveshare_5_lcd(), board_waveshare_5_touch()));
+    ESP_ERROR_CHECK(dashboard_ui_init(board_waveshare_5_lcd()));
 
     dashboard_model_t initial = dashboard_model_demo();
     dashboard_ui_set_model(&initial);
@@ -30,4 +30,3 @@ extern "C" void app_main()
         dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_NOT_CONFIGURED);
     }
 }
-

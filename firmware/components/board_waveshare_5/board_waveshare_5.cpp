@@ -7,6 +7,7 @@
 
 using esp_panel::board::Board;
 using esp_panel::drivers::BusRGB;
+using esp_panel::drivers::TouchPoint;
 
 static const char *TAG = "board_waveshare_5";
 static Board *board;
@@ -53,9 +54,16 @@ extern "C" esp_lcd_panel_handle_t board_waveshare_5_lcd(void)
         : nullptr;
 }
 
-extern "C" esp_lcd_touch_handle_t board_waveshare_5_touch(void)
+extern "C" bool board_waveshare_5_read_touch(uint16_t *x, uint16_t *y)
 {
-    return board != nullptr && board->getTouch() != nullptr
-        ? board->getTouch()->getPanelHandle()
-        : nullptr;
+    if (board == nullptr || board->getTouch() == nullptr || x == nullptr || y == nullptr) {
+        return false;
+    }
+    TouchPoint point;
+    if (board->getTouch()->readPoints(&point, 1, 0) < 1) {
+        return false;
+    }
+    *x = static_cast<uint16_t>(point.x);
+    *y = static_cast<uint16_t>(point.y);
+    return true;
 }

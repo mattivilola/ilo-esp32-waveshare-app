@@ -1,8 +1,10 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "esp_err.h"
 #include "esp_lcd_panel_ops.h"
-#include "esp_lcd_touch.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -13,9 +15,8 @@ extern "C" {
 
 esp_err_t board_waveshare_5_init(void);
 esp_lcd_panel_handle_t board_waveshare_5_lcd(void);
-esp_lcd_touch_handle_t board_waveshare_5_touch(void);
+bool board_waveshare_5_read_touch(uint16_t *x, uint16_t *y);
 
 #ifdef __cplusplus
 }
 #endif
-
