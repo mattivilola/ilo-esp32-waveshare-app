@@ -48,6 +48,17 @@ After the build succeeds, flash and monitor:
 ./tools/board monitor
 ```
 
+### If flashing cannot connect
+
+The board normally supports automatic download, but its native USB connection may need a manual transition:
+
+1. Hold **BOOT**.
+2. Press and release **RESET** while continuing to hold BOOT.
+3. Release **BOOT**.
+4. Run `./tools/board flash` again.
+
+After a successful flash, the board may remain at `DOWNLOAD(USB/UART0)` with a black screen. Press and release **RESET once only**—do not hold BOOT—to start the flashed application. This reset does not erase or reflash anything.
+
 See [Board bring-up](docs/board-bringup.md), [Architecture](docs/architecture.md), and [Security](docs/security.md) before flashing.
 
 ## Repository layout

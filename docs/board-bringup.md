@@ -44,7 +44,9 @@ Backups are written to ignored `artifacts/factory-backups/`. Keep at least one v
 
 Exit the monitor with `Ctrl-]`.
 
-If automatic download fails, hold BOOT, tap RESET, release BOOT, and retry. Waveshare also documents holding BOOT while reconnecting USB. Press RESET once after a successful first download if the app does not start automatically.
+If automatic download fails, hold BOOT, press and release RESET while continuing to hold BOOT, then release BOOT and retry. Waveshare also documents holding BOOT while reconnecting USB.
+
+After a successful flash, a serial log of `DOWNLOAD(USB/UART0)` plus `waiting for download` means the ROM loader is still active. Press and release RESET once only, without BOOT, to start the application. This does not erase or reflash the board.
 
 ## Recovery
 
