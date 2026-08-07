@@ -19,6 +19,10 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 # Native USB serial/JTAG is the verified development path on this board
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 
+# Board, GT911, and initial LVGL object creation all run synchronously in app_main.
+# Reserve enough internal stack for that one-time initialization path.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
 # TLS-PSK is the only wireless application transport in protocol v1
 CONFIG_ESP_TLS_PSK_VERIFICATION=y
 
