@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "BoardProtocol", targets: ["BoardProtocol"]),
         .library(name: "BoardHostCore", targets: ["BoardHostCore"]),
         .executable(name: "ilo-board-host", targets: ["ilo-board-host"]),
+        .executable(name: "ILOBoardMenu", targets: ["ILOBoardMenu"]),
     ],
     targets: [
         .target(name: "BoardProtocol"),
@@ -23,8 +24,11 @@ let package = Package(
             name: "ilo-board-host",
             dependencies: ["BoardProtocol", "BoardHostCore"]
         ),
+        .executableTarget(
+            name: "ILOBoardMenu",
+            dependencies: ["BoardProtocol", "BoardHostCore"]
+        ),
         .testTarget(name: "BoardProtocolTests", dependencies: ["BoardProtocol"]),
         .testTarget(name: "BoardHostCoreTests", dependencies: ["BoardHostCore", "BoardProtocol"]),
     ]
 )
-

@@ -1,35 +1,3 @@
 menu "ILO Board"
-    config ILO_WIFI_SSID
-        string "Wi-Fi SSID"
-        default ""
-        help
-            Stored only in the generated, gitignored sdkconfig file.
-
-    config ILO_WIFI_PASSWORD
-        string "Wi-Fi password"
-        default ""
-        help
-            Stored only in the generated, gitignored sdkconfig file.
-
-    config ILO_BOARD_ID
-        string "Paired board ID"
-        default "waveshare-94a990ca5b7c"
-
-    config ILO_HOST_ADDRESS
-        string "Mac host address"
-        default ""
-        help
-            Phase 1 accepts a direct IPv4/hostname fallback while Bonjour discovery is finalized.
-
-    config ILO_HOST_PORT
-        int "Mac host port"
-        default 0
-        range 0 65535
-
-    config ILO_PSK_HEX
-        string "32-byte TLS PSK as 64 hexadecimal characters"
-        default ""
-        help
-            Store this only in generated sdkconfig. It must match the Keychain pairing on the Mac.
+    comment "Wi-Fi and pairing settings are provisioned at runtime with ./tools/board provision"
 endmenu
-

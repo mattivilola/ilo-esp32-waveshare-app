@@ -48,6 +48,26 @@ If automatic download fails, hold BOOT, press and release RESET while continuing
 
 After a successful flash, a serial log of `DOWNLOAD(USB/UART0)` plus `waiting for download` means the ROM loader is still active. Press and release RESET once only, without BOOT, to start the application. This does not erase or reflash the board.
 
+## Secure Wi-Fi provisioning
+
+Provisioning is separate from the firmware build, so the same binary can be shared without embedding network credentials:
+
+```bash
+./tools/board provision
+```
+
+The command:
+
+1. reads the SSID, a hidden Wi-Fi password, Mac LAN address, and service port interactively;
+2. creates a per-board opaque ID and random 32-byte PSK;
+3. stores the PSK in the signed-in user's macOS Keychain;
+4. generates a temporary NVS image outside the repository;
+5. asks for the documented BOOT/RESET download-mode sequence;
+6. writes and verifies only the `nvs` partition at the offset declared in `firmware/partitions.csv`;
+7. removes its temporary secret material automatically.
+
+After provisioning succeeds, press and release RESET once without BOOT. Start the menu-bar host with `./tools/host menu`. Re-run provisioning when the Wi-Fi network or Mac LAN address changes. The current Phase-1 direct-address fallback will be replaced by Bonjour discovery after the encrypted hardware handshake is verified.
+
 ## Recovery
 
 The CLI's erase and restore operations require explicit confirmation text. A normal build or flash never erases the entire chip.

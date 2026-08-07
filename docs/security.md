@@ -8,7 +8,9 @@ The only board capability is `tasks.read`. The host sends a normalized task ID, 
 
 ## Pairing and transport
 
-The intended pairing flow creates an opaque board ID and random 32-byte PSK while USB is physically connected. The host stores the PSK in the user Keychain; the board stores it in NVS. Bonjour advertises only protocol compatibility.
+The pairing flow creates an opaque board ID and random 32-byte PSK while USB is physically connected. The host stores the PSK in the user Keychain; the board stores it in NVS. Bonjour advertises only protocol compatibility.
+
+`./tools/board provision` reads the Wi-Fi password without terminal echo and sends the key material to the host CLI through standard input, never through process arguments. Its NVS CSV and binary exist only in a permission-restricted temporary directory for the duration of the verified partition write. The persistent host metadata file contains only the nonsecret board ID, protocol version, and service port.
 
 TLS 1.2 PSK protects the local-network link. Phase 1 validates `TLS_PSK_WITH_AES_128_GCM_SHA256` interoperability before the protocol is expanded.
 

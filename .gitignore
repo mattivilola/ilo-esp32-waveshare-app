@@ -1,4 +1,6 @@
 .DS_Store
+__pycache__/
+*.pyc
 
 # Local toolchains and generated artifacts
 .tools/
@@ -21,4 +23,3 @@ mac-service/.swiftpm/
 .env
 .env.*
 !.env.example
-

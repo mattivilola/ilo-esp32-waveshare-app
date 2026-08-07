@@ -68,9 +68,8 @@ public struct KeychainPSKStore: Sendable {
         return secret
     }
 
-    private static func valid(boardID: String) -> Bool {
+    static func valid(boardID: String) -> Bool {
         guard (1...80).contains(boardID.count) else { return false }
         return boardID.allSatisfy { $0.isLetter || $0.isNumber || ".-_".contains($0) }
     }
 }
-

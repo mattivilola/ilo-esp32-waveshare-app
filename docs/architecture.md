@@ -11,6 +11,7 @@ macOS user service
   board protocol + pairing
   sanitized TaskSource interface
   mock source (Phase 1)
+  SwiftUI MenuBarExtra status dashboard
   service-owned Codex adapter (later)
         │ stdio / local Unix socket only
         ▼
@@ -25,6 +26,8 @@ Codex app-server
 - A future Codex source may observe only threads owned by its own documented `codex app-server` connection. It must not label unrelated desktop chats as live.
 - Board-specific LCD, touch, backlight, and IO-expander behavior for the 1024×600 5B stays behind `board_waveshare_5`.
 - UI components consume a view model and do not perform networking.
+- `BoardHostCore` owns TLS, Keychain access, task sanitization, and connection events; the menu-bar executable only presents that state and lifecycle controls.
+- The macOS companion is intentionally menu-bar-only during development and uses accessory activation, so it does not add a Dock icon.
 
 ## Why ESP-IDF
 
@@ -35,3 +38,9 @@ The hardware layer is intentionally pinned to Waveshare SKU 28151. The similarly
 ## Why framed JSON
 
 The first transport is a four-byte length plus JSON over TLS/TCP. It is bidirectional, bounded, debuggable, supported by Network.framework and ESP-TLS, and avoids embedding an HTTP server dependency in the macOS service. The message model can move to WebSocket later without changing dashboard records.
+
+## Runtime configuration
+
+Firmware never compiles Wi-Fi credentials or pairing keys into the application image. `./tools/board provision` writes them to the ESP NVS data partition through physical USB. The paired PSK is stored in the macOS login Keychain, while nonsecret board ID and service-port metadata live in `~/Library/Application Support/ILO Board Host/board.json`.
+
+The first hardware interoperability slice uses a fixed port and provisioned LAN address. The Mac already advertises `_iloboard._tcp`; firmware-side Bonjour browsing follows once TLS-PSK behavior is proven end-to-end.

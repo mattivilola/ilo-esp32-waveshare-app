@@ -1,4 +1,4 @@
-.PHONY: doctor firmware-setup firmware-build firmware-flash firmware-monitor mac-build mac-test mac-run test
+.PHONY: doctor firmware-setup firmware-build firmware-flash firmware-monitor mac-build mac-test mac-run mac-menu test
 
 doctor:
 	./tools/board doctor
@@ -16,13 +16,15 @@ firmware-monitor:
 	./tools/board monitor
 
 mac-build:
-	cd mac-service && swift build
+	./tools/host build
 
 mac-test:
-	cd mac-service && swift test
+	./tools/host test
 
 mac-run:
-	cd mac-service && swift run ilo-board-host serve --mock
+	./tools/host serve
+
+mac-menu:
+	./tools/host menu
 
 test: mac-test
-

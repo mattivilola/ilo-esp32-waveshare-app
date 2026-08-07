@@ -16,21 +16,21 @@ The no-suffix `ESP32-S3-Touch-LCD-5` (SKU 28117, 800×480) is a different displa
 The repository has two runtime halves:
 
 - `firmware/` — ESP-IDF 5.5.2 firmware for the 1024×600 Waveshare 5B board (SKU 28151), using LVGL 9.
-- `mac-service/` — a native Swift service that sends a deliberately small task-status model to paired boards.
+- `mac-service/` — a native Swift service plus a clean menu-bar companion that shows board connectivity and sends a deliberately small task-status model.
 
 Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `tools/`.
 
 ## Current phase
 
-Phase 1 is intentionally read-only. The board may display sanitized task status, but it cannot approve commands, apply file changes, answer Codex questions, or steer a task. Those actions need a separate security and informed-consent design.
+Phase 1 is intentionally read-only. The physical 5B display and GT911 touch path are hardware-verified. The wireless slice uses mock task data while encrypted Mac↔board transport is validated. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 ## First commands
 
 ```bash
 ./tools/board doctor
 ./tools/board chip-id
-make mac-test
-make mac-run
+./tools/host doctor
+./tools/host test
 ```
 
 
@@ -47,6 +47,17 @@ After the build succeeds, flash and monitor:
 ./tools/board flash
 ./tools/board monitor
 ```
+
+Provision Wi-Fi and the paired Mac after the firmware is flashed:
+
+```bash
+./tools/board provision
+./tools/host menu
+```
+
+`board provision` prompts for Wi-Fi details, hides the password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. The current bring-up slice records the Mac's local address and fixed service port `47472`; Bonjour address discovery is the next transport increment after TLS-PSK interoperability is proven.
+
+`host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
 
 ### If flashing cannot connect
 
@@ -65,8 +76,8 @@ See [Board bring-up](docs/board-bringup.md), [Architecture](docs/architecture.md
 
 ```text
 firmware/       ESP32-S3 board support, transport, and LVGL UI
-mac-service/    SwiftPM host service and protocol implementation
+mac-service/    SwiftPM host core, CLI, protocol, and menu-bar companion
 protocol/       Versioned, language-neutral message schemas
-tools/          CLI entry points for setup, build, flash, backup, and recovery
+tools/          CLI entry points for setup, build, flash, provisioning, host, backup, and recovery
 docs/           Hardware, architecture, UX, and security decisions
 ```

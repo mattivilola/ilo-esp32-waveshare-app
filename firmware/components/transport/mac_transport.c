@@ -13,10 +13,25 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "nvs.h"
 #include "dashboard_ui.h"
 
 #define WIFI_READY_BIT BIT0
 #define FRAME_MAX 65536
+#define BOARD_ID_MAX 81
+#define HOST_ADDRESS_MAX 254
+#define WIFI_SSID_MAX 33
+#define WIFI_PASSWORD_MAX 64
+#define PSK_SIZE 32
+
+typedef struct {
+    char wifi_ssid[WIFI_SSID_MAX];
+    char wifi_password[WIFI_PASSWORD_MAX];
+    char board_id[BOARD_ID_MAX];
+    char host_address[HOST_ADDRESS_MAX];
+    uint16_t host_port;
+    uint8_t psk[PSK_SIZE];
+} mac_transport_config_t;
 
 static const char *TAG = "mac_transport";
 static EventGroupHandle_t wifi_events;
@@ -35,7 +50,56 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
     }
 }
 
-static esp_err_t wifi_start(void)
+static esp_err_t nvs_read_string(
+    nvs_handle_t handle,
+    const char *key,
+    char *destination,
+    size_t destination_size
+)
+{
+    size_t required_size = destination_size;
+    esp_err_t status = nvs_get_str(handle, key, destination, &required_size);
+    if (status == ESP_OK && (required_size == 0 || required_size > destination_size)) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    return status;
+}
+
+static esp_err_t load_config(mac_transport_config_t *config)
+{
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(nvs_open("ilo_board", NVS_READONLY, &handle), TAG, "Board is not provisioned");
+
+    esp_err_t status = nvs_read_string(handle, "wifi_ssid", config->wifi_ssid, sizeof(config->wifi_ssid));
+    if (status == ESP_OK) {
+        status = nvs_read_string(handle, "wifi_password", config->wifi_password, sizeof(config->wifi_password));
+    }
+    if (status == ESP_OK) {
+        status = nvs_read_string(handle, "board_id", config->board_id, sizeof(config->board_id));
+    }
+    if (status == ESP_OK) {
+        status = nvs_read_string(handle, "host_address", config->host_address, sizeof(config->host_address));
+    }
+    if (status == ESP_OK) {
+        status = nvs_get_u16(handle, "host_port", &config->host_port);
+    }
+    size_t psk_size = sizeof(config->psk);
+    if (status == ESP_OK) {
+        status = nvs_get_blob(handle, "psk", config->psk, &psk_size);
+        if (status == ESP_OK && psk_size != sizeof(config->psk)) {
+            status = ESP_ERR_INVALID_SIZE;
+        }
+    }
+    nvs_close(handle);
+
+    if (status != ESP_OK || config->wifi_ssid[0] == 0 || config->board_id[0] == 0
+        || config->host_address[0] == 0 || config->host_port == 0) {
+        return status == ESP_OK ? ESP_ERR_INVALID_STATE : status;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
 {
     wifi_events = xEventGroupCreate();
     if (wifi_events == NULL) {
@@ -50,29 +114,12 @@ static esp_err_t wifi_start(void)
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL), TAG, "IP handler failed");
 
     wifi_config_t config = { 0 };
-    strlcpy((char *)config.sta.ssid, CONFIG_ILO_WIFI_SSID, sizeof(config.sta.ssid));
-    strlcpy((char *)config.sta.password, CONFIG_ILO_WIFI_PASSWORD, sizeof(config.sta.password));
+    memcpy(config.sta.ssid, transport_config->wifi_ssid, strlen(transport_config->wifi_ssid));
+    memcpy(config.sta.password, transport_config->wifi_password, strlen(transport_config->wifi_password));
     config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "Wi-Fi mode failed");
     ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config failed");
     return esp_wifi_start();
-}
-
-static bool decode_hex(const char *input, uint8_t *output, size_t output_size)
-{
-    if (strlen(input) != output_size * 2) {
-        return false;
-    }
-    for (size_t i = 0; i < output_size; ++i) {
-        char byte[3] = { input[i * 2], input[(i * 2) + 1], 0 };
-        char *end = NULL;
-        long value = strtol(byte, &end, 16);
-        if (end == NULL || *end != 0 || value < 0 || value > 255) {
-            return false;
-        }
-        output[i] = (uint8_t)value;
-    }
-    return true;
 }
 
 static bool tls_write_all(esp_tls_t *tls, const uint8_t *data, size_t size)
@@ -195,13 +242,12 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
 
 static void transport_task(void *argument)
 {
-    uint8_t key[32];
-    if (!decode_hex(CONFIG_ILO_PSK_HEX, key, sizeof(key))) {
-        ESP_LOGE(TAG, "TLS PSK must contain exactly 64 hexadecimal characters");
-        vTaskDelete(NULL);
-        return;
-    }
-    psk_hint_key_t psk = { .key = key, .key_size = sizeof(key), .hint = CONFIG_ILO_BOARD_ID };
+    mac_transport_config_t *config = argument;
+    psk_hint_key_t psk = {
+        .key = config->psk,
+        .key_size = sizeof(config->psk),
+        .hint = config->board_id,
+    };
     esp_tls_cfg_t tls_config = { .psk_hint_key = &psk, .timeout_ms = 10000 };
 
     for (;;) {
@@ -213,9 +259,9 @@ static void transport_task(void *argument)
             continue;
         }
         int connected = esp_tls_conn_new_sync(
-            CONFIG_ILO_HOST_ADDRESS,
-            strlen(CONFIG_ILO_HOST_ADDRESS),
-            CONFIG_ILO_HOST_PORT,
+            config->host_address,
+            strlen(config->host_address),
+            config->host_port,
             &tls_config,
             tls
         );
@@ -223,7 +269,7 @@ static void transport_task(void *argument)
             cJSON *hello = cJSON_CreateObject();
             cJSON_AddStringToObject(hello, "type", "hello");
             cJSON_AddNumberToObject(hello, "protocolVersion", 1);
-            cJSON_AddStringToObject(hello, "boardID", CONFIG_ILO_BOARD_ID);
+            cJSON_AddStringToObject(hello, "boardID", config->board_id);
             bool ok = send_json(tls, hello);
             cJSON_Delete(hello);
             cJSON *reply = ok ? read_json(tls) : NULL;
@@ -258,13 +304,24 @@ static void transport_task(void *argument)
 bool mac_transport_start(mac_transport_model_callback_t callback)
 {
     model_callback = callback;
-    if (strlen(CONFIG_ILO_WIFI_SSID) == 0 || strlen(CONFIG_ILO_HOST_ADDRESS) == 0
-        || CONFIG_ILO_HOST_PORT == 0 || strlen(CONFIG_ILO_PSK_HEX) == 0) {
+    mac_transport_config_t *config = calloc(1, sizeof(*config));
+    if (config == NULL) {
         return false;
     }
-    if (wifi_start() != ESP_OK) {
+    esp_err_t status = load_config(config);
+    if (status != ESP_OK) {
+        free(config);
+        ESP_LOGI(TAG, "No valid runtime provisioning found in NVS");
+        return false;
+    }
+    if (wifi_start(config) != ESP_OK) {
+        free(config);
         return false;
     }
     dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_CONNECTING);
-    return xTaskCreatePinnedToCore(transport_task, "mac_transport", 8192, NULL, 5, NULL, 0) == pdPASS;
+    if (xTaskCreatePinnedToCore(transport_task, "mac_transport", 8192, config, 5, NULL, 0) != pdPASS) {
+        free(config);
+        return false;
+    }
+    return true;
 }

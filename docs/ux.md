@@ -34,3 +34,17 @@ LVGL's Montserrat assets provide a restrained three-role scale for Phase 1: 28 p
 The signature is the vertical “work pulse”: one continuous status rail that makes the system's overall state readable before individual cards. Amber is reserved for genuine attention, not decoration.
 
 Touch targets are at least 48×48 logical pixels. Empty, sleeping, reconnecting, and stale-data states explain what is happening and what the user can do. Phase 1 offers inspection only; it never draws a control that cannot safely complete its action.
+
+## macOS menu-bar companion
+
+The Mac companion uses a SwiftUI `MenuBarExtra` with window-style content and intentionally stays out of the Dock during this development phase. Its 360-point dashboard mirrors the board's status hierarchy without copying the fixed dark palette: it uses native macOS material, semantic text colors, and state tints so Light and Dark appearances both remain legible.
+
+The compact surface shows:
+
+- one clear connection-state chip;
+- board model and shortened opaque identity;
+- listening port and most recent successful sync;
+- the active security/capability boundary (`TLS 1.2 · Read only`);
+- start/stop service, copy identity, and quit actions.
+
+Green is reserved for an authenticated board connection, orange means the service is ready but waiting, red means action is required, and neutral means stopped or not provisioned. Longer diagnostics stay in the status card rather than expanding menu labels.

@@ -18,18 +18,23 @@ struct ILOBoardHostCommand {
         let command = arguments.first ?? "help"
         switch command {
         case "pair":
-            let boardID = value(after: "--board-id", in: arguments) ?? "waveshare-94a990ca5b7c"
-            let secret = try KeychainPSKStore().create(boardID: boardID)
-            print("Pairing created in the macOS Keychain.")
-            print("Board ID: \(boardID)")
-            print("PSK (shown once for USB provisioning): \(secret.map { String(format: "%02x", $0) }.joined())")
+            guard arguments.contains("--secret-stdin"),
+                  let boardID = value(after: "--board-id", in: arguments),
+                  let line = readLine(),
+                  let secret = decodeHexSecret(line)
+            else {
+                throw PairingError.invalidSecret
+            }
+            try KeychainPSKStore().save(secret: secret, boardID: boardID)
+            print("Pairing stored securely in the macOS Keychain for board \(boardID).")
         case "snapshot":
             let snapshot = try await MockTaskSource().snapshot(revision: 1)
             let data = try ProtocolJSON.encoder().encode(snapshot)
             print(String(decoding: data, as: UTF8.self))
         case "serve":
-            let boardID = value(after: "--board-id", in: arguments) ?? "waveshare-94a990ca5b7c"
-            let port = UInt16(value(after: "--port", in: arguments) ?? "0") ?? 0
+            let configuration = try HostConfiguration.load()
+            let boardID = value(after: "--board-id", in: arguments) ?? configuration.boardID
+            let port = UInt16(value(after: "--port", in: arguments) ?? "") ?? configuration.port
             let secret = try KeychainPSKStore().load(boardID: boardID)
             let server = BoardServer(boardID: boardID, secret: secret, source: MockTaskSource())
             try server.start(port: port)
@@ -52,14 +57,27 @@ struct ILOBoardHostCommand {
         return arguments[index + 1]
     }
 
+    private static func decodeHexSecret(_ value: String) -> Data? {
+        guard value.count == 64 else { return nil }
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(32)
+        var index = value.startIndex
+        while index < value.endIndex {
+            let next = value.index(index, offsetBy: 2)
+            guard let byte = UInt8(value[index..<next], radix: 16) else { return nil }
+            bytes.append(byte)
+            index = next
+        }
+        return Data(bytes)
+    }
+
     private static func printUsage() {
         print("""
         Usage:
           ilo-board-host doctor
           ilo-board-host snapshot
-          ilo-board-host pair [--board-id ID]
+          ilo-board-host pair --board-id ID --secret-stdin
           ilo-board-host serve --mock [--board-id ID] [--port PORT]
         """)
     }
 }
-

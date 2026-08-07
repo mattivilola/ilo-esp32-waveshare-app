@@ -4,14 +4,21 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import datetime as dt
+import getpass
 import glob
 import hashlib
+import json
 import os
 from pathlib import Path
+import secrets
 import shutil
+import socket
 import subprocess
 import sys
+import tempfile
+import uuid
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,6 +27,12 @@ VENV = ROOT / ".tools" / "board-python"
 ESPTOOL = VENV / "bin" / "esptool"
 IDF = ROOT / "tools" / "idf"
 EXPECTED_FLASH_BYTES = 0x1000000
+NVS_PARTITION = ROOT / "firmware" / "partitions.csv"
+NVS_GENERATOR = ROOT / ".tools" / "esp-idf" / "components" / "nvs_flash" / "nvs_partition_generator" / "nvs_partition_gen.py"
+IDF_PYTHON_ROOT = ROOT / ".tools" / "espressif" / "python_env"
+HOST_PACKAGE = ROOT / "mac-service"
+HOST_CONFIG = Path.home() / "Library" / "Application Support" / "ILO Board Host" / "board.json"
+DEFAULT_HOST_PORT = 47472
 
 
 def candidate_ports() -> list[str]:
@@ -48,9 +61,9 @@ def resolve_port(explicit: str | None) -> str:
     return ports[0]
 
 
-def run(command: list[str], cwd: Path = ROOT) -> None:
+def run(command: list[str], cwd: Path = ROOT, input_text: str | None = None) -> None:
     print("+ " + " ".join(command))
-    subprocess.run(command, cwd=cwd, check=True)
+    subprocess.run(command, cwd=cwd, check=True, input=input_text, text=input_text is not None)
 
 
 def ensure_esptool() -> None:
@@ -110,6 +123,125 @@ def flash(args: argparse.Namespace) -> None:
     run([str(IDF), "idf.py", "-p", port, "flash"], cwd=FIRMWARE)
 
 
+def nvs_location() -> tuple[int, int]:
+    with NVS_PARTITION.open(newline="") as source:
+        for row in csv.reader(line for line in source if not line.lstrip().startswith("#")):
+            if row and row[0].strip() == "nvs":
+                return int(row[3].strip(), 0), int(row[4].strip(), 0)
+    raise SystemExit(f"NVS partition is missing from {NVS_PARTITION}")
+
+
+def detected_host_address() -> str:
+    connection = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        connection.connect(("192.0.2.1", 9))
+        return connection.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        connection.close()
+
+
+def prompt_default(label: str, default: str) -> str:
+    suffix = f" [{default}]" if default else ""
+    value = input(f"{label}{suffix}: ").strip()
+    return value or default
+
+
+def validate_provisioning(ssid: str, password: str, host: str, host_port: int) -> None:
+    if not 1 <= len(ssid.encode("utf-8")) <= 32:
+        raise SystemExit("Wi-Fi SSID must contain 1-32 UTF-8 bytes.")
+    if not 8 <= len(password.encode("utf-8")) <= 63:
+        raise SystemExit("Wi-Fi password must contain 8-63 UTF-8 bytes for WPA2/WPA3 personal.")
+    if not host or len(host.encode("utf-8")) > 253 or any(character.isspace() for character in host):
+        raise SystemExit("Mac host address must be a valid IPv4 address or hostname without spaces.")
+    if not 1 <= host_port <= 65535:
+        raise SystemExit("Mac host port must be between 1 and 65535.")
+
+
+def existing_board_id() -> str | None:
+    try:
+        value = json.loads(HOST_CONFIG.read_text())["boardID"]
+    except (FileNotFoundError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, str) and value else None
+
+
+def save_host_config(board_id: str, host_port: int) -> None:
+    HOST_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"boardID": board_id, "port": host_port, "protocolVersion": 1}
+    HOST_CONFIG.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    os.chmod(HOST_CONFIG, 0o600)
+
+
+def store_pairing(board_id: str, secret: bytes) -> None:
+    swift = shutil.which("swift")
+    if swift is None:
+        raise SystemExit("Swift is required to store the board pairing in macOS Keychain.")
+    run(
+        [swift, "run", "--package-path", str(HOST_PACKAGE), "ilo-board-host", "pair", "--board-id", board_id, "--secret-stdin"],
+        input_text=secret.hex() + "\n",
+    )
+
+
+def idf_python() -> Path:
+    candidates = sorted(IDF_PYTHON_ROOT.glob("idf5.5_py*/bin/python"))
+    if len(candidates) != 1:
+        raise SystemExit("Cannot identify the pinned ESP-IDF Python environment. Run `./tools/setup-idf`.")
+    return candidates[0]
+
+
+def provision(args: argparse.Namespace) -> None:
+    if not NVS_GENERATOR.is_file():
+        raise SystemExit("ESP-IDF is not installed. Run `./tools/setup-idf` first.")
+    python = idf_python()
+
+    print("ILO Board secure provisioning")
+    print("Secrets are read interactively, sent only through USB, and never written to this repository.")
+    ssid = input("Wi-Fi SSID: ").strip()
+    password = getpass.getpass("Wi-Fi password (hidden): ")
+    host = prompt_default("Mac address on this Wi-Fi", detected_host_address())
+    try:
+        host_port = int(prompt_default("Mac service port", str(DEFAULT_HOST_PORT)))
+    except ValueError as error:
+        raise SystemExit("Mac service port must be a number.") from error
+    validate_provisioning(ssid, password, host, host_port)
+
+    board_id = existing_board_id() or f"ilo-{uuid.uuid4()}"
+    secret = secrets.token_bytes(32)
+    store_pairing(board_id, secret)
+
+    offset, size = nvs_location()
+    with tempfile.TemporaryDirectory(prefix="ilo-board-provision-") as directory:
+        temporary = Path(directory)
+        csv_path = temporary / "provisioning.csv"
+        image_path = temporary / "nvs.bin"
+        with csv_path.open("w", newline="") as output:
+            writer = csv.writer(output)
+            writer.writerow(("key", "type", "encoding", "value"))
+            writer.writerow(("ilo_board", "namespace", "", ""))
+            writer.writerow(("wifi_ssid", "data", "string", ssid))
+            writer.writerow(("wifi_password", "data", "string", password))
+            writer.writerow(("board_id", "data", "string", board_id))
+            writer.writerow(("host_address", "data", "string", host))
+            writer.writerow(("host_port", "data", "u16", str(host_port)))
+            writer.writerow(("psk", "data", "hex2bin", secret.hex()))
+        os.chmod(csv_path, 0o600)
+        run([str(python), str(NVS_GENERATOR), "generate", str(csv_path), str(image_path), hex(size)])
+
+        print("\nPut the board in download mode:")
+        print("  1. Hold BOOT")
+        print("  2. Press and release RESET")
+        print("  3. Release BOOT")
+        input("Press Return when the board is ready... ")
+        esptool(resolve_port(args.port), "write-flash", hex(offset), str(image_path))
+
+    save_host_config(board_id, host_port)
+    print("Provisioning verified and host configuration saved.")
+    print(f"Board ID: {board_id}")
+    print("Press and release RESET once without BOOT, then run `./tools/host menu`.")
+
+
 def monitor(args: argparse.Namespace) -> None:
     port = resolve_port(args.port)
     run([str(IDF), "idf.py", "-p", port, "monitor"], cwd=FIRMWARE)
@@ -148,6 +280,9 @@ def parser() -> argparse.ArgumentParser:
         command = sub.add_parser(name, help=help_text)
         command.add_argument("--port")
         command.set_defaults(handler=handler)
+    provision_parser = sub.add_parser("provision", help="securely pair Wi-Fi and the Mac host through USB")
+    provision_parser.add_argument("--port", help="serial port; auto-detected when omitted")
+    provision_parser.set_defaults(handler=provision)
     sub.add_parser("build", help="configure and build firmware").set_defaults(handler=build)
     erase_parser = sub.add_parser("erase", help="erase the entire board (explicit confirmation required)")
     erase_parser.add_argument("--port")

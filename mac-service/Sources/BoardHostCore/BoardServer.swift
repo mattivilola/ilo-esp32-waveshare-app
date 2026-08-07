@@ -13,18 +13,33 @@ public enum BoardServerError: Error, LocalizedError, Sendable {
     }
 }
 
+public enum BoardServerEvent: Equatable, Sendable {
+    case listenerReady(port: UInt16)
+    case listenerFailed(message: String)
+    case boardConnected
+    case boardDisconnected
+    case snapshotSent(at: Date)
+}
+
 public final class BoardServer: @unchecked Sendable {
     private let boardID: String
     private let secret: Data
     private let source: any TaskSource
+    private let eventHandler: @Sendable (BoardServerEvent) -> Void
     private let queue = DispatchQueue(label: "com.iloapps.iloboard.host.network")
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: BoardConnection] = [:]
 
-    public init(boardID: String, secret: Data, source: any TaskSource) {
+    public init(
+        boardID: String,
+        secret: Data,
+        source: any TaskSource,
+        eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
+    ) {
         self.boardID = boardID
         self.secret = secret
         self.source = source
+        self.eventHandler = eventHandler
     }
 
     public func start(port: UInt16 = 0) throws {
@@ -65,13 +80,18 @@ public final class BoardServer: @unchecked Sendable {
             domain: nil,
             txtRecord: txt
         )
-        listener.stateUpdateHandler = { state in
+        listener.stateUpdateHandler = { [weak self, weak listener] state in
+            guard let self else { return }
             switch state {
             case .ready:
-                print("ILO Board host ready on \(listener.port?.debugDescription ?? "dynamic port")")
+                print("ILO Board host ready on \(listener?.port?.debugDescription ?? "dynamic port")")
                 print("Bonjour: _iloboard._tcp (TLS-PSK, protocol v1)")
+                if let port = listener?.port?.rawValue {
+                    self.eventHandler(.listenerReady(port: port))
+                }
             case let .failed(error):
                 fputs("Listener failed: \(error)\n", stderr)
+                self.eventHandler(.listenerFailed(message: error.localizedDescription))
             case .cancelled:
                 print("ILO Board host stopped")
             default:
@@ -99,9 +119,17 @@ public final class BoardServer: @unchecked Sendable {
             connection.cancel()
             return
         }
-        let client = BoardConnection(connection: connection, expectedBoardID: boardID, source: source) { [weak self] id in
-            self?.connections.removeValue(forKey: id)
-        }
+        let client = BoardConnection(
+            connection: connection,
+            expectedBoardID: boardID,
+            source: source,
+            onReady: { [eventHandler] in eventHandler(.boardConnected) },
+            onSnapshot: { [eventHandler] date in eventHandler(.snapshotSent(at: date)) },
+            onClose: { [weak self, eventHandler] id in
+                self?.connections.removeValue(forKey: id)
+                eventHandler(.boardDisconnected)
+            }
+        )
         connections[ObjectIdentifier(client)] = client
         client.start(queue: queue)
     }
@@ -111,6 +139,8 @@ private final class BoardConnection: @unchecked Sendable {
     private let connection: NWConnection
     private let expectedBoardID: String
     private let source: any TaskSource
+    private let onReady: @Sendable () -> Void
+    private let onSnapshot: @Sendable (Date) -> Void
     private let onClose: @Sendable (ObjectIdentifier) -> Void
     private var decoder = FrameDecoder()
     private var helloAccepted = false
@@ -121,11 +151,15 @@ private final class BoardConnection: @unchecked Sendable {
         connection: NWConnection,
         expectedBoardID: String,
         source: any TaskSource,
+        onReady: @escaping @Sendable () -> Void,
+        onSnapshot: @escaping @Sendable (Date) -> Void,
         onClose: @escaping @Sendable (ObjectIdentifier) -> Void
     ) {
         self.connection = connection
         self.expectedBoardID = expectedBoardID
         self.source = source
+        self.onReady = onReady
+        self.onSnapshot = onSnapshot
         self.onClose = onClose
     }
 
@@ -134,6 +168,7 @@ private final class BoardConnection: @unchecked Sendable {
             guard let self else { return }
             switch state {
             case .ready:
+                self.onReady()
                 self.receive()
             case .failed, .cancelled:
                 self.onClose(ObjectIdentifier(self))
@@ -223,6 +258,7 @@ private final class BoardConnection: @unchecked Sendable {
                 tasks: tasks
             )
             send(SnapshotMessage(snapshot: snapshot))
+            onSnapshot(Date())
         } catch {
             send(ErrorMessage(code: "sourceUnavailable", message: "Task status is temporarily unavailable."))
         }
