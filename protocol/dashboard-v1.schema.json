@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iloapps.com/schemas/ilo-board/dashboard-v1.schema.json",
+  "title": "ILO Board dashboard snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "revision", "generatedAt", "hostState", "capabilities", "tasks"],
+  "properties": {
+    "protocolVersion": { "const": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "hostState": { "enum": ["online", "sleeping", "degraded"] },
+    "capabilities": {
+      "type": "array",
+      "items": { "enum": ["tasks.read"] },
+      "uniqueItems": true
+    },
+    "tasks": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title", "state", "attentionKind", "updatedAt", "shortSummary"],
+        "properties": {
+          "id": { "type": "string", "maxLength": 80 },
+          "title": { "type": "string", "maxLength": 80 },
+          "state": { "enum": ["active", "waiting", "completed", "failed", "idle"] },
+          "attentionKind": { "enum": ["none", "question", "approval"] },
+          "updatedAt": { "type": "string", "format": "date-time" },
+          "shortSummary": { "type": "string", "maxLength": 180 }
+        }
+      }
+    }
+  }
+}
+

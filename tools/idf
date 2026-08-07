@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+IDF_PATH="$REPO_ROOT/.tools/esp-idf"
+IDF_TOOLS_PATH="$REPO_ROOT/.tools/espressif"
+
+if [ ! -f "$IDF_PATH/export.sh" ]; then
+    echo "ESP-IDF is not installed. Run ./tools/setup-idf first." >&2
+    exit 1
+fi
+
+export IDF_PATH IDF_TOOLS_PATH
+. "$IDF_PATH/export.sh" >/dev/null
+exec "$@"
+

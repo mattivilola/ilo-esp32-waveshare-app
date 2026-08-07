@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+IDF_PATH_LOCAL="$REPO_ROOT/.tools/esp-idf"
+IDF_TOOLS_LOCAL="$REPO_ROOT/.tools/espressif"
+IDF_VERSION="v5.5.4"
+
+mkdir -p "$REPO_ROOT/.tools" "$IDF_TOOLS_LOCAL"
+
+if [ ! -d "$IDF_PATH_LOCAL/.git" ]; then
+    git clone --branch "$IDF_VERSION" --depth 1 --recursive https://github.com/espressif/esp-idf.git "$IDF_PATH_LOCAL"
+else
+    current_tag=$(git -C "$IDF_PATH_LOCAL" describe --tags --exact-match 2>/dev/null || true)
+    if [ "$current_tag" != "$IDF_VERSION" ]; then
+        echo "Refusing to replace existing ESP-IDF at $IDF_PATH_LOCAL (found ${current_tag:-unknown}, need $IDF_VERSION)." >&2
+        exit 1
+    fi
+fi
+
+IDF_TOOLS_PATH="$IDF_TOOLS_LOCAL" "$IDF_PATH_LOCAL/install.sh" esp32s3
+
+echo "ESP-IDF $IDF_VERSION is ready."
+echo "Use ./tools/board build, flash, or monitor."
+

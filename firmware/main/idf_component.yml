@@ -1,0 +1,10 @@
+dependencies:
+  idf:
+    version: "==5.5.4"
+  espressif/esp32_display_panel:
+    version: "==1.0.4"
+  espressif/esp_lvgl_port:
+    version: "==2.9.0"
+  lvgl/lvgl:
+    version: "==9.5.0"
+

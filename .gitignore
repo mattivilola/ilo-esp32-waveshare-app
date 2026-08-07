@@ -1,0 +1,24 @@
+.DS_Store
+
+# Local toolchains and generated artifacts
+.tools/
+artifacts/
+
+# ESP-IDF generated files
+firmware/build/
+firmware/managed_components/
+firmware/sdkconfig
+firmware/sdkconfig.old
+firmware/.cache/
+
+# SwiftPM generated files
+mac-service/.build/
+mac-service/.swiftpm/
+
+# Local credentials and provisioning material
+*.local
+*.secret
+.env
+.env.*
+!.env.example
+

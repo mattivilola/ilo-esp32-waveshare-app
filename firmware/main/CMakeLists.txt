@@ -1,0 +1,8 @@
+idf_component_register(
+    SRCS "main.cpp"
+    INCLUDE_DIRS "."
+    REQUIRES board_waveshare_5 ui transport nvs_flash
+)
+
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-missing-field-initializers)
+
