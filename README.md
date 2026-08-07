@@ -22,7 +22,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 is intentionally read-only. The physical 5B display and GT911 touch path are hardware-verified. The wireless slice uses mock task data while encrypted Mac↔board transport is validated. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The current snapshot source is deterministic mock task data. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 ## First commands
 
@@ -55,7 +55,7 @@ Provision Wi-Fi and the paired Mac after the firmware is flashed:
 ./tools/host menu
 ```
 
-`board provision` prompts for Wi-Fi details, hides the password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. The current bring-up slice records the Mac's local address and fixed service port `47472`; Bonjour address discovery is the next transport increment after TLS-PSK interoperability is proven.
+`board provision` prompts for Wi-Fi details, hides the password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. The hardware-verified bring-up slice records the Mac's local address and fixed service port `47472`; Bonjour address discovery is the next transport increment.
 
 `host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
 

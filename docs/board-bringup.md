@@ -66,7 +66,9 @@ The command:
 6. writes and verifies only the `nvs` partition at the offset declared in `firmware/partitions.csv`;
 7. removes its temporary secret material automatically.
 
-After provisioning succeeds, press and release RESET once without BOOT. Start the menu-bar host with `./tools/host menu`. Re-run provisioning when the Wi-Fi network or Mac LAN address changes. The current Phase-1 direct-address fallback will be replaced by Bonjour discovery after the encrypted hardware handshake is verified.
+After provisioning succeeds, press and release RESET once without BOOT. Start the menu-bar host with `./tools/host menu`. Re-run provisioning when the Wi-Fi network or Mac LAN address changes. Replacing this Phase-1 direct-address fallback with firmware-side Bonjour discovery is the next transport increment.
+
+Verified success appears in the Mac menu as `ONLINE`, `Board connected`, and a current `Last sync` value. Those states are emitted only after the ESP32 completes TLS-PSK authentication and begins receiving recurring snapshots. The first physical 5B handshake was verified on port `47472`; no board ID, IP address, Wi-Fi credential, or PSK belongs in Git or screenshots intended for publication.
 
 ## Recovery
 
