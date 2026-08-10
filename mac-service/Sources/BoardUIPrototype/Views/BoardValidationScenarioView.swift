@@ -79,9 +79,75 @@ struct BoardValidationScenarioView: View {
                     ("Board data", "Last snapshot kept read only", "CACHED")
                 ]
             )
-        case .sleep:
+        case .approvalRequest:
+            approvalRequest
+        case .sleep, .screensaver:
             EmptyView()
         }
+    }
+
+    private var approvalRequest: some View {
+        HStack(spacing: 16) {
+            PulseCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionLabel(title: "Approval request · fixture")
+                    Text("Allow one planned build?")
+                        .font(.board(26, weight: .bold))
+                        .foregroundStyle(BoardPalette.mist)
+                    Text("Consequence")
+                        .font(.board(11, weight: .bold))
+                        .tracking(0.8)
+                        .foregroundStyle(BoardPalette.amber)
+                    Text("Would allow one local make verify run on the paired Mac.")
+                        .font(.board(15, weight: .semibold))
+                        .foregroundStyle(BoardPalette.mist)
+                        .lineSpacing(4)
+                    Spacer()
+                    HStack {
+                        Text("EXPIRES IN 01:42")
+                        Spacer()
+                        Text("REQUEST 7A2F")
+                    }
+                    .font(.board(11, weight: .bold))
+                    .tracking(0.7)
+                    .foregroundStyle(BoardPalette.fog)
+                }
+            }
+
+            PulseCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    SectionLabel(title: "Two explicit steps")
+                    Text("HOLD 1.5 SEC")
+                        .font(.board(24, weight: .bold))
+                        .foregroundStyle(BoardPalette.amber)
+                    Text("Then review the same consequence and tap Confirm. A tap or interrupted hold does nothing.")
+                        .font(.board(13))
+                        .foregroundStyle(BoardPalette.fog)
+                        .lineSpacing(4)
+                    Text("HOLD TO CONTINUE")
+                        .font(.board(13, weight: .bold))
+                        .tracking(0.9)
+                        .foregroundStyle(BoardPalette.mist)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(BoardPalette.amber.opacity(0.13), in: RoundedRectangle(cornerRadius: 13))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 13)
+                                .stroke(BoardPalette.amber, lineWidth: 1)
+                        }
+                    Spacer()
+                    Text("NOT CONNECTED · NO ACTION SENT")
+                        .font(.board(11, weight: .bold))
+                        .tracking(0.7)
+                        .foregroundStyle(BoardPalette.amber)
+                    Text("Expiry, one-time request IDs and Mac audit are required before transport is enabled.")
+                        .font(.board(11))
+                        .foregroundStyle(BoardPalette.fog)
+                }
+            }
+            .frame(width: 390)
+        }
+        .padding(.vertical, 4)
     }
 
     private func dashboardState(
@@ -244,5 +310,40 @@ struct BoardSleepValidationView: View {
         Color.black
             .frame(width: 1024, height: 600)
             .accessibilityLabel("Simulated display asleep; physical backlight behavior is unverified")
+    }
+}
+
+struct BoardScreensaverValidationView: View {
+    var body: some View {
+        ZStack {
+            BoardPalette.carbon
+            HStack(spacing: 22) {
+                Image(nsImage: BrandAsset.image())
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 72, height: 72)
+                    .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("ILO / PULSE")
+                        .font(.board(18, weight: .bold))
+                        .tracking(1.2)
+                        .foregroundStyle(BoardPalette.signal)
+                    Text("09:41")
+                        .font(.system(size: 58, weight: .bold, design: .rounded))
+                        .foregroundStyle(BoardPalette.mist)
+                    Text("SUN 10 AUG · EEST")
+                        .font(.board(14, weight: .semibold))
+                        .tracking(0.8)
+                        .foregroundStyle(BoardPalette.fog)
+                    Text("Touch to wake")
+                        .font(.board(13))
+                        .foregroundStyle(BoardPalette.fog)
+                        .padding(.top, 8)
+                }
+            }
+            .offset(x: 126, y: -82)
+        }
+        .frame(width: 1024, height: 600)
+        .accessibilityLabel("Pulse screensaver fixture showing clock, date, and timezone")
     }
 }

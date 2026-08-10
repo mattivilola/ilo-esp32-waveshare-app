@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "dashboard_model.h"
 #include "esp_err.h"
 #include "esp_lcd_panel_ops.h"
@@ -20,6 +23,7 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd);
 void dashboard_ui_set_model(const dashboard_model_t *model);
 void dashboard_ui_set_connection_state(dashboard_connection_state_t state);
 void dashboard_ui_set_weather(const weather_model_t *model);
+esp_err_t dashboard_ui_capture_rgb565(uint8_t **pixels, size_t *size);
 
 #ifdef __cplusplus
 }

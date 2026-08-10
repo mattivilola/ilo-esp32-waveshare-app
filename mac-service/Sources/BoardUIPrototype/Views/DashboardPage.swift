@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DashboardPage: View {
+    @State private var focusRunning = false
+
     var body: some View {
         HStack(spacing: 16) {
             PulseCard {
@@ -42,22 +44,32 @@ struct DashboardPage: View {
                 taskRow("ESP32 work pulse", "Four-page navigation and device UX", BoardPalette.signal)
                 taskRow("Mac companion", "Universal release pipeline verified", BoardPalette.signal)
                 taskRow("Codex decisions", "Plan review needed on Mac", BoardPalette.amber)
-                HStack(spacing: 12) {
-                    Text("FOCUS")
-                        .font(.board(11, weight: .bold))
-                        .tracking(1)
-                        .foregroundStyle(BoardPalette.fog)
-                    Text("Build the smallest safe next slice")
-                        .font(.board(13, weight: .semibold))
-                        .foregroundStyle(BoardPalette.mist)
-                    Spacer()
-                    Text("updated now")
-                        .font(.board(12))
-                        .foregroundStyle(BoardPalette.fog)
+                Button {
+                    focusRunning.toggle()
+                } label: {
+                    HStack(spacing: 12) {
+                        Text("FOCUS")
+                            .font(.board(11, weight: .bold))
+                            .tracking(1)
+                            .foregroundStyle(BoardPalette.fog)
+                        Text("25:00")
+                            .font(.system(size: 16, weight: .bold, design: .monospaced))
+                            .foregroundStyle(focusRunning ? BoardPalette.signal : BoardPalette.mist)
+                        Text("Build the smallest safe next slice")
+                            .font(.board(13, weight: .semibold))
+                            .foregroundStyle(BoardPalette.mist)
+                        Spacer()
+                        Text(focusRunning ? "PAUSE" : "START")
+                            .font(.board(11, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundStyle(focusRunning ? BoardPalette.signal : BoardPalette.fog)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(height: 45)
+                    .background(BoardPalette.slate, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
-                .padding(.horizontal, 16)
-                .frame(height: 45)
-                .background(BoardPalette.slate, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                .buttonStyle(.plain)
+                .accessibilityLabel(focusRunning ? "Pause 25 minute focus session" : "Start 25 minute focus session")
             }
         }
         .padding(.vertical, 4)

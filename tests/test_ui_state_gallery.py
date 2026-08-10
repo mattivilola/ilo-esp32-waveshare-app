@@ -14,6 +14,8 @@ SCENARIOS = (
     "privacy",
     "sleep",
     "reconnect",
+    "screensaver",
+    "approval-request",
 )
 
 

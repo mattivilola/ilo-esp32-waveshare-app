@@ -119,7 +119,7 @@ private enum PreviewError: LocalizedError {
         switch self {
         case let .invalidCommand(command): "Unknown command '\(command)'. Use preview, screenshot, screenshots, scenario-screenshot, or scenario-screenshots."
         case .invalidPage: "Pass --screen dashboard, codex, weather, or settings."
-        case .invalidScenario: "Pass --scenario offline, loading, stale, error, long-text, privacy, sleep, or reconnect."
+        case .invalidScenario: "Pass --scenario offline, loading, stale, error, long-text, privacy, sleep, reconnect, screensaver, or approval-request."
         case .renderFailed: "The 1024×600 UI preview could not be rendered."
         }
     }

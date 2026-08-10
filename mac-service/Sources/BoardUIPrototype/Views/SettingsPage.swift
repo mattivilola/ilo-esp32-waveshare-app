@@ -4,6 +4,9 @@ struct SettingsPage: View {
     @State private var screensaverMinutes = 2
     @State private var displayOffMinutes = 10
     @State private var privacyMode = false
+    @State private var uses24HourClock = true
+    @State private var usesFahrenheit = false
+    @State private var focusMinutes = 25
 
     var body: some View {
         HStack(spacing: 16) {
@@ -27,17 +30,29 @@ struct SettingsPage: View {
 
             VStack(spacing: 14) {
                 PulseCard {
+                    VStack(alignment: .leading, spacing: 8) {
+                        SectionLabel(title: "Pulse & units")
+                        compactSettingButton("Clock", value: uses24HourClock ? "24 HOUR" : "12 HOUR") {
+                            uses24HourClock.toggle()
+                        }
+                        compactSettingButton("Temperature", value: usesFahrenheit ? "FAHRENHEIT" : "CELSIUS") {
+                            usesFahrenheit.toggle()
+                        }
+                        compactSettingButton("Focus session", value: "\(focusMinutes) MIN") {
+                            focusMinutes = next(focusMinutes, in: [25, 45, 60])
+                        }
+                    }
+                }
+                .frame(height: 160)
+                PulseCard {
                     VStack(alignment: .leading, spacing: 12) {
                         SectionLabel(title: "Connections")
                         connectionRow("Wi-Fi", "KNOWN NETWORK", BoardPalette.signal)
                         connectionRow("Mac companion", "PAIRED", BoardPalette.signal)
                         connectionRow("Weather", "DIRECT READY", BoardPalette.cyan)
-                        Divider().overlay(BoardPalette.steel)
-                        Text("Wi-Fi password changes stay in the secure USB setup flow for now.")
-                            .font(.board(11))
-                            .foregroundStyle(BoardPalette.fog)
                     }
                 }
+                .frame(height: 112)
                 PulseCard {
                     HStack(spacing: 15) {
                         Image(nsImage: BrandAsset.image())
@@ -61,6 +76,23 @@ struct SettingsPage: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func compactSettingButton(_ title: String, value: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(value)
+                    .foregroundStyle(BoardPalette.signal)
+            }
+            .font(.board(11, weight: .semibold))
+            .foregroundStyle(BoardPalette.mist)
+            .padding(.horizontal, 11)
+            .frame(height: 31)
+            .background(BoardPalette.steel, in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
     }
 
     private func settingButton(_ title: String, value: String, action: @escaping () -> Void) -> some View {

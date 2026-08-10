@@ -30,6 +30,8 @@ typedef struct {
     float wind_ms;
     int weather_code;
     int64_t updated_epoch;
+    int32_t utc_offset_seconds;
+    char timezone_abbreviation[8];
     weather_day_t days[WEATHER_FORECAST_DAYS];
     uint8_t day_count;
 } weather_model_t;

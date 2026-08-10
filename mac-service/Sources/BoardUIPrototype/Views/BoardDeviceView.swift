@@ -24,6 +24,8 @@ public struct BoardDeviceView: View {
         Group {
             if scenario == .sleep {
                 BoardSleepValidationView()
+            } else if scenario == .screensaver {
+                BoardScreensaverValidationView()
             } else {
                 boardSurface
             }
@@ -100,6 +102,7 @@ public struct BoardDeviceView: View {
             switch visiblePage {
             case .dashboard: DashboardPage()
             case .codex: CodexPage()
+            case .xNews: XNewsPage()
             case .weather: WeatherPage()
             case .settings: SettingsPage()
             }

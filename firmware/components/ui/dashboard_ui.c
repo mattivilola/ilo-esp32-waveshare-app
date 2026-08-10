@@ -1,7 +1,11 @@
 #include "dashboard_ui.h"
 
+#include <string.h>
+
+#include "esp_heap_caps.h"
 #include <stdio.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "esp_check.h"
 #include "esp_lvgl_port.h"
@@ -20,7 +24,7 @@
 #define COLOR_CYAN    lv_color_hex(0x37B3D9)
 
 #define PAGE_COUNT 4
-#define DASHBOARD_VISIBLE_TASKS 4
+#define DASHBOARD_VISIBLE_TASKS 3
 #define CODEX_VISIBLE_TASKS 3
 #define MINUTE_MS 60000U
 
@@ -44,9 +48,16 @@ static lv_obj_t *nav_labels[PAGE_COUNT];
 static lv_obj_t *screensaver;
 static lv_obj_t *screensaver_content;
 static lv_obj_t *screensaver_status_dot;
+static lv_obj_t *screensaver_clock_label;
+static lv_obj_t *screensaver_date_label;
+static lv_obj_t *header_clock_label;
+static lv_obj_t *focus_timer_label;
 static lv_obj_t *settings_screensaver_value;
 static lv_obj_t *settings_display_off_value;
 static lv_obj_t *settings_privacy_value;
+static lv_obj_t *settings_clock_value;
+static lv_obj_t *settings_temperature_value;
+static lv_obj_t *settings_focus_value;
 static lv_obj_t *weather_location_label;
 static lv_obj_t *weather_state_label;
 static lv_obj_t *weather_temperature_label;
@@ -60,6 +71,14 @@ static bool latest_model_valid;
 static bool display_asleep;
 static bool consuming_wake_touch;
 static uint32_t screensaver_tick;
+static uint32_t focus_remaining_seconds;
+static bool focus_running;
+static int32_t clock_utc_offset_seconds;
+static char clock_timezone_abbreviation[8] = "UTC";
+static weather_model_t latest_weather_model;
+static bool latest_weather_valid;
+
+static void render_weather(const weather_model_t *model);
 
 static const char *page_eyebrows[PAGE_COUNT] = {
     "ILO / WORK PULSE", "ILO / CODEX", "ILO / WEATHER", "ILO / SETTINGS"
@@ -137,6 +156,83 @@ static lv_obj_t *create_card(lv_obj_t *parent, int x, int y, int width, int heig
     lv_obj_set_pos(card, x, y);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     return card;
+}
+
+static bool local_clock(struct tm *clock)
+{
+    time_t now = time(NULL);
+    if (now < 1700000000 || clock == NULL) {
+        return false;
+    }
+    now += (time_t)clock_utc_offset_seconds;
+    return gmtime_r(&now, clock) != NULL;
+}
+
+static void refresh_clock_labels(void)
+{
+    struct tm clock;
+    char time_text[20] = "--:--";
+    char date_text[24] = "TIME SYNC NEEDED";
+    if (local_clock(&clock)) {
+        if (current_settings.use_24_hour_clock) {
+            strftime(time_text, sizeof(time_text), "%H:%M", &clock);
+        } else {
+            strftime(time_text, sizeof(time_text), "%I:%M %p", &clock);
+            if (time_text[0] == '0') {
+                memmove(time_text, time_text + 1, strlen(time_text));
+            }
+        }
+        strftime(date_text, sizeof(date_text), "%a %d %b", &clock);
+    }
+    if (header_clock_label != NULL) {
+        lv_label_set_text(header_clock_label, time_text);
+    }
+    if (screensaver_clock_label != NULL) {
+        lv_label_set_text(screensaver_clock_label, time_text);
+    }
+    if (screensaver_date_label != NULL) {
+        char dated_zone[36];
+        snprintf(
+            dated_zone,
+            sizeof(dated_zone),
+            "%s  %s",
+            date_text,
+            clock_timezone_abbreviation[0] != 0 ? clock_timezone_abbreviation : "UTC"
+        );
+        lv_label_set_text(screensaver_date_label, dated_zone);
+    }
+}
+
+static void refresh_focus_label(void)
+{
+    if (focus_timer_label == NULL) return;
+    if (focus_remaining_seconds == 0) {
+        lv_label_set_text(focus_timer_label, "FOCUS COMPLETE    TAP TO RESTART");
+        lv_obj_set_style_text_color(focus_timer_label, COLOR_SIGNAL, 0);
+        return;
+    }
+    char text[64];
+    snprintf(
+        text,
+        sizeof(text),
+        "FOCUS %02u:%02u    %s",
+        (unsigned int)(focus_remaining_seconds / 60),
+        (unsigned int)(focus_remaining_seconds % 60),
+        focus_running ? "PAUSE" : (focus_remaining_seconds < (uint32_t)current_settings.focus_minutes * 60U ? "RESUME" : "START")
+    );
+    lv_label_set_text(focus_timer_label, text);
+    lv_obj_set_style_text_color(focus_timer_label, focus_running ? COLOR_SIGNAL : COLOR_MIST, 0);
+}
+
+static void focus_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    if (focus_remaining_seconds == 0) {
+        focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
+    }
+    focus_running = !focus_running;
+    refresh_focus_label();
+    lv_display_trigger_activity(ui_display);
 }
 
 static void build_codex_page(lv_obj_t *page)
@@ -264,6 +360,16 @@ static void refresh_settings_labels(void)
             0
         );
     }
+    if (settings_clock_value != NULL) {
+        lv_label_set_text(settings_clock_value, current_settings.use_24_hour_clock ? "24 HOUR" : "12 HOUR");
+    }
+    if (settings_temperature_value != NULL) {
+        lv_label_set_text(settings_temperature_value, current_settings.use_fahrenheit ? "FAHRENHEIT" : "CELSIUS");
+    }
+    if (settings_focus_value != NULL) {
+        snprintf(value, sizeof(value), "%u MIN", (unsigned int)current_settings.focus_minutes);
+        lv_label_set_text(settings_focus_value, value);
+    }
 }
 
 static void refresh_task_summaries(void)
@@ -314,6 +420,39 @@ static void privacy_setting_tapped(lv_event_t *event)
     lv_display_trigger_activity(ui_display);
 }
 
+static void clock_setting_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    current_settings.use_24_hour_clock = !current_settings.use_24_hour_clock;
+    device_settings_save(&current_settings);
+    refresh_settings_labels();
+    refresh_clock_labels();
+    lv_display_trigger_activity(ui_display);
+}
+
+static void temperature_setting_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    current_settings.use_fahrenheit = !current_settings.use_fahrenheit;
+    device_settings_save(&current_settings);
+    refresh_settings_labels();
+    if (latest_weather_valid) render_weather(&latest_weather_model);
+    lv_display_trigger_activity(ui_display);
+}
+
+static void focus_setting_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    current_settings.focus_minutes = device_settings_next_focus(current_settings.focus_minutes);
+    device_settings_save(&current_settings);
+    if (!focus_running) {
+        focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
+    }
+    refresh_settings_labels();
+    refresh_focus_label();
+    lv_display_trigger_activity(ui_display);
+}
+
 static void sleep_now_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_RELEASED) return;
@@ -343,6 +482,25 @@ static lv_obj_t *create_setting_row(
     return button;
 }
 
+static void create_compact_setting_row(
+    lv_obj_t *parent,
+    int y,
+    const char *title,
+    lv_event_cb_t callback,
+    lv_obj_t **value_label
+)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    set_clean_box(button, COLOR_STEEL, 10);
+    lv_obj_set_size(button, 438, 42);
+    lv_obj_set_pos(button, 20, y);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_ALL, NULL);
+    lv_obj_t *label = create_label(button, title, &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 14, 0);
+    *value_label = create_label(button, "", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_align(*value_label, LV_ALIGN_RIGHT_MID, -14, 0);
+}
+
 static void build_settings_page(lv_obj_t *page)
 {
     lv_obj_t *display = create_card(page, 22, 8, 480, 386, 16);
@@ -362,26 +520,14 @@ static void build_settings_page(lv_obj_t *page)
     lv_obj_set_style_text_line_space(power_note, 7, 0);
     lv_obj_align(power_note, LV_ALIGN_BOTTOM_LEFT, 18, -20);
 
-    lv_obj_t *connections = create_card(page, 518, 8, 478, 258, 16);
-    lv_obj_t *connection_title = create_label(connections, "CONNECTIONS", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(connection_title, LV_ALIGN_TOP_LEFT, 18, 18);
-    lv_obj_t *connection_values = create_label(
-        connections,
-        "Wi-Fi                  KNOWN NETWORK\n\nMac companion          PAIRED\n\nWeather              DIRECT READY",
-        &lv_font_montserrat_14,
-        COLOR_MIST
-    );
-    lv_obj_set_style_text_line_space(connection_values, 8, 0);
-    lv_obj_align(connection_values, LV_ALIGN_TOP_LEFT, 18, 58);
-    lv_obj_t *wifi_note = create_label(
-        connections,
-        "Wi-Fi password changes stay in secure USB setup.",
-        &lv_font_montserrat_14,
-        COLOR_FOG
-    );
-    lv_obj_align(wifi_note, LV_ALIGN_BOTTOM_LEFT, 18, -18);
+    lv_obj_t *pulse = create_card(page, 518, 8, 478, 194, 16);
+    lv_obj_t *pulse_title = create_label(pulse, "PULSE & UNITS", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(pulse_title, LV_ALIGN_TOP_LEFT, 18, 14);
+    create_compact_setting_row(pulse, 42, "Clock", clock_setting_tapped, &settings_clock_value);
+    create_compact_setting_row(pulse, 90, "Temperature", temperature_setting_tapped, &settings_temperature_value);
+    create_compact_setting_row(pulse, 138, "Focus session", focus_setting_tapped, &settings_focus_value);
 
-    lv_obj_t *privacy = create_card(page, 518, 282, 478, 112, 16);
+    lv_obj_t *privacy = create_card(page, 518, 214, 478, 104, 16);
     lv_obj_add_flag(privacy, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(privacy, privacy_setting_tapped, LV_EVENT_CLICKED, NULL);
     lv_obj_t *privacy_icon = lv_image_create(privacy);
@@ -397,6 +543,15 @@ static void build_settings_page(lv_obj_t *page)
     lv_obj_align(privacy_text, LV_ALIGN_LEFT_MID, 84, 0);
     settings_privacy_value = create_label(privacy, "VISIBLE", &lv_font_montserrat_14, COLOR_SIGNAL);
     lv_obj_align(settings_privacy_value, LV_ALIGN_RIGHT_MID, -20, 0);
+
+    lv_obj_t *connections = create_card(page, 518, 330, 478, 64, 16);
+    lv_obj_t *connection_values = create_label(
+        connections,
+        "WI-FI  KNOWN     MAC  PAIRED     WEATHER  DIRECT",
+        &lv_font_montserrat_14,
+        COLOR_MIST
+    );
+    lv_obj_center(connection_values);
     refresh_settings_labels();
 }
 
@@ -454,6 +609,12 @@ static void screensaver_tapped(lv_event_t *event)
 static void screensaver_timer(lv_timer_t *timer)
 {
     (void)timer;
+    refresh_clock_labels();
+    if (focus_running && focus_remaining_seconds > 0) {
+        --focus_remaining_seconds;
+        if (focus_remaining_seconds == 0) focus_running = false;
+        refresh_focus_label();
+    }
     uint32_t inactive = lv_display_get_inactive_time(ui_display);
     uint32_t saver_timeout = (uint32_t)current_settings.screensaver_minutes * MINUTE_MS;
     uint32_t off_timeout = (uint32_t)current_settings.display_off_minutes * MINUTE_MS;
@@ -497,23 +658,28 @@ static void build_screensaver(lv_obj_t *screen)
     screensaver_content = lv_obj_create(screensaver);
     lv_obj_set_style_bg_opa(screensaver_content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(screensaver_content, 0, 0);
-    lv_obj_set_size(screensaver_content, 360, 150);
+    lv_obj_set_size(screensaver_content, 460, 190);
     lv_obj_clear_flag(screensaver_content, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(screensaver_content);
 
     lv_obj_t *icon = lv_image_create(screensaver_content);
     lv_image_set_src(icon, &ilo_icon_48);
-    lv_obj_align(icon, LV_ALIGN_CENTER, -120, -20);
-    lv_obj_t *pulse = create_label(screensaver_content, "ILO / PULSE", &lv_font_montserrat_28, COLOR_MIST);
-    lv_obj_align(pulse, LV_ALIGN_CENTER, 8, -30);
+    lv_obj_align(icon, LV_ALIGN_CENTER, -180, -42);
+    lv_obj_t *pulse = create_label(screensaver_content, "ILO / PULSE", &lv_font_montserrat_20, COLOR_SIGNAL);
+    lv_obj_align(pulse, LV_ALIGN_CENTER, -70, -54);
+    screensaver_clock_label = create_label(screensaver_content, "--:--", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_align(screensaver_clock_label, LV_ALIGN_CENTER, 62, -4);
+    screensaver_date_label = create_label(screensaver_content, "TIME SYNC NEEDED", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(screensaver_date_label, LV_ALIGN_CENTER, 62, 36);
     lv_obj_t *wake = create_label(screensaver_content, "Touch to wake", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(wake, LV_ALIGN_CENTER, 8, 14);
+    lv_obj_align(wake, LV_ALIGN_CENTER, 62, 72);
     screensaver_status_dot = lv_obj_create(screensaver_content);
     set_clean_box(screensaver_status_dot, COLOR_FOG, LV_RADIUS_CIRCLE);
     lv_obj_set_size(screensaver_status_dot, 10, 10);
-    lv_obj_align(screensaver_status_dot, LV_ALIGN_CENTER, -50, 62);
+    lv_obj_align(screensaver_status_dot, LV_ALIGN_CENTER, -84, 72);
 
     lv_timer_create(screensaver_timer, 1000, NULL);
+    refresh_clock_labels();
 }
 
 static void build_ui(void)
@@ -546,7 +712,9 @@ static void build_ui(void)
     lv_label_set_text(connection_label, "Mac not configured");
     lv_obj_set_style_text_color(connection_label, COLOR_FOG, 0);
     lv_obj_set_style_text_font(connection_label, &lv_font_montserrat_14, 0);
-    lv_obj_align(connection_label, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_align(connection_label, LV_ALIGN_RIGHT_MID, -92, 0);
+    header_clock_label = create_label(header, "--:--", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_align(header_clock_label, LV_ALIGN_RIGHT_MID, 0, 0);
 
     tileview = lv_tileview_create(screen);
     set_clean_box(tileview, COLOR_CARBON, 0);
@@ -619,6 +787,15 @@ static void build_ui(void)
         lv_obj_set_style_text_font(task_summaries[i], &lv_font_montserrat_14, 0);
         lv_obj_align(task_summaries[i], LV_ALIGN_BOTTOM_LEFT, 42, -10);
     }
+
+    lv_obj_t *focus = create_card(tiles[0], 286, 326, 714, 72, 14);
+    lv_obj_add_flag(focus, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(focus, focus_tapped, LV_EVENT_CLICKED, NULL);
+    focus_timer_label = create_label(focus, "", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_align(focus_timer_label, LV_ALIGN_LEFT_MID, 18, 0);
+    lv_obj_t *focus_note = create_label(focus, "LOCAL ONLY", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(focus_note, LV_ALIGN_RIGHT_MID, -18, 0);
+    refresh_focus_label();
 
     build_codex_page(tiles[1]);
     build_weather_page(tiles[2]);
@@ -699,6 +876,7 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
 
     ui_display = display;
     current_settings = device_settings_load();
+    focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
     build_ui();
     lvgl_port_unlock();
     return ESP_OK;
@@ -810,10 +988,19 @@ static const char *weather_condition(int code)
     return "Mixed conditions";
 }
 
-void dashboard_ui_set_weather(const weather_model_t *model)
+static double display_temperature(float celsius)
+{
+    return current_settings.use_fahrenheit ? ((double)celsius * 9.0 / 5.0) + 32.0 : (double)celsius;
+}
+
+static const char *temperature_unit(void)
+{
+    return current_settings.use_fahrenheit ? "F" : "C";
+}
+
+static void render_weather(const weather_model_t *model)
 {
     if (model == NULL || weather_location_label == NULL) return;
-    lvgl_port_lock(0);
     lv_label_set_text(weather_location_label, model->location[0] != 0 ? model->location : "Weather");
 
     const char *state_text = "OFFLINE";
@@ -845,14 +1032,15 @@ void dashboard_ui_set_weather(const weather_model_t *model)
 
     if (model->state == WEATHER_STATE_LIVE || model->state == WEATHER_STATE_STALE) {
         char text[96];
-        snprintf(text, sizeof(text), "%.0f C", (double)model->temperature_c);
+        snprintf(text, sizeof(text), "%.0f %s", display_temperature(model->temperature_c), temperature_unit());
         lv_label_set_text(weather_temperature_label, text);
         lv_label_set_text(weather_condition_label, weather_condition(model->weather_code));
         snprintf(
             text,
             sizeof(text),
-            "Feels %.0f C  /  Wind %.1f m/s",
-            (double)model->apparent_c,
+            "Feels %.0f %s  /  Wind %.1f m/s",
+            display_temperature(model->apparent_c),
+            temperature_unit(),
             (double)model->wind_ms
         );
         lv_label_set_text(weather_details_label, text);
@@ -861,22 +1049,90 @@ void dashboard_ui_set_weather(const weather_model_t *model)
             snprintf(
                 text,
                 sizeof(text),
-                "%s\n%s    %.0f C - %.0f C",
+                "%s\n%s    %.0f %s - %.0f %s",
                 day_names[index],
                 weather_condition(model->days[index].weather_code),
-                (double)model->days[index].maximum_c,
-                (double)model->days[index].minimum_c
+                display_temperature(model->days[index].maximum_c),
+                temperature_unit(),
+                display_temperature(model->days[index].minimum_c),
+                temperature_unit()
             );
             lv_label_set_text(weather_day_labels[index], text);
         }
     } else if (model->state == WEATHER_STATE_NOT_CONFIGURED) {
-        lv_label_set_text(weather_temperature_label, "-- C");
+        lv_label_set_text(weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
         lv_label_set_text(weather_condition_label, "Add location over USB");
         lv_label_set_text(weather_details_label, "Run ./tools/board provision");
     } else if (model->state == WEATHER_STATE_ERROR) {
-        lv_label_set_text(weather_temperature_label, "-- C");
+        lv_label_set_text(weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
         lv_label_set_text(weather_condition_label, "Forecast unavailable");
         lv_label_set_text(weather_details_label, "Retrying automatically in 1 minute");
     }
+}
+
+void dashboard_ui_set_weather(const weather_model_t *model)
+{
+    if (model == NULL || weather_location_label == NULL) return;
+    lvgl_port_lock(0);
+    latest_weather_model = *model;
+    latest_weather_valid = true;
+    if ((model->state == WEATHER_STATE_LIVE || model->state == WEATHER_STATE_STALE)
+        && model->timezone_abbreviation[0] != 0) {
+        clock_utc_offset_seconds = model->utc_offset_seconds;
+        strlcpy(
+            clock_timezone_abbreviation,
+            model->timezone_abbreviation,
+            sizeof(clock_timezone_abbreviation)
+        );
+        refresh_clock_labels();
+    }
+    render_weather(model);
     lvgl_port_unlock();
+}
+
+esp_err_t dashboard_ui_capture_rgb565(uint8_t **pixels, size_t *size)
+{
+    if (pixels == NULL || size == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *pixels = NULL;
+    *size = 0;
+    if (ui_display == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const size_t row_bytes = ILO_BOARD_WIDTH * 2;
+    const size_t capture_size = row_bytes * ILO_BOARD_HEIGHT;
+    uint8_t *capture = heap_caps_malloc(capture_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (capture == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    if (!lvgl_port_lock(1000)) {
+        heap_caps_free(capture);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    lv_refr_now(ui_display);
+    lv_draw_buf_t *draw_buffer = lv_display_get_buf_active(ui_display);
+    bool valid = draw_buffer != NULL
+        && draw_buffer->data != NULL
+        && draw_buffer->header.cf == LV_COLOR_FORMAT_RGB565
+        && draw_buffer->header.w == ILO_BOARD_WIDTH
+        && draw_buffer->header.h == ILO_BOARD_HEIGHT
+        && draw_buffer->header.stride >= row_bytes
+        && draw_buffer->data_size >= draw_buffer->header.stride * ILO_BOARD_HEIGHT;
+    if (valid) {
+        for (size_t row = 0; row < ILO_BOARD_HEIGHT; ++row) {
+            memcpy(capture + (row * row_bytes), draw_buffer->data + (row * draw_buffer->header.stride), row_bytes);
+        }
+    }
+    lvgl_port_unlock();
+
+    if (!valid) {
+        heap_caps_free(capture);
+        return ESP_ERR_INVALID_SIZE;
+    }
+    *pixels = capture;
+    *size = capture_size;
+    return ESP_OK;
 }

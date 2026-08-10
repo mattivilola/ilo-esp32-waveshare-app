@@ -55,6 +55,8 @@ Never put the Wi-Fi password, pairing secret, complete board ID, local IP addres
 | HW-103 | Make mostly vertical drags over cards and Settings controls. | Vertical intent does not unexpectedly change page; a control changes only when deliberately tapped. | Video | NOT RUN |
 | HW-104 | Exercise every Settings row and privacy toggle, then return to each page. | Hit targets respond once per tap, labels update, content stays clipped to its cards, and navigation remains available. | Video + values tested | NOT RUN |
 | HW-105 | Reboot after changing every persisted setting. | Screensaver timeout, display-off timeout, and privacy state survive a normal reboot. | Before/after photos + boot log | NOT RUN |
+| HW-106 | Switch 24-hour/12-hour clock, Celsius/Fahrenheit, and 25/45/60-minute focus duration, rebooting after the final choice. | Header/screensaver format and every weather temperature use the selected units; focus duration and all choices survive reboot. | Before/after photos + chosen values | NOT RUN |
+| HW-107 | Start a 25-minute focus session, pause/resume it, and let a shortened development session reach zero. | One tap starts, subsequent taps pause/resume, countdown does not jump, completion is explicit, and restart requires a tap. | Timed video + serial log | NOT RUN |
 
 ## C. Failure and privacy states
 
@@ -68,6 +70,7 @@ Use [the deterministic state gallery](ui-state-validation.md) as a semantic refe
 | HW-204 | Boot with no usable weather cache and no network. | Weather shows setup/offline/error guidance without fabricated values or an endless blocking loader. | Photo + log | NOT RUN |
 | HW-205 | Supply fixture tasks with very long UTF-8 titles/summaries from the Mac test source. | Text truncates inside its row; no overlap, crash, replacement-character corruption, or changed touch target. | Photo with sanitized fixture text | NOT RUN |
 | HW-206 | Enable privacy mode while task summaries exist, navigate away/back, then reboot. | Titles/summaries are hidden everywhere on the panel; counts/coarse state may remain; privacy survives reboot. | Photos before/after + reboot | NOT RUN |
+| HW-207 | After weather has synchronized time, compare the header and Pulse screensaver with a trusted local clock across a minute boundary. | Time advances once per minute, date/timezone are correct for the configured weather location, and unsynchronized boot never shows a fabricated time. | Timed photo pair + weather log | NOT RUN |
 
 ## D. Screensaver, backlight, and wake safety
 
@@ -90,6 +93,7 @@ Use [the deterministic state gallery](ui-state-validation.md) as a semantic refe
 | HW-404 | Keep the Mac off and reboot the board with working Wi-Fi. | Direct weather synchronizes time, verifies HTTPS, and reaches `LIVE` independently. | Photo + certificate/time/weather log lines | NOT RUN |
 | HW-405 | With the Mac companion running, compare one sanitized Codex snapshot with the panel. | Counts/coarse states match; no prompt, transcript, local path, credential, or unbounded private text reaches the board. | Redacted host payload + photo | NOT RUN |
 | HW-406 | Change to an unknown Wi-Fi network. | Board gives clear offline/setup guidance and never exposes the stored SSID password on screen or serial output. | Photo + redacted log | NOT RUN |
+| HW-407 | Stop the menu companion and run `./tools/host screenshot --output /tmp/ilo-board-live.png`; repeat on all four pages and once during animation. | Each authenticated capture completes without reset or UI freeze; PNG is exactly 1024×600; orientation, red/blue channels, alpha-rendered icon, visible page, and freshness match a simultaneous panel photo; no tearing appears; a second run refuses to overwrite without `--force`. | Four PNG/photo pairs + redacted host/serial timing | NOT RUN |
 
 ## F. Endurance and release decision
 
@@ -102,4 +106,6 @@ Use [the deterministic state gallery](ui-state-validation.md) as a semantic refe
 
 ## Deferred gates
 
-Framebuffer screenshot fidelity and OTA/rollback have their own future implementation gates. Until a board-side screenshot path exists, panel photos remain the only faithful color/orientation evidence. Until signed dual-slot OTA exists and is physically exercised, USB flash remains the supported firmware update path.
+Framebuffer screenshot transport is implemented and hardware-independently verified, but HW-407 remains its physical fidelity/reliability release gate; panel photos are still authoritative until it passes. OTA/rollback remains deferred. Until signed dual-slot OTA exists and is physically exercised, USB flash remains the supported firmware update path.
+
+Board-originated Codex approvals are also deferred. The current approval-request fixture is intentionally disconnected and must continue to display **NO ACTION SENT**. A future physical gate must prove authoritative live request state, exact consequence, expiry, hold duration, a separate confirmation, one-time/replay rejection, cancellation, disconnect behavior, and Mac-side audit evidence before remote actions can be enabled.

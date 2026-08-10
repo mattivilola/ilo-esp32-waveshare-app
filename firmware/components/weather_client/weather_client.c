@@ -88,11 +88,24 @@ static bool parse_weather(const char *json, weather_model_t *model)
     if (root == NULL) return false;
     cJSON *current = cJSON_GetObjectItemCaseSensitive(root, "current");
     cJSON *daily = cJSON_GetObjectItemCaseSensitive(root, "daily");
+    cJSON *utc_offset = cJSON_GetObjectItemCaseSensitive(root, "utc_offset_seconds");
+    cJSON *timezone_abbreviation = cJSON_GetObjectItemCaseSensitive(root, "timezone_abbreviation");
     bool ok = cJSON_IsObject(current) && cJSON_IsObject(daily)
+        && cJSON_IsNumber(utc_offset)
+        && cJSON_IsString(timezone_abbreviation)
         && number(current, "temperature_2m", &model->temperature_c)
         && number(current, "apparent_temperature", &model->apparent_c)
         && number(current, "wind_speed_10m", &model->wind_ms)
         && integer(current, "weather_code", &model->weather_code);
+
+    if (ok) {
+        model->utc_offset_seconds = (int32_t)utc_offset->valuedouble;
+        strlcpy(
+            model->timezone_abbreviation,
+            timezone_abbreviation->valuestring,
+            sizeof(model->timezone_abbreviation)
+        );
+    }
 
     cJSON *codes = cJSON_GetObjectItemCaseSensitive(daily, "weather_code");
     cJSON *maximums = cJSON_GetObjectItemCaseSensitive(daily, "temperature_2m_max");

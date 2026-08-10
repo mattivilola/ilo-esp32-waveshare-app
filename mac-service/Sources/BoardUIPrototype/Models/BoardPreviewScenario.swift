@@ -14,6 +14,8 @@ public enum BoardPreviewScenario: String, CaseIterable, Identifiable, Sendable {
     case privacy
     case sleep
     case reconnect
+    case screensaver
+    case approvalRequest = "approval-request"
 
     public var id: String { rawValue }
 
@@ -27,13 +29,15 @@ public enum BoardPreviewScenario: String, CaseIterable, Identifiable, Sendable {
         case .privacy: "Privacy enabled"
         case .sleep: "Display asleep"
         case .reconnect: "Mac reconnecting"
+        case .screensaver: "Pulse screensaver"
+        case .approvalRequest: "Approval request safety"
         }
     }
 
     public var page: BoardPage {
         switch self {
-        case .offline, .privacy, .reconnect, .sleep: .dashboard
-        case .loading, .longText: .codex
+        case .offline, .privacy, .reconnect, .sleep, .screensaver: .dashboard
+        case .loading, .longText, .approvalRequest: .codex
         case .stale, .error: .weather
         }
     }
@@ -43,6 +47,7 @@ public enum BoardPreviewScenario: String, CaseIterable, Identifiable, Sendable {
         case .offline: "MAC OFFLINE"
         case .reconnect: "RECONNECTING"
         case .sleep: "DISPLAY ASLEEP"
+        case .approvalRequest: "FIXTURE · NO ACTION"
         default: "MAC ONLINE"
         }
     }
@@ -51,6 +56,7 @@ public enum BoardPreviewScenario: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .offline, .error: BoardPalette.amber
         case .reconnect, .loading: BoardPalette.cyan
+        case .approvalRequest: BoardPalette.amber
         default: BoardPalette.signal
         }
     }
