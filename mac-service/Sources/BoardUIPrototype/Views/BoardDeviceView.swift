@@ -4,14 +4,35 @@ public struct BoardDeviceView: View {
     @State private var page: BoardPage
     private let interactive: Bool
     private let fixedPage: BoardPage?
+    private let scenario: BoardPreviewScenario?
 
     public init(page: BoardPage = .dashboard, interactive: Bool = true) {
         _page = State(initialValue: page)
         self.interactive = interactive
         fixedPage = interactive ? nil : page
+        scenario = nil
+    }
+
+    public init(scenario: BoardPreviewScenario) {
+        _page = State(initialValue: scenario.page)
+        interactive = false
+        fixedPage = scenario.page
+        self.scenario = scenario
     }
 
     public var body: some View {
+        Group {
+            if scenario == .sleep {
+                BoardSleepValidationView()
+            } else {
+                boardSurface
+            }
+        }
+        .frame(width: 1024, height: 600)
+        .environment(\.colorScheme, .dark)
+    }
+
+    private var boardSurface: some View {
         ZStack(alignment: .leading) {
             BoardPalette.carbon
             BoardPalette.signal.frame(width: 6)
@@ -33,7 +54,6 @@ public struct BoardDeviceView: View {
         .transaction { transaction in
             if !interactive { transaction.disablesAnimations = true }
         }
-        .environment(\.colorScheme, .dark)
     }
 
     private var header: some View {
@@ -55,15 +75,15 @@ public struct BoardDeviceView: View {
             }
             Spacer()
             HStack(spacing: 8) {
-                StatusDot(color: BoardPalette.signal)
-                Text("MAC ONLINE")
+                StatusDot(color: scenario?.connectionColor ?? BoardPalette.signal)
+                Text(scenario?.connectionLabel ?? "MAC ONLINE")
                     .font(.board(12, weight: .bold))
                     .tracking(0.7)
                     .foregroundStyle(BoardPalette.mist)
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 8)
-            .background(BoardPalette.signal.opacity(0.12), in: Capsule())
+            .background((scenario?.connectionColor ?? BoardPalette.signal).opacity(0.12), in: Capsule())
             Text("09:41")
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .foregroundStyle(BoardPalette.fog)
@@ -74,11 +94,15 @@ public struct BoardDeviceView: View {
 
     @ViewBuilder
     private var pageContent: some View {
-        switch visiblePage {
-        case .dashboard: DashboardPage()
-        case .codex: CodexPage()
-        case .weather: WeatherPage()
-        case .settings: SettingsPage()
+        if let scenario {
+            BoardValidationScenarioView(scenario: scenario)
+        } else {
+            switch visiblePage {
+            case .dashboard: DashboardPage()
+            case .codex: CodexPage()
+            case .weather: WeatherPage()
+            case .settings: SettingsPage()
+            }
         }
     }
 

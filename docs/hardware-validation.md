@@ -1,0 +1,105 @@
+# Waveshare 5B physical validation gate
+
+This checklist is the release gate for the **Waveshare ESP32-S3-Touch-LCD-5B, SKU 28151, 1024×600**. It does not apply to the 800×480 no-suffix board. Every item below is currently **NOT RUN** for the post-travel firmware unless an evidence link and tested commit are added to the result record.
+
+Do not mark the firmware hardware-verified merely because it compiles, renders in the SwiftUI fixture, or worked with an older binary. Perform the gate against the exact commit proposed for release.
+
+## Result record
+
+Copy this block into the release notes or test log and fill it during the session:
+
+```text
+Board: Waveshare ESP32-S3-Touch-LCD-5B / SKU 28151 / 1024x600
+Firmware commit:
+Firmware version/build:
+Mac model and macOS version:
+Mac companion version/build:
+Wi-Fi/router:
+Started (local time):
+Completed (local time):
+Tester:
+Overall: NOT RUN | PASS | FAIL
+Evidence folder:
+Failed check IDs:
+Notes:
+```
+
+Never put the Wi-Fi password, pairing secret, complete board ID, local IP address, Codex prompt, transcript, or private path in the evidence folder.
+
+## Prerequisites
+
+- A data-capable USB-C cable, the factory 16 MB backup, and the exact 5B board are available.
+- The board is powered only by USB for the first pass; any battery switch is off.
+- `make verify` passes at the exact commit under test.
+- `./tools/board doctor` shows one expected `/dev/cu.usbmodem*` device.
+- `./tools/board chip-id` identifies an ESP32-S3; the cold-boot log agrees with the board's documented 16 MB flash/8 MB PSRAM profile.
+- The board has been provisioned through `./tools/board provision`; secrets have not been copied into the repository or test notes.
+- A phone or camera is ready for panel evidence. Simulator screenshots are reference fixtures, not panel captures.
+
+## A. Identity, boot, and panel
+
+| ID | Procedure | Pass condition | Evidence | Result |
+| --- | --- | --- | --- | --- |
+| HW-001 | Photograph the product label/PCB, run `./tools/board chip-id`, and retain the cold-boot memory lines. | Label/profile is 5B/SKU 28151; chip is ESP32-S3; boot log agrees with the documented 16 MB flash/8 MB PSRAM profile. | Redacted photo + terminal excerpt | NOT RUN |
+| HW-002 | Cold boot from disconnected USB while serial monitoring is ready. | One normal boot reaches Dashboard without a reset loop, panic, watchdog, or ROM download prompt. | Complete redacted boot log | NOT RUN |
+| HW-003 | Compare Dashboard, Codex, Weather, and Settings with `docs/images/ui-preview/`. | Content fills 1024×600; no 800×480 crop/stretch, tearing, unexpected rotation, or edge offset. | One straight-on photo per page | NOT RUN |
+| HW-004 | Inspect the ILO roundel, mint bar, amber states, text, gradients/shadows, and dark cards. | Icon alpha is clean; red/blue channels are not swapped; text is legible; no persistent corruption or flicker. | Close-up photo | NOT RUN |
+| HW-005 | Leave the normal Dashboard visible for 15 minutes. | No panel corruption, visible frame jitter, reset, or growing redraw artifact. | Start/end photo + serial log | NOT RUN |
+
+## B. Touch and page navigation
+
+| ID | Procedure | Pass condition | Evidence | Result |
+| --- | --- | --- | --- | --- |
+| HW-101 | Tap each bottom navigation target five times, including near each target's left/right edges. | 20/20 intended taps select the correct page; adjacent pages are never selected. | Short video + count | NOT RUN |
+| HW-102 | From Dashboard, swipe left through all pages and right back to Dashboard ten complete cycles. | Page order is Dashboard → Codex → Weather → Settings in both directions; no wrap, stuck tile, or inverted gesture. | Video + cycle count | NOT RUN |
+| HW-103 | Make mostly vertical drags over cards and Settings controls. | Vertical intent does not unexpectedly change page; a control changes only when deliberately tapped. | Video | NOT RUN |
+| HW-104 | Exercise every Settings row and privacy toggle, then return to each page. | Hit targets respond once per tap, labels update, content stays clipped to its cards, and navigation remains available. | Video + values tested | NOT RUN |
+| HW-105 | Reboot after changing every persisted setting. | Screensaver timeout, display-off timeout, and privacy state survive a normal reboot. | Before/after photos + boot log | NOT RUN |
+
+## C. Failure and privacy states
+
+Use [the deterministic state gallery](ui-state-validation.md) as a semantic reference. Pixel identity with SwiftUI is not required; the LVGL result must preserve the hierarchy, wording intent, state color, attribution, and safe truncation.
+
+| ID | Procedure | Pass condition | Evidence | Result |
+| --- | --- | --- | --- | --- |
+| HW-201 | Stop the Mac host while the board is online. | The board changes to an unambiguous offline state, retains only safe cached data, and does not present old Codex state as live. | Photo + serial timestamps | NOT RUN |
+| HW-202 | Restart the paired Mac host without rebooting the board. | Reconnecting is visible; authenticated online state returns automatically without reprovisioning. | Video + host/serial logs | NOT RUN |
+| HW-203 | Disable Wi-Fi after a successful weather result and allow the next refresh attempt to fail. | Cached weather becomes visibly `STALE`; it is not labeled live and attribution remains present. | Before/after photo + log | NOT RUN |
+| HW-204 | Boot with no usable weather cache and no network. | Weather shows setup/offline/error guidance without fabricated values or an endless blocking loader. | Photo + log | NOT RUN |
+| HW-205 | Supply fixture tasks with very long UTF-8 titles/summaries from the Mac test source. | Text truncates inside its row; no overlap, crash, replacement-character corruption, or changed touch target. | Photo with sanitized fixture text | NOT RUN |
+| HW-206 | Enable privacy mode while task summaries exist, navigate away/back, then reboot. | Titles/summaries are hidden everywhere on the panel; counts/coarse state may remain; privacy survives reboot. | Photos before/after + reboot | NOT RUN |
+
+## D. Screensaver, backlight, and wake safety
+
+| ID | Procedure | Pass condition | Evidence | Result |
+| --- | --- | --- | --- | --- |
+| HW-301 | Set Pulse screensaver to 2 minutes and leave the board untouched. | Saver appears at approximately 2 minutes and its content changes position over time without clipping. | Timed video | NOT RUN |
+| HW-302 | Touch once while only the screensaver is active. | Normal UI returns and the touch does not activate the control underneath it. | Video | NOT RUN |
+| HW-303 | Set display off to 5 minutes and leave the board untouched. | CH422G `DISP` makes the physical backlight fully dark at approximately 5 minutes; this is not merely a black framebuffer. | Dark-room video + current observation if available | NOT RUN |
+| HW-304 | Touch once while the backlight is off. | Backlight returns; the wake touch is consumed and no hidden control changes. | Video showing unchanged setting/page | NOT RUN |
+| HW-305 | Tap **Turn display off now**, wait, wake, then repeat ten times. | 10/10 cycles turn off and recover without a reset, frozen touch controller, or accidental action. | Video + cycle count + serial log | NOT RUN |
+| HW-306 | Select `Never` for both timeouts and leave untouched for longer than the former timeout. | Screensaver and backlight remain on; setting is honored after reboot. | Timed notes + photos | NOT RUN |
+
+## E. Network and data paths
+
+| ID | Procedure | Pass condition | Evidence | Result |
+| --- | --- | --- | --- | --- |
+| HW-401 | Boot with the known Wi-Fi and paired Mac already available. | Wi-Fi and authenticated Mac sync recover automatically; no USB step is required after provisioning. | Redacted log + online photo | NOT RUN |
+| HW-402 | Reboot the access point, then restore it. | Board stays responsive, shows offline/retrying honestly, and reconnects without reset or reprovisioning. | Timed video + serial log | NOT RUN |
+| HW-403 | Reboot the Mac while the board stays powered. | Board remains usable for direct features and authenticated sync returns when the host launches. | Timed notes + board/host logs | NOT RUN |
+| HW-404 | Keep the Mac off and reboot the board with working Wi-Fi. | Direct weather synchronizes time, verifies HTTPS, and reaches `LIVE` independently. | Photo + certificate/time/weather log lines | NOT RUN |
+| HW-405 | With the Mac companion running, compare one sanitized Codex snapshot with the panel. | Counts/coarse states match; no prompt, transcript, local path, credential, or unbounded private text reaches the board. | Redacted host payload + photo | NOT RUN |
+| HW-406 | Change to an unknown Wi-Fi network. | Board gives clear offline/setup guidance and never exposes the stored SSID password on screen or serial output. | Photo + redacted log | NOT RUN |
+
+## F. Endurance and release decision
+
+| ID | Procedure | Pass condition | Evidence | Result |
+| --- | --- | --- | --- | --- |
+| HW-501 | Run the board for at least 8 hours with Mac sync and weather enabled; interact once per hour. | No reset/panic, UI freeze, progressive memory failure, auth storm, or unusable touch latency. | Full serial log + hourly notes | NOT RUN |
+| HW-502 | During endurance, stop/start Wi-Fi and the host at least three times each. | All six recoveries complete without USB intervention or leaked private data in logs. | Timestamped recovery table | NOT RUN |
+| HW-503 | Run `make verify` again from the unchanged commit after the physical session. | Hardware-independent suite and firmware build still pass. | Command output | NOT RUN |
+| HW-504 | Review every failed/not-run item and the evidence folder. | Release is blocked by any safety, privacy, boot, touch, backlight, or recovery failure; deferrals are explicit. | Signed result record | NOT RUN |
+
+## Deferred gates
+
+Framebuffer screenshot fidelity and OTA/rollback have their own future implementation gates. Until a board-side screenshot path exists, panel photos remain the only faithful color/orientation evidence. Until signed dual-slot OTA exists and is physically exercised, USB flash remains the supported firmware update path.

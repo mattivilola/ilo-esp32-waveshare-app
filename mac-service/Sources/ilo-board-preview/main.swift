@@ -21,6 +21,15 @@ enum ILOBoardPreviewCommand {
                 for page in BoardPage.allCases {
                     try render(page, to: "\(outputDirectory)/\(page.rawValue).png")
                 }
+            case "scenario-screenshot":
+                let scenario = try scenarioArgument(arguments)
+                let output = value(after: "--output", in: arguments) ?? "artifacts/ui-states/\(scenario.rawValue).png"
+                try render(scenario, to: output)
+            case "scenario-screenshots":
+                let outputDirectory = value(after: "--output-dir", in: arguments) ?? "artifacts/ui-states"
+                for scenario in BoardPreviewScenario.allCases {
+                    try render(scenario, to: "\(outputDirectory)/\(scenario.rawValue).png")
+                }
             default:
                 throw PreviewError.invalidCommand(command)
             }
@@ -51,7 +60,17 @@ enum ILOBoardPreviewCommand {
 
     @MainActor
     private static func render(_ page: BoardPage, to path: String) throws {
-        let renderer = ImageRenderer(content: BoardDeviceView(page: page, interactive: false))
+        try render(BoardDeviceView(page: page, interactive: false), label: page.title, to: path)
+    }
+
+    @MainActor
+    private static func render(_ scenario: BoardPreviewScenario, to path: String) throws {
+        try render(BoardDeviceView(scenario: scenario), label: scenario.title, to: path)
+    }
+
+    @MainActor
+    private static func render<Content: View>(_ content: Content, label: String, to path: String) throws {
+        let renderer = ImageRenderer(content: content)
         renderer.proposedSize = ProposedViewSize(width: 1024, height: 600)
         renderer.scale = 1
         guard let image = renderer.nsImage,
@@ -65,7 +84,7 @@ enum ILOBoardPreviewCommand {
             .standardizedFileURL
         try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
         try png.write(to: output, options: .atomic)
-        print("Rendered \(page.title): \(output.path)")
+        print("Rendered \(label): \(output.path)")
     }
 
     private static func pageArgument(_ arguments: [String]) throws -> BoardPage {
@@ -73,6 +92,15 @@ enum ILOBoardPreviewCommand {
             throw PreviewError.invalidPage
         }
         return page
+    }
+
+    private static func scenarioArgument(_ arguments: [String]) throws -> BoardPreviewScenario {
+        guard let value = value(after: "--scenario", in: arguments),
+              let scenario = BoardPreviewScenario(rawValue: value)
+        else {
+            throw PreviewError.invalidScenario
+        }
+        return scenario
     }
 
     private static func value(after option: String, in arguments: [String]) -> String? {
@@ -84,12 +112,14 @@ enum ILOBoardPreviewCommand {
 private enum PreviewError: LocalizedError {
     case invalidCommand(String)
     case invalidPage
+    case invalidScenario
     case renderFailed
 
     var errorDescription: String? {
         switch self {
-        case let .invalidCommand(command): "Unknown command '\(command)'. Use preview, screenshot, or screenshots."
+        case let .invalidCommand(command): "Unknown command '\(command)'. Use preview, screenshot, screenshots, scenario-screenshot, or scenario-screenshots."
         case .invalidPage: "Pass --screen dashboard, codex, weather, or settings."
+        case .invalidScenario: "Pass --scenario offline, loading, stale, error, long-text, privacy, sleep, or reconnect."
         case .renderFailed: "The 1024×600 UI preview could not be rendered."
         }
     }
