@@ -1,4 +1,4 @@
-import BoardUIPrototype
+@testable import BoardUIPrototype
 import Testing
 
 @Test func boardPageOrderMatchesSwipeInformationArchitecture() {
@@ -15,6 +15,31 @@ import Testing
         .dashboard, .codex, .weather, .weather, .codex, .dashboard, .dashboard, .dashboard,
         .dashboard, .codex
     ])
+}
+
+@Test func pointerDragScrollLocksToDirectionAndClampsToFeedBounds() {
+    #expect(PointerDragScrollMath.axis(translationX: 2, translationY: -3) == .pending)
+    #expect(PointerDragScrollMath.axis(translationX: 8, translationY: -40) == .vertical)
+    #expect(PointerDragScrollMath.axis(translationX: 40, translationY: -8) == .horizontal)
+
+    #expect(PointerDragScrollMath.originY(
+        startOriginY: 0,
+        translationY: 80,
+        minimumY: 0,
+        maximumY: 120
+    ) == 80)
+    #expect(PointerDragScrollMath.originY(
+        startOriginY: 80,
+        translationY: 80,
+        minimumY: 0,
+        maximumY: 120
+    ) == 120)
+    #expect(PointerDragScrollMath.originY(
+        startOriginY: 40,
+        translationY: -80,
+        minimumY: 0,
+        maximumY: 120
+    ) == 0)
 }
 
 @Test func approvalRequiresHoldThenSeparateConfirmation() {

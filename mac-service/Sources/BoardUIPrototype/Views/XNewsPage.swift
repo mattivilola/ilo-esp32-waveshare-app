@@ -6,6 +6,8 @@ struct XNewsPage: View {
     @State private var pullDistance: CGFloat = 0
     @State private var refreshEligible = false
     @State private var scrollOffset: CGFloat = 0
+    @State private var scrollContentHeight: CGFloat = 0
+    @State private var scrollViewportHeight: CGFloat = 0
 
     init(interactive: Bool = true) {
         self.interactive = interactive
@@ -23,6 +25,7 @@ struct XNewsPage: View {
                         .foregroundStyle(BoardPalette.fog)
                 }
                 Spacer()
+                refreshIndicator
                 verificationChip("5 CITED STORIES", tint: BoardPalette.signal)
                 verificationChip("08:00", tint: BoardPalette.cyan)
             }
@@ -31,6 +34,8 @@ struct XNewsPage: View {
                 ZStack(alignment: .bottomTrailing) {
                     feedViewport
 
+                    scrollIndicator(viewportHeight: geometry.size.height)
+
                     Text("SWIPE UP · 2 MORE  ↓")
                         .font(.board(9, weight: .bold))
                         .tracking(0.55)
@@ -38,11 +43,13 @@ struct XNewsPage: View {
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
                         .background(BoardPalette.carbon.opacity(0.92), in: Capsule())
-                        .padding(.trailing, 4)
+                        .padding(.trailing, 16)
                         .padding(.bottom, 4)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .clipped()
+                .onAppear { scrollViewportHeight = geometry.size.height }
+                .onChange(of: geometry.size.height) { scrollViewportHeight = $0 }
             }
         }
         .padding(.vertical, 4)
@@ -56,15 +63,22 @@ struct XNewsPage: View {
                     .background {
                         GeometryReader { geometry in
                             Color.clear.preference(
-                                key: XNewsScrollOffsetKey.self,
-                                value: geometry.frame(in: .named("x-news-scroll-space")).minY
+                                key: XNewsScrollMetricsKey.self,
+                                value: XNewsScrollMetrics(
+                                    offset: geometry.frame(in: .named("x-news-scroll-space")).minY,
+                                    contentHeight: geometry.size.height
+                                )
                             )
                         }
                     }
+                    .background(PointerDragScrollBridge())
             }
             .accessibilityIdentifier("x-news-scroll")
             .coordinateSpace(name: "x-news-scroll-space")
-            .onPreferenceChange(XNewsScrollOffsetKey.self) { scrollOffset = $0 }
+            .onPreferenceChange(XNewsScrollMetricsKey.self) { metrics in
+                scrollOffset = metrics.offset
+                scrollContentHeight = metrics.contentHeight
+            }
             .simultaneousGesture(refreshGesture)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -83,6 +97,53 @@ struct XNewsPage: View {
         case .updated:
             "Updated now · timestamps and direct citations verified"
         }
+    }
+
+    @ViewBuilder
+    private var refreshIndicator: some View {
+        HStack(spacing: 6) {
+            switch refreshState {
+            case .fetching:
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(BoardPalette.signal)
+                Text("REFRESHING")
+            case .updated:
+                Image(systemName: "checkmark.circle.fill")
+                Text("UPDATED")
+            case .idle:
+                Image(systemName: pullDistance >= 72 ? "arrow.down.circle.fill" : "arrow.down.circle")
+                Text(pullDistance >= 72 ? "RELEASE" : "PULL TO REFRESH")
+            }
+        }
+        .font(.board(9, weight: .bold))
+        .tracking(0.5)
+        .foregroundStyle(refreshState == .updated ? BoardPalette.cyan : BoardPalette.signal)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(BoardPalette.signal.opacity(0.11), in: Capsule())
+    }
+
+    private func scrollIndicator(viewportHeight: CGFloat) -> some View {
+        let trackHeight = max(viewportHeight - 16, 1)
+        let maximumOffset = max(scrollContentHeight - scrollViewportHeight, 1)
+        let progress = min(max(-scrollOffset / maximumOffset, 0), 1)
+        let thumbHeight = max(38, trackHeight * min(scrollViewportHeight / max(scrollContentHeight, 1), 1))
+        let thumbTravel = max(trackHeight - thumbHeight, 0)
+
+        return Capsule()
+            .fill(BoardPalette.steel.opacity(0.48))
+            .frame(width: 5, height: trackHeight)
+            .overlay(alignment: .top) {
+                Capsule()
+                    .fill(BoardPalette.cyan)
+                    .frame(width: 5, height: thumbHeight)
+                    .offset(y: thumbTravel * progress)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            .padding(.trailing, 4)
+            .allowsHitTesting(false)
+            .opacity(scrollContentHeight > scrollViewportHeight + 1 ? 1 : 0)
     }
 
     private var refreshGesture: some Gesture {
@@ -255,10 +316,15 @@ private enum PreviewRefreshState {
     case updated
 }
 
-private struct XNewsScrollOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
+private struct XNewsScrollMetrics: Equatable {
+    let offset: CGFloat
+    let contentHeight: CGFloat
+}
 
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+private struct XNewsScrollMetricsKey: PreferenceKey {
+    static let defaultValue = XNewsScrollMetrics(offset: 0, contentHeight: 0)
+
+    static func reduce(value: inout XNewsScrollMetrics, nextValue: () -> XNewsScrollMetrics) {
         value = nextValue()
     }
 }
