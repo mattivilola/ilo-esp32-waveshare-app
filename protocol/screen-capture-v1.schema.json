@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iloapps.com/schemas/ilo-board/screen-capture-v1.schema.json",
+  "title": "ILO Board authenticated screen capture messages",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/begin" },
+    { "$ref": "#/$defs/chunk" },
+    { "$ref": "#/$defs/result" }
+  ],
+  "$defs": {
+    "requestID": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9-]{1,64}$"
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "format", "width", "height"],
+      "properties": {
+        "type": { "const": "screenCaptureRequest" },
+        "version": { "const": 1 },
+        "requestID": { "$ref": "#/$defs/requestID" },
+        "format": { "const": "rgb565le" },
+        "width": { "const": 1024 },
+        "height": { "const": 600 }
+      }
+    },
+    "begin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "format", "width", "height", "totalBytes", "chunkBytes", "chunkCount"],
+      "properties": {
+        "type": { "const": "screenCaptureBegin" },
+        "version": { "const": 1 },
+        "requestID": { "$ref": "#/$defs/requestID" },
+        "format": { "const": "rgb565le" },
+        "width": { "const": 1024 },
+        "height": { "const": 600 },
+        "totalBytes": { "const": 1228800 },
+        "chunkBytes": { "const": 12288 },
+        "chunkCount": { "const": 100 }
+      }
+    },
+    "chunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "sequence", "offset", "data"],
+      "properties": {
+        "type": { "const": "screenCaptureChunk" },
+        "version": { "const": 1 },
+        "requestID": { "$ref": "#/$defs/requestID" },
+        "sequence": { "type": "integer", "minimum": 0 },
+        "offset": { "type": "integer", "minimum": 0, "maximum": 1228799 },
+        "data": { "type": "string", "contentEncoding": "base64", "maxLength": 16384 }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "status"],
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "ok" } } },
+          "then": {
+            "required": ["totalBytes", "sha256"],
+            "properties": {
+              "errorCode": false,
+              "message": false
+            }
+          }
+        },
+        {
+          "if": { "properties": { "status": { "const": "error" } } },
+          "then": {
+            "required": ["errorCode", "message"],
+            "properties": {
+              "totalBytes": false,
+              "sha256": false
+            }
+          }
+        }
+      ],
+      "properties": {
+        "type": { "const": "screenCaptureResult" },
+        "version": { "const": 1 },
+        "requestID": { "$ref": "#/$defs/requestID" },
+        "status": { "enum": ["ok", "error"] },
+        "totalBytes": { "const": 1228800 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "errorCode": { "type": "string", "maxLength": 64 },
+        "message": { "type": "string", "maxLength": 160 }
+      }
+    }
+  }
+}

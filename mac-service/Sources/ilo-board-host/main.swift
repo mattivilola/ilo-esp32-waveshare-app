@@ -49,6 +49,49 @@ struct ILOBoardHostCommand {
             print(arguments.contains("--mock") ? "Serving sanitized mock task status." : "Serving sanitized Codex recent-task history.")
             print("Remote actions are disabled.")
             await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+        case "screenshot":
+            guard let outputPath = value(after: "--output", in: arguments) else {
+                throw ScreenCaptureCommandError.outputRequired
+            }
+            let timeout = try captureTimeout(value(after: "--timeout", in: arguments))
+            let outputURL = URL(fileURLWithPath: NSString(string: outputPath).expandingTildeInPath).standardizedFileURL
+            let force = arguments.contains("--force")
+            if !force && FileManager.default.fileExists(atPath: outputURL.path) {
+                throw ScreenCaptureCommandError.outputExists(outputURL.path)
+            }
+            guard FileManager.default.fileExists(atPath: outputURL.deletingLastPathComponent().path) else {
+                throw ScreenCaptureCommandError.outputDirectoryMissing(outputURL.deletingLastPathComponent().path)
+            }
+
+            let configuration = try HostConfiguration.load()
+            let secret = try KeychainPSKStore().load(boardID: configuration.boardID)
+            let (events, continuation) = AsyncStream.makeStream(
+                of: Result<CapturedScreen, ScreenCaptureError>.self,
+                bufferingPolicy: .bufferingNewest(1)
+            )
+            let server = BoardServer(
+                boardID: configuration.boardID,
+                secret: secret,
+                source: MockTaskSource(),
+                screenCaptureHandler: { result in
+                    continuation.yield(result)
+                    continuation.finish()
+                },
+                eventHandler: { event in
+                    if case let .listenerFailed(message) = event {
+                        continuation.yield(.failure(.hostUnavailable(message)))
+                        continuation.finish()
+                    }
+                }
+            )
+            try server.start(port: configuration.port)
+            print("Waiting up to \(timeout) seconds for the paired board. Stop ILOBoardMenu first if it owns the service port.")
+            defer { server.stop() }
+            let capture = try await waitForCapture(events: events, timeoutSeconds: timeout)
+            let png = try ScreenCapturePNGEncoder.encode(capture)
+            let options: Data.WritingOptions = force ? .atomic : [.atomic, .withoutOverwriting]
+            try png.write(to: outputURL, options: options)
+            print("Saved authenticated 1024x600 board capture: \(outputURL.path)")
         case "doctor":
             print("ILO Board Host")
             print("  protocol: v\(boardProtocolVersion), tasks.read only")
@@ -80,6 +123,34 @@ struct ILOBoardHostCommand {
         return Data(bytes)
     }
 
+    private static func captureTimeout(_ value: String?) throws -> Int {
+        guard let value else { return 45 }
+        guard let seconds = Int(value), (1...120).contains(seconds) else {
+            throw ScreenCaptureCommandError.invalidTimeout
+        }
+        return seconds
+    }
+
+    private static func waitForCapture(
+        events: AsyncStream<Result<CapturedScreen, ScreenCaptureError>>,
+        timeoutSeconds: Int
+    ) async throws -> CapturedScreen {
+        try await withThrowingTaskGroup(of: CapturedScreen.self) { group in
+            group.addTask {
+                var iterator = events.makeAsyncIterator()
+                guard let result = await iterator.next() else { throw ScreenCaptureError.connectionClosed }
+                return try result.get()
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeoutSeconds))
+                throw ScreenCaptureError.timedOut
+            }
+            guard let capture = try await group.next() else { throw ScreenCaptureError.connectionClosed }
+            group.cancelAll()
+            return capture
+        }
+    }
+
     private static func printUsage() {
         print("""
         Usage:
@@ -87,6 +158,23 @@ struct ILOBoardHostCommand {
           ilo-board-host snapshot [--mock]
           ilo-board-host pair --board-id ID --secret-stdin
           ilo-board-host serve [--mock] [--board-id ID] [--port PORT]
+          ilo-board-host screenshot --output FILE.png [--timeout SECONDS] [--force]
         """)
+    }
+}
+
+private enum ScreenCaptureCommandError: Error, LocalizedError {
+    case outputRequired
+    case outputExists(String)
+    case outputDirectoryMissing(String)
+    case invalidTimeout
+
+    var errorDescription: String? {
+        switch self {
+        case .outputRequired: "Screenshot output is required. Pass --output FILE.png."
+        case let .outputExists(path): "Refusing to overwrite existing file: \(path). Pass --force to replace it."
+        case let .outputDirectoryMissing(path): "Screenshot output directory does not exist: \(path)"
+        case .invalidTimeout: "Screenshot timeout must be an integer from 1 through 120 seconds."
+        }
     }
 }

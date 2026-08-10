@@ -4,7 +4,7 @@ This model covers the firmware built for the Waveshare ESP32-S3-Touch-LCD-5B (SK
 
 ## Phase-1 capability
 
-The only board capability is `tasks.read`. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, and short summary. Mutating requests fail closed.
+Board capabilities are read-only: `tasks.read` plus an explicitly requested diagnostic display capture. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, and short summary. Capture returns only the pixels already visible on the paired physical display. Mutating requests fail closed.
 
 ## Codex privacy boundary
 
@@ -16,11 +16,13 @@ A task reported as `notLoaded` is presented as recent history with live Desktop 
 
 ## Pairing and transport
 
-The pairing flow creates an opaque board ID and random 32-byte PSK while USB is physically connected. The host stores the PSK in the user Keychain; the board stores it in NVS. Bonjour advertises only protocol compatibility.
+The pairing flow creates an opaque board ID and random 32-byte PSK while USB is physically connected. The host stores the PSK in the user Keychain; the board stores it in NVS. Bonjour TXT advertises only protocol compatibility (`v=1`, `transport=tls-psk-tcp`), not the board ID or secret. The service instance contains only the final eight characters already used in its nonsecret display name; firmware uses it to avoid unrelated compatible hosts, then relies on TLS-PSK and the protocol hello for authoritative pairing identity. Failed or blocked discovery falls back to the provisioned endpoint without weakening authentication.
 
 `./tools/board provision` reads the Wi-Fi password without terminal echo and sends the key material to the host CLI through standard input, never through process arguments. Its NVS CSV and binary exist only in a permission-restricted temporary directory for the duration of the verified partition write. The persistent host metadata file contains only the nonsecret board ID, protocol version, and service port.
 
 TLS 1.2 PSK protects the local-network link. Phase 1 validates `TLS_PSK_WITH_AES_128_GCM_SHA256` interoperability before the protocol is expanded.
+
+Live framebuffer capture has no unauthenticated HTTP or discovery endpoint. The request is accepted only inside an established paired TLS session after the version-1 hello/subscription exchange. Firmware accepts a bounded request ID and exactly one format/size, copies the framebuffer into temporary PSRAM, sends fixed-size sequenced chunks, attaches a SHA-256 result, then frees the copy. The Mac rejects unsolicited, mismatched, duplicate, reordered, truncated, oversized, or corrupt capture data and refuses to overwrite an output path unless the operator passes `--force`.
 
 Direct weather is the only current board-originated Internet request. It sends configured latitude/longitude and ordinary HTTP metadata to `api.open-meteo.com`; it sends no board ID, pairing secret, Wi-Fi password, Codex data, or Mac data. The response is bounded to 8 KiB and HTTPS uses ESP-IDF's CA certificate bundle after SNTP clock synchronization. Weather is optional public-data access, not a general proxy or arbitrary URL feature.
 

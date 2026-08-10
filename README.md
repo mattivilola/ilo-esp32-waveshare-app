@@ -50,7 +50,7 @@ Hardware-independent development can continue without a board: the Swift service
 
 - The Mac and board must be able to reach each other on the same LAN.
 - Client/AP isolation must be disabled.
-- Bonjour discovery requires multicast DNS between clients; the provisioned Mac address remains a recovery fallback while discovery support is completed.
+- Bonjour discovery requires multicast DNS between clients. Firmware now looks for the paired Mac's `_iloboard._tcp` instance, accepts only protocol-v1 `tls-psk-tcp` TXT metadata, and otherwise retains the provisioned Mac address as a recovery fallback. This path is compile-verified and awaits a physical LAN/reconnect test.
 - Wi-Fi provisioning currently accepts WPA2/WPA3 Personal passwords of 8–63 UTF-8 bytes. Enterprise and open Wi-Fi are not supported yet.
 
 ## Quick start
@@ -79,7 +79,7 @@ make firmware-build
 ./tools/host menu
 ```
 
-`board provision` prompts for Wi-Fi details, Mac address, and weather location/coordinates; it hides the Wi-Fi password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. The hardware-verified bring-up slice records the Mac's local address and fixed service port `47472`; Bonjour address discovery is the next transport increment.
+`board provision` prompts for Wi-Fi details, a recovery Mac address, and weather location/coordinates; it hides the Wi-Fi password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. At runtime the board first discovers the paired host's compatible Bonjour service and uses its current address and advertised port. If multicast DNS is unavailable, incompatible, or does not return that host, it safely falls back to the provisioned address and port.
 
 `host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
 
@@ -111,6 +111,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Run the menu-bar app from source | `make mac-menu` | No; board status stays offline |
 | Run the headless Codex service | `make mac-run` or `./tools/host serve` | No; board status stays offline |
 | Run the service with sample tasks | `./tools/host serve --mock` | No |
+| Capture the live board framebuffer | `./tools/host screenshot --output board.png` | Yes, Wi-Fi |
 | Build universal `.app` | `make app` | No |
 | Build local DMG | `make package-dmg` | No |
 | Run every hardware-independent test | `make test` | No |
@@ -129,7 +130,14 @@ make ui-screenshots
 
 Generated files go to `artifacts/ui-previews/` by default. They use sample data and represent the intended layout. They do not prove RGB output, physical legibility, touch mapping, backlight behavior, or frame timing.
 
-There is not yet a live `board screenshot` framebuffer command in the flashed firmware. Until that transport exists, a photo is the only faithful capture of the actual panel.
+The updated firmware also supports an authenticated live framebuffer capture:
+
+```bash
+# Stop the menu companion first so the capture host can use its service port.
+./tools/host screenshot --output /tmp/ilo-board-live.png
+```
+
+The command waits up to 45 seconds for the paired board, requests exactly one 1024×600 RGB565-LE frame over the existing TLS-PSK connection, verifies 100 strictly ordered bounded chunks and the final SHA-256 digest, then writes a PNG atomically. It refuses to replace an existing file unless `--force` is explicit; `--timeout 1..120` changes the wait. There is no HTTP screenshot endpoint and an unpaired LAN client cannot request a capture. Firmware, protocol validation, worst-case frame sizing, RGB565 conversion, and PNG dimensions are hardware-independently verified. Actual panel color order, buffer freshness, tearing, capture latency, and peak PSRAM still require the physical board.
 
 ### Four-screen information architecture
 

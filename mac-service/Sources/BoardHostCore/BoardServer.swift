@@ -26,6 +26,7 @@ public final class BoardServer: @unchecked Sendable {
     private let secret: Data
     private let source: any TaskSource
     private let eventHandler: @Sendable (BoardServerEvent) -> Void
+    private let screenCaptureHandler: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let queue = DispatchQueue(label: "com.iloapps.iloboard.host.network")
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: BoardConnection] = [:]
@@ -39,6 +40,21 @@ public final class BoardServer: @unchecked Sendable {
         self.boardID = boardID
         self.secret = secret
         self.source = source
+        self.screenCaptureHandler = nil
+        self.eventHandler = eventHandler
+    }
+
+    public init(
+        boardID: String,
+        secret: Data,
+        source: any TaskSource,
+        screenCaptureHandler: @escaping @Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void,
+        eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
+    ) {
+        self.boardID = boardID
+        self.secret = secret
+        self.source = source
+        self.screenCaptureHandler = screenCaptureHandler
         self.eventHandler = eventHandler
     }
 
@@ -115,14 +131,18 @@ public final class BoardServer: @unchecked Sendable {
     }
 
     private func accept(_ connection: NWConnection) {
-        guard connections.count < 4 else {
+        let connectionLimit = screenCaptureHandler == nil ? 4 : 1
+        guard connections.count < connectionLimit else {
             connection.cancel()
             return
         }
+        let captureRequest = screenCaptureHandler.map { _ in ScreenCaptureRequest() }
         let client = BoardConnection(
             connection: connection,
             expectedBoardID: boardID,
             source: source,
+            captureRequest: captureRequest,
+            onScreenCapture: screenCaptureHandler,
             onReady: { [eventHandler] in eventHandler(.boardConnected) },
             onSnapshot: { [eventHandler] date in eventHandler(.snapshotSent(at: date)) },
             onClose: { [weak self, eventHandler] id in
@@ -139,6 +159,8 @@ private final class BoardConnection: @unchecked Sendable {
     private let connection: NWConnection
     private let expectedBoardID: String
     private let source: any TaskSource
+    private let captureRequest: ScreenCaptureRequest?
+    private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let onReady: @Sendable () -> Void
     private let onSnapshot: @Sendable (Date) -> Void
     private let onClose: @Sendable (ObjectIdentifier) -> Void
@@ -146,11 +168,15 @@ private final class BoardConnection: @unchecked Sendable {
     private var helloAccepted = false
     private var subscribed = false
     private var revision: UInt64 = 0
+    private var captureAssembler: ScreenCaptureAssembler?
+    private var captureFinished = false
 
     init(
         connection: NWConnection,
         expectedBoardID: String,
         source: any TaskSource,
+        captureRequest: ScreenCaptureRequest?,
+        onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
         onReady: @escaping @Sendable () -> Void,
         onSnapshot: @escaping @Sendable (Date) -> Void,
         onClose: @escaping @Sendable (ObjectIdentifier) -> Void
@@ -158,6 +184,9 @@ private final class BoardConnection: @unchecked Sendable {
         self.connection = connection
         self.expectedBoardID = expectedBoardID
         self.source = source
+        self.captureRequest = captureRequest
+        self.onScreenCapture = onScreenCapture
+        self.captureAssembler = captureRequest.map { ScreenCaptureAssembler(requestID: $0.requestID) }
         self.onReady = onReady
         self.onSnapshot = onSnapshot
         self.onClose = onClose
@@ -171,6 +200,7 @@ private final class BoardConnection: @unchecked Sendable {
                 self.onReady()
                 self.receive()
             case .failed, .cancelled:
+                self.finishCapture(.failure(.connectionClosed))
                 self.onClose(ObjectIdentifier(self))
             default:
                 break
@@ -207,12 +237,16 @@ private final class BoardConnection: @unchecked Sendable {
     }
 
     private func handle(_ payload: Data) {
-        guard let message = try? ProtocolJSON.decoder().decode(ClientMessage.self, from: payload) else {
+        guard let envelope = try? ProtocolJSON.decoder().decode(MessageEnvelope.self, from: payload) else {
             send(ErrorMessage(code: "invalidMessage", message: "Message is not valid protocol JSON."))
             return
         }
-        switch message.type {
+        switch envelope.type {
         case "hello":
+            guard let message = try? ProtocolJSON.decoder().decode(ClientMessage.self, from: payload) else {
+                send(ErrorMessage(code: "invalidMessage", message: "Hello is not valid protocol JSON."))
+                return
+            }
             guard message.protocolVersion == boardProtocolVersion else {
                 send(ErrorMessage(code: "unsupportedVersion", message: "Protocol version 1 is required."))
                 return
@@ -230,6 +264,20 @@ private final class BoardConnection: @unchecked Sendable {
                 return
             }
             beginSubscription()
+        case "screenCaptureBegin":
+            handleCaptureMessage(payload, as: ScreenCaptureBeginMessage.self) { assembler, message in
+                try assembler.begin(message)
+                return nil
+            }
+        case "screenCaptureChunk":
+            handleCaptureMessage(payload, as: ScreenCaptureChunkMessage.self) { assembler, message in
+                try assembler.append(message)
+                return nil
+            }
+        case "screenCaptureResult":
+            handleCaptureMessage(payload, as: ScreenCaptureResultMessage.self) { assembler, message in
+                try assembler.finish(message)
+            }
         default:
             send(ErrorMessage(code: "unsupportedCapability", message: "Protocol v1 supports task status reads only."))
         }
@@ -238,12 +286,50 @@ private final class BoardConnection: @unchecked Sendable {
     private func beginSubscription() {
         guard !subscribed else { return }
         subscribed = true
+        if let captureRequest {
+            send(captureRequest)
+            return
+        }
         Task { [weak self] in
             while let self, self.subscribed {
                 await self.sendSnapshot()
                 try? await Task.sleep(for: .seconds(5))
             }
         }
+    }
+
+    private func handleCaptureMessage<Message: Decodable>(
+        _ payload: Data,
+        as type: Message.Type,
+        operation: (inout ScreenCaptureAssembler, Message) throws -> CapturedScreen?
+    ) {
+        guard helloAccepted, subscribed, var assembler = captureAssembler,
+              let message = try? ProtocolJSON.decoder().decode(type, from: payload)
+        else {
+            send(ErrorMessage(code: "unexpectedCaptureData", message: "No authenticated screen capture is pending."))
+            connection.cancel()
+            return
+        }
+        do {
+            let capture = try operation(&assembler, message)
+            captureAssembler = assembler
+            if let capture {
+                finishCapture(.success(capture))
+            }
+        } catch let error as ScreenCaptureError {
+            finishCapture(.failure(error))
+            connection.cancel()
+        } catch {
+            finishCapture(.failure(.invalidMetadata))
+            connection.cancel()
+        }
+    }
+
+    private func finishCapture(_ result: Result<CapturedScreen, ScreenCaptureError>) {
+        guard !captureFinished, onScreenCapture != nil else { return }
+        captureFinished = true
+        captureAssembler = nil
+        onScreenCapture?(result)
     }
 
     private func sendSnapshot() async {

@@ -11,7 +11,9 @@ Phase-1 client flow:
 1. Board establishes TLS using its opaque board ID as PSK identity.
 2. Board sends `hello`.
 3. Host replies `helloAck` with `capabilities: ["tasks.read"]`.
-4. Board sends `subscribe`.
-5. Host sends complete `snapshot` frames and periodic `ping` frames.
+4. Board sends `subscribe` and advertises its read-only `display.capture.rgb565` capability in `hello`.
+5. Host sends complete `snapshot` frames.
+
+An explicit one-shot capture host may then send `screenCaptureRequest` version 1. The request fixes format `rgb565le` and dimensions 1024×600. The board replies with one `screenCaptureBegin`, exactly 100 ordered `screenCaptureChunk` frames of at most 12,288 decoded bytes, and one `screenCaptureResult` containing the full-byte count and lowercase SHA-256 digest. The chunk limit stays below the 65,536-byte frame ceiling even if a JSON encoder escapes every slash in worst-case Base64. An error result contains only a bounded code/message and no pixel data. See `screen-capture-v1.schema.json`.
 
 Mutating message types are unsupported in protocol version 1.
