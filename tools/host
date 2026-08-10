@@ -34,8 +34,18 @@ def menu(_: argparse.Namespace) -> None:
     run(["run", "ILOBoardMenu"])
 
 
-def serve(_: argparse.Namespace) -> None:
-    run(["run", "ilo-board-host", "serve", "--mock"])
+def snapshot(arguments: argparse.Namespace) -> None:
+    command = ["run", "ilo-board-host", "snapshot"]
+    if arguments.mock:
+        command.append("--mock")
+    run(command)
+
+
+def serve(arguments: argparse.Namespace) -> None:
+    command = ["run", "ilo-board-host", "serve"]
+    if arguments.mock:
+        command.append("--mock")
+    run(command)
 
 
 def doctor(_: argparse.Namespace) -> None:
@@ -49,10 +59,13 @@ def parser() -> argparse.ArgumentParser:
         ("build", "build the Swift package", build),
         ("test", "run all host tests", test),
         ("menu", "run the menu-bar companion", menu),
-        ("serve", "run the headless mock status service", serve),
+        ("snapshot", "print one sanitized Codex status snapshot", snapshot),
+        ("serve", "run the headless Codex status service", serve),
         ("doctor", "show host protocol capabilities", doctor),
     ):
         command = commands.add_parser(name, help=help_text)
+        if name in ("snapshot", "serve"):
+            command.add_argument("--mock", action="store_true", help="use deterministic sample tasks instead of Codex history")
         command.set_defaults(handler=handler)
     return result
 

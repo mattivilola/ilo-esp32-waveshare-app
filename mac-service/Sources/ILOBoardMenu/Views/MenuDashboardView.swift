@@ -81,6 +81,7 @@ struct MenuDashboardView: View {
             detailRow("Identity", value: shortBoardID)
             detailRow("Service", value: serviceDescription)
             detailRow("Last sync", value: lastSyncDescription)
+            detailRow("Source", value: "Codex recent history")
             detailRow("Security", value: "TLS 1.2 · Read only")
         }
     }

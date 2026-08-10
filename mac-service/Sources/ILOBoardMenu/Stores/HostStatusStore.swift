@@ -26,7 +26,7 @@ final class HostStatusStore: ObservableObject {
             let server = BoardServer(
                 boardID: configuration.boardID,
                 secret: secret,
-                source: MockTaskSource()
+                source: CodexHistoryTaskSource()
             ) { [weak self] event in
                 Task { @MainActor in self?.handle(event) }
             }

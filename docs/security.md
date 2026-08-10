@@ -6,6 +6,14 @@ This model covers the firmware built for the Waveshare ESP32-S3-Touch-LCD-5B (SK
 
 The only board capability is `tasks.read`. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, and short summary. Mutating requests fail closed.
 
+## Codex privacy boundary
+
+The host obtains recent task metadata through a one-shot local Codex App Server `thread/list` request. Its decoder accepts only `id`, optional `name`, `updatedAt`, and `status`. Prompt previews, full turns, working-directory paths, task source metadata, Git information, file contents, environment variables, and credentials are neither decoded nor placed in the board protocol.
+
+Results are capped at six tasks and cached for 15 seconds. A child App Server is closed after each refresh; the companion never reads or writes Codex SQLite databases, session logs, or internal state files directly.
+
+A task reported as `notLoaded` is presented as recent history with live Desktop status unavailable. It is not presented as active, waiting for approval, or waiting for an answer. This prevents the separate companion process from overstating what it can observe.
+
 ## Pairing and transport
 
 The pairing flow creates an opaque board ID and random 32-byte PSK while USB is physically connected. The host stores the PSK in the user Keychain; the board stores it in NVS. Bonjour advertises only protocol compatibility.

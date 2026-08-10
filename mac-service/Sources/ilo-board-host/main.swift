@@ -28,7 +28,14 @@ struct ILOBoardHostCommand {
             try KeychainPSKStore().save(secret: secret, boardID: boardID)
             print("Pairing stored securely in the macOS Keychain for board \(boardID).")
         case "snapshot":
-            let snapshot = try await MockTaskSource().snapshot(revision: 1)
+            let source: any TaskSource = arguments.contains("--mock") ? MockTaskSource() : CodexHistoryTaskSource()
+            let raw = try await source.snapshot(revision: 1)
+            let snapshot = DashboardSnapshot(
+                revision: raw.revision,
+                generatedAt: raw.generatedAt,
+                hostState: raw.hostState,
+                tasks: raw.tasks.map(TaskSanitizer.sanitize)
+            )
             let data = try ProtocolJSON.encoder().encode(snapshot)
             print(String(decoding: data, as: UTF8.self))
         case "serve":
@@ -36,9 +43,10 @@ struct ILOBoardHostCommand {
             let boardID = value(after: "--board-id", in: arguments) ?? configuration.boardID
             let port = UInt16(value(after: "--port", in: arguments) ?? "") ?? configuration.port
             let secret = try KeychainPSKStore().load(boardID: boardID)
-            let server = BoardServer(boardID: boardID, secret: secret, source: MockTaskSource())
+            let source: any TaskSource = arguments.contains("--mock") ? MockTaskSource() : CodexHistoryTaskSource()
+            let server = BoardServer(boardID: boardID, secret: secret, source: source)
             try server.start(port: port)
-            print("Serving sanitized mock task status for board \(boardID).")
+            print(arguments.contains("--mock") ? "Serving sanitized mock task status." : "Serving sanitized Codex recent-task history.")
             print("Remote actions are disabled.")
             await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
         case "doctor":
@@ -46,7 +54,8 @@ struct ILOBoardHostCommand {
             print("  protocol: v\(boardProtocolVersion), tasks.read only")
             print("  service: _iloboard._tcp")
             print("  transport: TLS 1.2 PSK")
-            print("  Codex adapter: disabled (mock source)")
+            print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")
+            print("  Desktop task status: recent history only unless owned by this App Server")
         default:
             printUsage()
         }
@@ -75,9 +84,9 @@ struct ILOBoardHostCommand {
         print("""
         Usage:
           ilo-board-host doctor
-          ilo-board-host snapshot
+          ilo-board-host snapshot [--mock]
           ilo-board-host pair --board-id ID --secret-stdin
-          ilo-board-host serve --mock [--board-id ID] [--port PORT]
+          ilo-board-host serve [--mock] [--board-id ID] [--port PORT]
         """)
     }
 }

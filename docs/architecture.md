@@ -10,11 +10,11 @@ Waveshare ESP32-S3-Touch-LCD-5B (SKU 28151, 1024x600)
 macOS user service
   board protocol + pairing
   sanitized TaskSource interface
-  mock source (Phase 1)
+  Codex recent-history source (default)
+  deterministic mock source (tests/demos)
   SwiftUI MenuBarExtra status dashboard
   SwiftUI 1024x600 device UI prototype + PNG renderer
-  service-owned Codex adapter (later)
-        │ stdio / local Unix socket only
+        │ one-shot JSONL/stdio
         ▼
 Codex app-server
 ```
@@ -23,8 +23,10 @@ Codex app-server
 
 - The ESP32 never receives OpenAI credentials, Mac login credentials, full transcripts, shell access, filesystem paths, or environment variables.
 - `BoardProtocol` contains transport-neutral status models.
-- `TaskSource` isolates Codex from the board-facing service. The initial source is deterministic mock data.
-- A future Codex source may observe only threads owned by its own documented `codex app-server` connection. It must not label unrelated desktop chats as live.
+- `TaskSource` isolates Codex from the board-facing service. `CodexHistoryTaskSource` is the default; deterministic mock data remains an explicit test/demo mode.
+- The Codex source starts a local App Server only for a bounded `thread/list` request, caches the result for 15 seconds, then closes the child process. It uses the supported protocol instead of scraping Codex databases or session files.
+- The separately launched server can list recent Desktop-created tasks, but those tasks report `notLoaded`; the mapper labels them as recent history and never as live. Only tasks loaded by that App Server may expose authoritative active/waiting state.
+- The narrow decoder admits only thread ID, name, update time, and status. Board payloads exclude prompt preview, working directory, turns, source metadata, Git data, and file contents.
 - Board-specific LCD, touch, backlight, and IO-expander behavior for the 1024×600 5B stays behind `board_waveshare_5`.
 - UI components consume a view model and do not perform networking.
 - `BoardUIPrototype` mirrors the intended device information architecture for visual iteration and screenshots; LVGL remains the shipping device UI and physical hardware remains the final verification target.
