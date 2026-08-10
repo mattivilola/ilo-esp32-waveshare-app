@@ -50,6 +50,17 @@ enum HostServiceState: Equatable {
         }
     }
 
+    var diagnosticTitle: String {
+        switch self {
+        case .notProvisioned: "Setup required"
+        case .starting: "Starting"
+        case .listening: "Ready; waiting for board"
+        case .connected: "Board connected"
+        case .stopped: "Stopped"
+        case .failed: "Needs attention"
+        }
+    }
+
     var tint: Color {
         switch self {
         case .connected: .green

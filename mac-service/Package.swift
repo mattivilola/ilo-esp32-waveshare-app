@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "BoardProtocol", targets: ["BoardProtocol"]),
         .library(name: "BoardHostCore", targets: ["BoardHostCore"]),
         .library(name: "BoardUIPrototype", targets: ["BoardUIPrototype"]),
+        .library(name: "ILOBoardMenuSupport", targets: ["ILOBoardMenuSupport"]),
         .executable(name: "ilo-board-host", targets: ["ilo-board-host"]),
         .executable(name: "ilo-board-preview", targets: ["ilo-board-preview"]),
         .executable(name: "ILOBoardMenu", targets: ["ILOBoardMenu"]),
@@ -16,9 +17,15 @@ let package = Package(
         .target(name: "BoardProtocol"),
         .target(name: "BoardUIPrototype"),
         .target(
+            name: "ILOBoardMenuSupport",
+            linkerSettings: [.linkedFramework("ServiceManagement")]
+        ),
+        .target(
             name: "BoardHostCore",
             dependencies: ["BoardProtocol"],
             linkerSettings: [
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("ImageIO"),
                 .linkedFramework("Network"),
                 .linkedFramework("Security"),
             ]
@@ -33,11 +40,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "ILOBoardMenu",
-            dependencies: ["BoardProtocol", "BoardHostCore"],
+            dependencies: ["BoardProtocol", "BoardHostCore", "ILOBoardMenuSupport"],
             exclude: ["Resources"]
         ),
         .testTarget(name: "BoardProtocolTests", dependencies: ["BoardProtocol"]),
         .testTarget(name: "BoardHostCoreTests", dependencies: ["BoardHostCore", "BoardProtocol"]),
         .testTarget(name: "BoardUIPrototypeTests", dependencies: ["BoardUIPrototype"]),
+        .testTarget(name: "ILOBoardMenuSupportTests", dependencies: ["ILOBoardMenuSupport"]),
     ]
 )

@@ -1,19 +1,26 @@
 import AppKit
+import ILOBoardMenuSupport
 import SwiftUI
 
 struct MenuDashboardView: View {
     @ObservedObject var store: HostStatusStore
+    @ObservedObject var launchAtLogin: LaunchAtLoginController
+    @State private var diagnosticNotice: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             header
             statusCard
             details
+            companionControls
+            recentActivity
             Divider()
+            diagnosticActions
             actions
         }
         .padding(18)
         .frame(width: 360)
+        .onAppear { launchAtLogin.refresh() }
     }
 
     private var header: some View {
@@ -86,6 +93,91 @@ struct MenuDashboardView: View {
         }
     }
 
+    private var companionControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Launch at login", systemImage: "power.circle")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(launchAtLogin.state.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack(spacing: 8) {
+                switch launchAtLogin.state {
+                case .disabled:
+                    Button("Enable") { launchAtLogin.enable() }
+                case .enabled:
+                    Button("Disable") { launchAtLogin.disable() }
+                case .requiresApproval:
+                    Button("Review Login Items") { launchAtLogin.openSystemSettings() }
+                    Button("Remove") { launchAtLogin.disable() }
+                case .unavailable:
+                    Text("Move the signed app to Applications to enable this.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            if let notice = launchAtLogin.notice {
+                Text(notice)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private var recentActivity: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Recent activity")
+                .font(.caption.weight(.semibold))
+            if store.connectionHistory.isEmpty {
+                Text("No connection events yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(store.connectionHistory.prefix(3)) { entry in
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(activityTint(entry.kind))
+                            .frame(width: 6, height: 6)
+                        Text(entry.kind.title)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(entry.date.formatted(.relative(presentation: .named)))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.caption2)
+                }
+            }
+        }
+    }
+
+    private var diagnosticActions: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button("Copy Diagnostics") {
+                    DiagnosticExporter.copy(diagnosticSummary)
+                    diagnosticNotice = "Privacy-safe diagnostics copied"
+                }
+                Button("Save…") {
+                    DiagnosticExporter.save(diagnosticSummary) { saved in
+                        diagnosticNotice = saved ? "Diagnostics saved" : nil
+                    }
+                }
+                Spacer()
+            }
+            if let diagnosticNotice {
+                Text(diagnosticNotice)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func detailRow(_ title: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title)
@@ -116,6 +208,19 @@ struct MenuDashboardView: View {
                 Image(systemName: "power")
             }
             .help("Quit ILO Board")
+        }
+    }
+
+    private var diagnosticSummary: String {
+        store.diagnosticSummary(launchAtLogin: launchAtLogin.state)
+    }
+
+    private func activityTint(_ kind: ConnectionHistoryEntry.Kind) -> Color {
+        switch kind {
+        case .boardConnected: .green
+        case .serviceIssue: .red
+        case .waitingForBoard, .serviceStarting: .orange
+        case .boardDisconnected, .serviceStopped, .setupRequired: .secondary
         }
     }
 
