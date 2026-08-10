@@ -30,6 +30,8 @@ IDF = ROOT / "tools" / "idf"
 EXPECTED_FLASH_BYTES = 0x1000000
 NVS_PARTITION = ROOT / "firmware" / "partitions.csv"
 NVS_GENERATOR = ROOT / ".tools" / "esp-idf" / "components" / "nvs_flash" / "nvs_partition_generator" / "nvs_partition_gen.py"
+ESPSECURE = ROOT / ".tools" / "esp-idf" / "components" / "esptool_py" / "esptool" / "espsecure.py"
+ESPTOOL_PY = ROOT / ".tools" / "esp-idf" / "components" / "esptool_py" / "esptool" / "esptool.py"
 IDF_PYTHON_ROOT = ROOT / ".tools" / "espressif" / "python_env"
 HOST_PACKAGE = ROOT / "mac-service"
 HOST_CONFIG = Path.home() / "Library" / "Application Support" / "ILO Board Host" / "board.json"
@@ -95,6 +97,11 @@ def doctor(_: argparse.Namespace) -> None:
     print(f"  Swift: {shutil.which('swift') or 'not found'}")
     print(f"  CMake: {shutil.which('cmake') or 'not found'}")
     print(f"  Ninja: {shutil.which('ninja') or 'not found'}")
+    try:
+        layout = validate_ota_layout(NVS_PARTITION)
+        print(f"  OTA layout: rollback-safe ({layout['slot_size']} bytes per slot)")
+    except SystemExit as error:
+        print(f"  OTA layout: invalid ({error})")
 
 
 def chip_id(args: argparse.Namespace) -> None:
@@ -117,6 +124,149 @@ def backup(args: argparse.Namespace) -> None:
 
 def build(_: argparse.Namespace) -> None:
     run([str(IDF), "idf.py", "-D", "IDF_TARGET=esp32s3", "build"], cwd=FIRMWARE)
+
+
+def read_sdkconfig(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        raise SystemExit(f"SDK configuration does not exist: {path}")
+    values: dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"')
+    return values
+
+
+def validate_ota_layout(path: Path) -> dict[str, int]:
+    if not path.is_file():
+        raise SystemExit(f"Partition table does not exist: {path}")
+    partitions: list[dict[str, int | str]] = []
+    with path.open(newline="") as source:
+        for row in csv.reader(line for line in source if line.strip() and not line.lstrip().startswith("#")):
+            if len(row) < 5:
+                raise SystemExit("Partition table contains an incomplete row.")
+            name, kind, subtype, offset, size = (field.strip() for field in row[:5])
+            try:
+                parsed_offset = int(offset, 0)
+                parsed_size = int(size, 0)
+            except ValueError as error:
+                raise SystemExit(f"Partition {name} must have explicit numeric offset and size.") from error
+            partitions.append({
+                "name": name,
+                "type": kind,
+                "subtype": subtype,
+                "offset": parsed_offset,
+                "size": parsed_size,
+            })
+
+    if any(item["type"] == "app" and item["subtype"] in ("factory", "test") for item in partitions):
+        raise SystemExit("Rollback policy forbids factory and test app partitions.")
+    slots = [item for item in partitions if item["type"] == "app" and item["subtype"] in ("ota_0", "ota_1")]
+    if len(slots) != 2 or {item["subtype"] for item in slots} != {"ota_0", "ota_1"}:
+        raise SystemExit("Partition table must contain exactly ota_0 and ota_1 application slots.")
+    if slots[0]["size"] != slots[1]["size"]:
+        raise SystemExit("ota_0 and ota_1 must have identical sizes.")
+    if any(int(item["offset"]) % 0x10000 != 0 for item in slots):
+        raise SystemExit("OTA application offsets must be aligned to 64 KiB.")
+    ota_data = [item for item in partitions if item["type"] == "data" and item["subtype"] == "ota"]
+    if len(ota_data) != 1 or int(ota_data[0]["size"]) < 0x2000:
+        raise SystemExit("Partition table must contain one otadata partition of at least 0x2000 bytes.")
+    ordered = sorted(partitions, key=lambda item: int(item["offset"]))
+    for previous, current in zip(ordered, ordered[1:]):
+        if int(previous["offset"]) + int(previous["size"]) > int(current["offset"]):
+            raise SystemExit(f"Partitions {previous['name']} and {current['name']} overlap.")
+    flash_end = max(int(item["offset"]) + int(item["size"]) for item in partitions)
+    if flash_end > EXPECTED_FLASH_BYTES:
+        raise SystemExit("Partition table exceeds the board's 16 MB flash.")
+    return {
+        "slot_size": int(slots[0]["size"]),
+        "ota_0_offset": int(next(item["offset"] for item in slots if item["subtype"] == "ota_0")),
+        "ota_1_offset": int(next(item["offset"] for item in slots if item["subtype"] == "ota_1")),
+    }
+
+
+def ota_release_policy_errors(config: dict[str, str]) -> list[str]:
+    errors: list[str] = []
+    if config.get("CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE") != "y":
+        errors.append("bootloader rollback is not enabled")
+    secure_boot = config.get("CONFIG_SECURE_BOOT") == "y"
+    signed_without_secure_boot = config.get("CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT") == "y"
+    if not secure_boot and not signed_without_secure_boot:
+        errors.append("signed application verification is not enabled")
+    if not secure_boot and config.get("CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT") != "y":
+        errors.append("signature verification on OTA update is not enabled")
+    if not secure_boot and config.get("CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME") != "y":
+        errors.append("ESP32-S3 release profile must use RSA secure-boot-v2 signatures")
+    return errors
+
+
+def ota_status(args: argparse.Namespace) -> None:
+    layout = validate_ota_layout(NVS_PARTITION)
+    sdkconfig = Path(args.sdkconfig).expanduser().resolve() if args.sdkconfig else FIRMWARE / "sdkconfig"
+    if not sdkconfig.is_file():
+        sdkconfig = FIRMWARE / "sdkconfig.defaults"
+    config = read_sdkconfig(sdkconfig)
+    errors = ota_release_policy_errors(config)
+    print("ILO Board OTA status (read-only)")
+    print(f"  slots: ota_0 + ota_1, {layout['slot_size']} bytes each")
+    print(f"  rollback: {'enabled' if config.get('CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE') == 'y' else 'disabled in selected sdkconfig'}")
+    print(f"  signed update policy: {'ready' if not errors else 'BLOCKED'}")
+    print("  update ingress: disabled (no upload/install command is implemented)")
+    print("  production secure boot/eFuse provisioning: not performed")
+    for error in errors:
+        print(f"  gate: {error}")
+
+
+def public_verification_key(path: Path) -> None:
+    if not path.is_file():
+        raise SystemExit(f"Public verification key does not exist: {path}")
+    payload = path.read_bytes()
+    if b"PRIVATE KEY" in payload:
+        raise SystemExit("Refusing a private key. Pass an RSA public verification key only.")
+    if b"BEGIN PUBLIC KEY" not in payload and b"BEGIN RSA PUBLIC KEY" not in payload:
+        raise SystemExit("Verification key must be a PEM public key.")
+
+
+def ota_verify(args: argparse.Namespace) -> None:
+    image = Path(args.image).expanduser().resolve()
+    public_key = Path(args.public_key).expanduser().resolve()
+    sdkconfig = Path(args.sdkconfig).expanduser().resolve()
+    if not image.is_file() or image.stat().st_size == 0:
+        raise SystemExit("OTA image must be a non-empty existing file.")
+    layout = validate_ota_layout(NVS_PARTITION)
+    if image.stat().st_size > layout["slot_size"]:
+        raise SystemExit("OTA image is larger than an application slot.")
+    errors = ota_release_policy_errors(read_sdkconfig(sdkconfig))
+    if errors:
+        raise SystemExit("Release SDK configuration is unsafe: " + "; ".join(errors))
+    public_verification_key(public_key)
+    if not ESPSECURE.is_file() or not ESPTOOL_PY.is_file():
+        raise SystemExit("Pinned ESP-IDF verification tools are missing. Run `./tools/setup-idf`.")
+    python = idf_python()
+    image_check = subprocess.run(
+        [str(python), str(ESPTOOL_PY), "image_info", "--version", "2", str(image)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if image_check.returncode != 0:
+        raise SystemExit("Artifact is not a valid ESP application image.")
+    signature_check = subprocess.run(
+        [str(python), str(ESPSECURE), "verify_signature", "--version", "2", "--keyfile", str(public_key), str(image)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if signature_check.returncode != 0:
+        raise SystemExit("RSA signature verification failed; artifact is blocked.")
+    digest = hashlib.sha256(image.read_bytes()).hexdigest()
+    print("OTA release artifact verified (no upload performed)")
+    print(f"  bytes: {image.stat().st_size}")
+    print(f"  SHA-256: {digest}")
+    print("  signature: valid RSA secure-boot-v2 signature")
+    print("  next gate: physical rollback/recovery validation before enabling delivery")
 
 
 def swift_preview(*arguments: str) -> None:
@@ -348,6 +498,14 @@ def parser() -> argparse.ArgumentParser:
     screenshot_parser.add_argument("--output", help="output PNG path, or output directory with --all")
     screenshot_parser.set_defaults(handler=ui_screenshot)
     sub.add_parser("build", help="configure and build firmware").set_defaults(handler=build)
+    ota_status_parser = sub.add_parser("ota-status", help="inspect dual-slot and signing gates without hardware")
+    ota_status_parser.add_argument("--sdkconfig", help="sdkconfig to inspect; defaults to the current firmware build")
+    ota_status_parser.set_defaults(handler=ota_status)
+    ota_verify_parser = sub.add_parser("ota-verify", help="verify a signed release artifact without uploading it")
+    ota_verify_parser.add_argument("--image", required=True, help="signed ESP32-S3 application binary")
+    ota_verify_parser.add_argument("--public-key", required=True, help="RSA public verification key PEM; private keys are refused")
+    ota_verify_parser.add_argument("--sdkconfig", required=True, help="sdkconfig used to build the release artifact")
+    ota_verify_parser.set_defaults(handler=ota_verify)
     erase_parser = sub.add_parser("erase", help="erase the entire board (explicit confirmation required)")
     erase_parser.add_argument("--port")
     erase_parser.add_argument("--confirm")

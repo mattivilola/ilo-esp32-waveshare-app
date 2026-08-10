@@ -40,7 +40,7 @@ Codex app-server
 
 ## Why ESP-IDF
 
-Native ESP-IDF gives one supported CLI for Wi-Fi, NVS, TLS, diagnostics, serial monitoring, partitioning, and later signed OTA with rollback. The firmware pins the Waveshare-tested ESP-IDF 5.5.2 and component versions rather than inheriting a moving Arduino or PlatformIO bundle.
+Native ESP-IDF gives one supported CLI for Wi-Fi, NVS, TLS, diagnostics, serial monitoring, partitioning, and signed OTA foundations. Equal `ota_0`/`ota_1` slots and first-boot rollback validation are compiled; update ingress remains disabled until signed artifact, key-custody, hosting, and physical recovery gates pass. The firmware pins the Waveshare-tested ESP-IDF 5.5.2 and component versions rather than inheriting a moving Arduino or PlatformIO bundle.
 
 The hardware layer is intentionally pinned to Waveshare SKU 28151. The similarly named SKU 28117 uses an 800×480 panel with different timing and is outside this build profile.
 

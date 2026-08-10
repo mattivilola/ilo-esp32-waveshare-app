@@ -99,6 +99,8 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Compile firmware | `make firmware-build` | No |
 | Flash firmware | `make firmware-flash` | Yes, USB |
 | Open serial monitor | `make firmware-monitor` | Yes, USB |
+| Inspect OTA safety gates | `make ota-status` | No |
+| Verify a signed OTA artifact | `./tools/board ota-verify --image IMAGE --public-key PUBLIC.pem --sdkconfig SDKCONFIG` | No |
 | Open interactive 1024×600 UI preview | `make ui-preview` | No |
 | Export all five simulator screenshots | `make ui-screenshots` | No |
 | Export one simulator screenshot | `./tools/board ui-screenshot --screen codex` | No |
@@ -122,6 +124,12 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Test host/release tooling and compile firmware | `make verify` | No |
 
 `./tools/board --help` and `./tools/host --help` are the authoritative detailed command lists.
+
+### OTA foundation
+
+The partition table already reserves equal 4 MiB `ota_0` and `ota_1` slots. Rollback is enabled for clean builds, and a newly installed image stays `PENDING_VERIFY` until board/UI initialization succeeds and a 30-second runtime/heap health window passes. A crash, reset, failed health check, or failure to persist the valid state keeps the image unconfirmed and selects the previous valid slot when recovery is available.
+
+There is deliberately no OTA upload or install command yet. `make ota-status` is read-only and reports the current layout, rollback, and signing gates. Production artifacts must use the separate signed-update profile and pass `ota-verify`; that command accepts only a public RSA key, validates the ESP image and release sdkconfig, verifies the Secure Boot v2 signature, and prints its SHA-256 without uploading anything. Private signing keys must remain outside this repository. See [the OTA policy](docs/ota.md) for the release flow and remaining hardware gates.
 
 ### Screenshots
 

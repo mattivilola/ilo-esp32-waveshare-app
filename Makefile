@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test verify
+.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ota-status ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test verify
 
 help:
 	@printf "ILO Board commands\n\n"
@@ -10,6 +10,7 @@ help:
 	@printf "  make firmware-build      Compile firmware without hardware\n"
 	@printf "  make firmware-flash      Flash a connected Waveshare 5B\n"
 	@printf "  make firmware-monitor    Open the board serial monitor\n"
+	@printf "  make ota-status          Inspect OTA safety gates without hardware\n"
 	@printf "  make ui-preview          Open the desktop 1024x600 device UI preview\n"
 	@printf "  make ui-screenshots      Export PNG previews for all five device screens\n"
 	@printf "  make mac-build           Build the Swift package\n"
@@ -43,6 +44,9 @@ firmware-flash:
 
 firmware-monitor:
 	./tools/board monitor
+
+ota-status:
+	./tools/board ota-status
 
 ui-preview:
 	./tools/board ui-preview

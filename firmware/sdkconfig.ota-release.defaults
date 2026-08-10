@@ -1,0 +1,12 @@
+# Release-only overlay for remotely installable firmware.
+#
+# This profile intentionally emits an unsigned binary for signing by an
+# external/offline RSA-3072 key. Never add a production private key to this
+# repository. The signed artifact must pass `./tools/board ota-verify` before
+# any future delivery step is allowed.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+# CONFIG_SECURE_BOOT is not set
+# CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES is not set

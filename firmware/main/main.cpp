@@ -5,6 +5,7 @@
 #include "dashboard_model.h"
 #include "dashboard_ui.h"
 #include "mac_transport.h"
+#include "ota_policy.h"
 #include "weather_client.h"
 
 static const char *TAG = "ilo_board";
@@ -19,9 +20,12 @@ extern "C" void app_main()
         ESP_ERROR_CHECK(nvs_status);
     }
 
+    ESP_ERROR_CHECK(ota_policy_begin());
+
     ESP_LOGI(TAG, "Starting ILO Board protocol v1 (read-only)");
     ESP_ERROR_CHECK(board_waveshare_5_init());
     ESP_ERROR_CHECK(dashboard_ui_init(board_waveshare_5_lcd()));
+    ESP_ERROR_CHECK(ota_policy_confirm_after_stability());
 
     dashboard_model_t initial = dashboard_model_demo();
     dashboard_ui_set_model(&initial);
