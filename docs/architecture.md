@@ -35,7 +35,7 @@ Codex app-server
 - The shared 512×512 PNG is transformed deterministically into macOS `.icns` and a 48×48 LVGL ARGB descriptor by `make assets`; generated firmware bytes contain no runtime PNG decoder dependency.
 - `BoardHostCore` owns TLS, Keychain access, task sanitization, and connection events; the menu-bar executable only presents that state and lifecycle controls.
 - Live screenshots reuse the authenticated framed connection. A one-shot host sends a versioned capture request only after hello/subscription, firmware copies one full LVGL RGB565 buffer into temporary PSRAM, and returns bounded base64 chunks plus SHA-256. The host validates metadata, exact sequence/offset/length, and checksum before converting to PNG; neither side exposes an HTTP listener.
-- Optional X News is a Mac-side adapter, not direct ESP32 Internet access. An explicitly enabled scheduler runs headless `grok -p`, validates direct X citations and their ID-derived timestamps, caches only the bounded accepted feed, and adds that cache to the existing read-only snapshot. The fifth LVGL page never executes Grok or holds X credentials.
+- Optional X News is a Mac-side adapter, not direct ESP32 Internet access. An explicitly enabled scheduler or authenticated pull-to-refresh request runs headless `grok -p`, validates direct X citations and their ID-derived timestamps, caches only the bounded accepted feed, and adds that cache to the status snapshot. The fifth LVGL page never executes Grok or holds X credentials; its request cannot enable consent or bypass cooldown/validation.
 - The macOS companion is intentionally menu-bar-only during development and uses accessory activation, so it does not add a Dock icon.
 
 ## Why ESP-IDF

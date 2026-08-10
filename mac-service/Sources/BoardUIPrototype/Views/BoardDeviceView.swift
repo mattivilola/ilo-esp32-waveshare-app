@@ -51,7 +51,7 @@ public struct BoardDeviceView: View {
         }
         .frame(width: 1024, height: 600)
         .contentShape(Rectangle())
-        .gesture(swipeGesture)
+        .simultaneousGesture(swipeGesture)
         .animation(interactive ? .easeOut(duration: 0.18) : nil, value: visiblePage)
         .transaction { transaction in
             if !interactive { transaction.disablesAnimations = true }
@@ -102,7 +102,7 @@ public struct BoardDeviceView: View {
             switch visiblePage {
             case .dashboard: DashboardPage()
             case .codex: CodexPage()
-            case .xNews: XNewsPage()
+            case .xNews: XNewsPage(interactive: interactive)
             case .weather: WeatherPage()
             case .settings: SettingsPage()
             }

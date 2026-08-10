@@ -10,8 +10,8 @@ Phase-1 client flow:
 
 1. Board establishes TLS using its opaque board ID as PSK identity.
 2. Board sends `hello`.
-3. Host replies `helloAck` with its transport capabilities. Dashboard snapshots support `tasks.read` and `macPower.read`, and add `xNews.read` only when a verified cache is present.
-4. Board sends `subscribe` and advertises its read-only `display.capture.rgb565` capability in `hello`.
+3. Host replies `helloAck` with `tasks.read`, `macPower.read`, and the gated `xNews.refresh.request` capability. Dashboard snapshots add `xNews.read` only when a verified cache is present.
+4. Board sends `subscribe` and advertises `tasks.read`, diagnostic `display.capture.rgb565`, and gated `xNews.refresh.request` support in `hello`.
 5. Host sends complete `snapshot` frames.
 
 An explicit one-shot capture host may then send `screenCaptureRequest` version 1. The request fixes format `rgb565le` and dimensions 1024×600. The board replies with one `screenCaptureBegin`, exactly 100 ordered `screenCaptureChunk` frames of at most 12,288 decoded bytes, and one `screenCaptureResult` containing the full-byte count and lowercase SHA-256 digest. The chunk limit stays below the 65,536-byte frame ceiling even if a JSON encoder escapes every slash in worst-case Base64. An error result contains only a bounded code/message and no pixel data. See `screen-capture-v1.schema.json`.
@@ -19,3 +19,5 @@ An explicit one-shot capture host may then send `screenCaptureRequest` version 1
 The optional `newsFeed` snapshot field carries at most five bounded AI/robotics stories and three direct X citations per story. It contains no Grok prompt, reasoning, session, usage, authentication, or tool output beyond the locally validated story contract. Mutating message types are unsupported in protocol version 1.
 
 The optional `macPower` field carries only a clamped battery percentage and one coarse state: `battery`, `charging`, `powerAdapter`, or `full`. It intentionally excludes the Mac name, battery serial, hardware identifiers, capacity/health history, power-adapter details, and time-remaining estimates. Missing or invalid power data is treated as unavailable, so desktop Macs and older hosts remain compatible.
+
+An authenticated board may send `xNewsRefreshRequest` after hello/subscription when the user pulls down at the top of X News. The host replies with bounded `xNewsRefreshStatus` states: `fetching`, `updated`, `disabled`, `cooldown`, `busy`, or `failed`. This never bypasses Mac-side Grok opt-in, the 15-minute cost cooldown, one-in-flight limit, direct-X/timestamp validation, or cache preservation. See `x-news-refresh-v1.schema.json`.

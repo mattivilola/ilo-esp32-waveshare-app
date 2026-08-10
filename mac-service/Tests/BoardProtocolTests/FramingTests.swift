@@ -33,3 +33,21 @@ import Testing
     #expect(encodedPower["levelPercent"] as? Int == 100)
     #expect(encodedPower["state"] as? String == "charging")
 }
+
+@Test func xNewsRefreshMessagesStayBoundedAndExplicit() throws {
+    let request = XNewsRefreshRequest(requestID: "board-1234")
+    let requestData = try ProtocolJSON.encoder().encode(request)
+    let requestObject = try #require(JSONSerialization.jsonObject(with: requestData) as? [String: String])
+    #expect(requestObject == ["type": "xNewsRefreshRequest", "requestID": "board-1234"])
+
+    let status = XNewsRefreshStatusMessage(
+        requestID: "board-1234",
+        status: .cooldown,
+        message: "Refresh available after the 15 minute cooldown"
+    )
+    let decoded = try ProtocolJSON.decoder().decode(
+        XNewsRefreshStatusMessage.self,
+        from: ProtocolJSON.encoder().encode(status)
+    )
+    #expect(decoded == status)
+}

@@ -26,6 +26,7 @@ public final class BoardServer: @unchecked Sendable {
     private let secret: Data
     private let source: any TaskSource
     private let powerStatusSource: any MacPowerStatusProviding
+    private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
     private let eventHandler: @Sendable (BoardServerEvent) -> Void
     private let screenCaptureHandler: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let queue = DispatchQueue(label: "com.iloapps.iloboard.host.network")
@@ -37,12 +38,14 @@ public final class BoardServer: @unchecked Sendable {
         secret: Data,
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
+        xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
     ) {
         self.boardID = boardID
         self.secret = secret
         self.source = source
         self.powerStatusSource = powerStatusSource
+        self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.screenCaptureHandler = nil
         self.eventHandler = eventHandler
     }
@@ -52,6 +55,7 @@ public final class BoardServer: @unchecked Sendable {
         secret: Data,
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
+        xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
         screenCaptureHandler: @escaping @Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void,
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
     ) {
@@ -59,6 +63,7 @@ public final class BoardServer: @unchecked Sendable {
         self.secret = secret
         self.source = source
         self.powerStatusSource = powerStatusSource
+        self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.screenCaptureHandler = screenCaptureHandler
         self.eventHandler = eventHandler
     }
@@ -147,6 +152,7 @@ public final class BoardServer: @unchecked Sendable {
             expectedBoardID: boardID,
             source: source,
             powerStatusSource: powerStatusSource,
+            xNewsRefreshCoordinator: xNewsRefreshCoordinator,
             captureRequest: captureRequest,
             onScreenCapture: screenCaptureHandler,
             onReady: { [eventHandler] in eventHandler(.boardConnected) },
@@ -166,6 +172,7 @@ private final class BoardConnection: @unchecked Sendable {
     private let expectedBoardID: String
     private let source: any TaskSource
     private let powerStatusSource: any MacPowerStatusProviding
+    private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
     private let captureRequest: ScreenCaptureRequest?
     private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let onReady: @Sendable () -> Void
@@ -183,6 +190,7 @@ private final class BoardConnection: @unchecked Sendable {
         expectedBoardID: String,
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding,
+        xNewsRefreshCoordinator: XNewsRefreshCoordinator,
         captureRequest: ScreenCaptureRequest?,
         onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
         onReady: @escaping @Sendable () -> Void,
@@ -193,6 +201,7 @@ private final class BoardConnection: @unchecked Sendable {
         self.expectedBoardID = expectedBoardID
         self.source = source
         self.powerStatusSource = powerStatusSource
+        self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.captureRequest = captureRequest
         self.onScreenCapture = onScreenCapture
         self.captureAssembler = captureRequest.map { ScreenCaptureAssembler(requestID: $0.requestID) }
@@ -287,8 +296,48 @@ private final class BoardConnection: @unchecked Sendable {
             handleCaptureMessage(payload, as: ScreenCaptureResultMessage.self) { assembler, message in
                 try assembler.finish(message)
             }
+        case "xNewsRefreshRequest":
+            handleXNewsRefreshRequest(payload)
         default:
-            send(ErrorMessage(code: "unsupportedCapability", message: "Protocol v1 supports task status reads only."))
+            send(ErrorMessage(code: "unsupportedCapability", message: "Protocol v1 does not support this capability."))
+        }
+    }
+
+    private func handleXNewsRefreshRequest(_ payload: Data) {
+        guard helloAccepted, subscribed,
+              let request = try? ProtocolJSON.decoder().decode(XNewsRefreshRequest.self, from: payload),
+              request.type == "xNewsRefreshRequest",
+              Self.validRequestID(request.requestID)
+        else {
+            send(ErrorMessage(code: "invalidXNewsRefresh", message: "A subscribed session and bounded request ID are required."))
+            return
+        }
+        send(XNewsRefreshStatusMessage(
+            requestID: request.requestID,
+            status: .fetching,
+            message: "Fetching latest AI news"
+        ))
+        Task { [weak self, xNewsRefreshCoordinator] in
+            let outcome = await xNewsRefreshCoordinator.requestManualRefresh()
+            guard let self else { return }
+            let response: (XNewsRefreshStatus, String) = switch outcome {
+            case .updated: (.updated, "Latest verified stories are ready")
+            case .disabled: (.disabled, "Enable X News on the Mac first")
+            case .cooldown: (.cooldown, "Refresh available after the 15 minute cooldown")
+            case .busy: (.busy, "A news refresh is already running")
+            case .failed: (.failed, "No verified update was accepted")
+            }
+            self.send(XNewsRefreshStatusMessage(
+                requestID: request.requestID,
+                status: response.0,
+                message: response.1
+            ))
+        }
+    }
+
+    private static func validRequestID(_ value: String) -> Bool {
+        !value.isEmpty && value.count <= 64 && value.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-")
         }
     }
 

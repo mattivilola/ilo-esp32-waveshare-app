@@ -9,6 +9,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_random.h"
 #include "esp_tls.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -52,6 +53,9 @@ static const char *TAG = "mac_transport";
 static EventGroupHandle_t wifi_events;
 static mac_transport_model_callback_t model_callback;
 static bool mdns_available;
+static portMUX_TYPE refresh_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool transport_online;
+static bool x_news_refresh_requested;
 
 typedef struct {
     char address[HOST_ADDRESS_MAX];
@@ -291,6 +295,53 @@ static bool send_json(esp_tls_t *tls, cJSON *json)
         && tls_write_all(tls, (const uint8_t *)payload, size);
     free(payload);
     return ok;
+}
+
+static bool take_x_news_refresh_request(void)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool requested = x_news_refresh_requested;
+    x_news_refresh_requested = false;
+    portEXIT_CRITICAL(&refresh_lock);
+    return requested;
+}
+
+static bool send_x_news_refresh_request(esp_tls_t *tls)
+{
+    char request_id[25];
+    snprintf(
+        request_id,
+        sizeof(request_id),
+        "board-%08lx-%08lx",
+        (unsigned long)esp_random(),
+        (unsigned long)esp_random()
+    );
+    cJSON *request = cJSON_CreateObject();
+    if (request == NULL) return false;
+    cJSON_AddStringToObject(request, "type", "xNewsRefreshRequest");
+    cJSON_AddStringToObject(request, "requestID", request_id);
+    bool ok = send_json(tls, request);
+    cJSON_Delete(request);
+    return ok;
+}
+
+static void handle_x_news_refresh_status(cJSON *message)
+{
+    cJSON *status = cJSON_GetObjectItemCaseSensitive(message, "status");
+    if (!cJSON_IsString(status)) return;
+    dashboard_x_news_refresh_state_t state = DASHBOARD_X_NEWS_REFRESH_FAILED;
+    if (strcmp(status->valuestring, "fetching") == 0) {
+        state = DASHBOARD_X_NEWS_REFRESH_FETCHING;
+    } else if (strcmp(status->valuestring, "updated") == 0) {
+        state = DASHBOARD_X_NEWS_REFRESH_UPDATED;
+    } else if (strcmp(status->valuestring, "disabled") == 0) {
+        state = DASHBOARD_X_NEWS_REFRESH_DISABLED;
+    } else if (strcmp(status->valuestring, "cooldown") == 0) {
+        state = DASHBOARD_X_NEWS_REFRESH_COOLDOWN;
+    } else if (strcmp(status->valuestring, "busy") == 0) {
+        state = DASHBOARD_X_NEWS_REFRESH_BUSY;
+    }
+    dashboard_ui_set_x_news_refresh_state(state);
 }
 
 static bool valid_request_id(const char *value)
@@ -644,6 +695,7 @@ static void transport_task(void *argument)
             if (capabilities != NULL) {
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.read"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("display.capture.rgb565"));
+                cJSON_AddItemToArray(capabilities, cJSON_CreateString("xNews.refresh.request"));
             }
             bool ok = send_json(tls, hello);
             cJSON_Delete(hello);
@@ -659,6 +711,9 @@ static void transport_task(void *argument)
             }
             if (ok) {
                 dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_ONLINE);
+                portENTER_CRITICAL(&refresh_lock);
+                transport_online = true;
+                portEXIT_CRITICAL(&refresh_lock);
                 for (;;) {
                     cJSON *message = read_json(tls);
                     if (message == NULL) break;
@@ -670,18 +725,38 @@ static void transport_task(void *argument)
                         if (!capture_ok) break;
                         continue;
                     }
+                    if (cJSON_IsString(message_type)
+                        && strcmp(message_type->valuestring, "xNewsRefreshStatus") == 0) {
+                        handle_x_news_refresh_status(message);
+                        cJSON_Delete(message);
+                        continue;
+                    }
                     dashboard_model_t model;
                     if (parse_snapshot(message, &model) && model_callback != NULL) {
                         model_callback(&model);
                     }
                     cJSON_Delete(message);
+                    if (take_x_news_refresh_request() && !send_x_news_refresh_request(tls)) break;
                 }
             }
         }
+        portENTER_CRITICAL(&refresh_lock);
+        transport_online = false;
+        x_news_refresh_requested = false;
+        portEXIT_CRITICAL(&refresh_lock);
         dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
         esp_tls_conn_destroy(tls);
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
+}
+
+bool mac_transport_request_x_news_refresh(void)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool accepted = transport_online && !x_news_refresh_requested;
+    if (accepted) x_news_refresh_requested = true;
+    portEXIT_CRITICAL(&refresh_lock);
+    return accepted;
 }
 
 bool mac_transport_start(mac_transport_model_callback_t callback)

@@ -13,6 +13,7 @@ typedef void (*mac_transport_model_callback_t)(const dashboard_model_t *model);
 
 bool mac_transport_start(mac_transport_model_callback_t callback);
 bool mac_transport_wait_for_network(uint32_t timeout_ms);
+bool mac_transport_request_x_news_refresh(void);
 
 #ifdef __cplusplus
 }

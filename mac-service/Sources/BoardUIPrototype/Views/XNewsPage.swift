@@ -1,22 +1,123 @@
 import SwiftUI
 
 struct XNewsPage: View {
+    let interactive: Bool
+    @State private var refreshState = PreviewRefreshState.idle
+    @State private var pullDistance: CGFloat = 0
+    @State private var refreshEligible = false
+    @State private var scrollOffset: CGFloat = 0
+
+    init(interactive: Bool = true) {
+        self.interactive = interactive
+    }
+
     var body: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 10) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("AI + humanoid robotics")
                         .font(.board(20, weight: .semibold))
                         .foregroundStyle(BoardPalette.mist)
-                    Text("Rolling 24 hours · refreshed by the Mac companion")
+                    Text(refreshSubtitle)
                         .font(.board(11))
                         .foregroundStyle(BoardPalette.fog)
                 }
                 Spacer()
-                verificationChip("3 CITED STORIES", tint: BoardPalette.signal)
+                verificationChip("5 CITED STORIES", tint: BoardPalette.signal)
                 verificationChip("08:00", tint: BoardPalette.cyan)
             }
 
+            GeometryReader { geometry in
+                ZStack(alignment: .bottomTrailing) {
+                    feedViewport
+
+                    Text("SWIPE UP · 2 MORE  ↓")
+                        .font(.board(9, weight: .bold))
+                        .tracking(0.55)
+                        .foregroundStyle(BoardPalette.cyan)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(BoardPalette.carbon.opacity(0.92), in: Capsule())
+                        .padding(.trailing, 4)
+                        .padding(.bottom, 4)
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                .clipped()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var feedViewport: some View {
+        if interactive {
+            ScrollView(.vertical, showsIndicators: false) {
+                feedContent
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.preference(
+                                key: XNewsScrollOffsetKey.self,
+                                value: geometry.frame(in: .named("x-news-scroll-space")).minY
+                            )
+                        }
+                    }
+            }
+            .accessibilityIdentifier("x-news-scroll")
+            .coordinateSpace(name: "x-news-scroll-space")
+            .onPreferenceChange(XNewsScrollOffsetKey.self) { scrollOffset = $0 }
+            .simultaneousGesture(refreshGesture)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            feedContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .clipped()
+        }
+    }
+
+    private var refreshSubtitle: String {
+        switch refreshState {
+        case .idle:
+            pullDistance >= 72 ? "Release to fetch the latest verified stories" : "Rolling 24 hours · pull down to refresh"
+        case .fetching:
+            "Fetching latest AI + robotics news via the Mac…"
+        case .updated:
+            "Updated now · timestamps and direct citations verified"
+        }
+    }
+
+    private var refreshGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard interactive, refreshState != .fetching else { return }
+                if pullDistance == 0 {
+                    refreshEligible = scrollOffset >= -2
+                }
+                guard refreshEligible,
+                      value.translation.height > 0,
+                      abs(value.translation.height) > abs(value.translation.width)
+                else {
+                    return
+                }
+                pullDistance = min(value.translation.height, 96)
+            }
+            .onEnded { _ in
+                defer {
+                    pullDistance = 0
+                    refreshEligible = false
+                }
+                guard interactive, refreshState == .idle, pullDistance >= 72 else { return }
+                refreshState = .fetching
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1.2))
+                    refreshState = .updated
+                    try? await Task.sleep(for: .seconds(1.4))
+                    refreshState = .idle
+                }
+            }
+    }
+
+    private var feedContent: some View {
+        VStack(spacing: 12) {
             HStack(spacing: 14) {
                 featuredStory
                     .frame(width: 430)
@@ -35,22 +136,43 @@ struct XNewsPage: View {
                     )
                 }
             }
+            .frame(height: 326)
 
-            HStack(spacing: 8) {
-                StatusDot(color: BoardPalette.signal)
-                Text("DIRECT X POSTS · TIMESTAMPS CHECKED LOCALLY")
-                    .font(.board(10, weight: .bold))
-                    .tracking(0.65)
-                    .foregroundStyle(BoardPalette.fog)
-                Spacer()
-                Text("SAMPLE CONTRACT · GROK VIA MAC")
-                    .font(.board(10, weight: .bold))
-                    .tracking(0.65)
-                    .foregroundStyle(BoardPalette.amber)
+            verificationFooter
+
+            HStack(spacing: 14) {
+                compactStory(
+                    category: "ROBOTICS",
+                    title: "Dexterous gripper study reports repeatable manipulation gains",
+                    source: "@robotics_lab · 4 hr",
+                    tint: BoardPalette.cyan
+                )
+                compactStory(
+                    category: "AI",
+                    title: "Efficient vision stack reaches a new edge-device milestone",
+                    source: "@edge_ai · 6 hr",
+                    tint: BoardPalette.signal
+                )
             }
-            .padding(.horizontal, 4)
+            .frame(height: 148)
+            .padding(.bottom, 24)
         }
-        .padding(.vertical, 4)
+    }
+
+    private var verificationFooter: some View {
+        HStack(spacing: 8) {
+            StatusDot(color: BoardPalette.signal)
+            Text("DIRECT X POSTS · TIMESTAMPS CHECKED LOCALLY")
+                .font(.board(10, weight: .bold))
+                .tracking(0.65)
+                .foregroundStyle(BoardPalette.fog)
+            Spacer()
+            Text("SAMPLE CONTRACT · GROK VIA MAC")
+                .font(.board(10, weight: .bold))
+                .tracking(0.65)
+                .foregroundStyle(BoardPalette.amber)
+        }
+        .padding(.horizontal, 4)
     }
 
     private var featuredStory: some View {
@@ -124,5 +246,19 @@ struct XNewsPage: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(tint.opacity(0.11), in: Capsule())
+    }
+}
+
+private enum PreviewRefreshState {
+    case idle
+    case fetching
+    case updated
+}
+
+private struct XNewsScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

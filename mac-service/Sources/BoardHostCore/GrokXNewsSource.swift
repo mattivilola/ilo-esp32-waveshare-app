@@ -369,7 +369,30 @@ public enum GrokXNewsParser {
         }
 
         var seenURLs = Set<String>()
-        let stories = try raw.topics.map { topic -> XNewsStory in
+        var stories = [XNewsStory]()
+        var firstTopicError: Error?
+        for topic in raw.topics {
+            do {
+                let story = try validate(topic, since: since, until: until, now: now, seenURLs: &seenURLs)
+                stories.append(story)
+            } catch {
+                firstTopicError = firstTopicError ?? error
+            }
+        }
+        guard (GrokXNewsContract.minimumStories...GrokXNewsContract.maximumStories).contains(stories.count) else {
+            if let firstTopicError { throw firstTopicError }
+            throw GrokXNewsError.invalidFeed("expected at least 2 fully verified stories")
+        }
+        return XNewsFeed(generatedAt: generatedAt, stories: stories)
+    }
+
+    private static func validate(
+        _ topic: RawTopic,
+        since: Date,
+        until: Date,
+        now: Date,
+        seenURLs: inout Set<String>
+    ) throws -> XNewsStory {
             let title = try bounded(topic.headline, field: "headline", maximum: 70)
             let summary = try bounded(topic.summary, field: "summary", maximum: 220)
             guard let category = XNewsCategory(rawValue: topic.category) else {
@@ -387,6 +410,7 @@ public enum GrokXNewsParser {
             guard (1...3).contains(topic.sources.count) else {
                 throw GrokXNewsError.invalidFeed("every story needs 1 to 3 sources")
             }
+            var topicURLs = Set<String>()
             let citations = try topic.sources.map { source -> XNewsCitation in
                 guard let parsed = directStatusURL(source.postURL) else {
                     throw GrokXNewsError.invalidFeed("every post_url must be a direct x.com status URL")
@@ -403,20 +427,15 @@ public enum GrokXNewsParser {
                 guard abs(parsed.postedAt.timeIntervalSince(claimedPostedAt)) <= 10 * 60 else {
                     throw GrokXNewsError.invalidFeed("posted_at does not agree with the X status ID")
                 }
-                guard seenURLs.insert(parsed.url.absoluteString).inserted else {
+                guard !seenURLs.contains(parsed.url.absoluteString),
+                      topicURLs.insert(parsed.url.absoluteString).inserted
+                else {
                     throw GrokXNewsError.invalidFeed("duplicate X status URL")
                 }
                 return XNewsCitation(handle: expectedHandle, postedAt: parsed.postedAt, xURL: parsed.url)
             }
-            return XNewsStory(
-                title: title,
-                summary: summary,
-                category: category,
-                confidence: confidence,
-                sources: citations
-            )
-        }
-        return XNewsFeed(generatedAt: generatedAt, stories: stories)
+            seenURLs.formUnion(topicURLs)
+            return XNewsStory(title: title, summary: summary, category: category, confidence: confidence, sources: citations)
     }
 
     private static func bounded(_ value: String, field: String, maximum: Int) throws -> String {
@@ -658,6 +677,35 @@ public actor XNewsRefreshCoordinator {
         }
     }
 
+    public func requestManualRefresh(now: Date = Date()) async -> XNewsManualRefreshOutcome {
+        guard !refreshInFlight else { return .busy }
+        let settings = settingsStore.load()
+        guard settings.consentVersion == 1, settings.cadence != .off else { return .disabled }
+        let policy = XNewsRefreshPolicy(cadence: settings.cadence)
+        guard policy.allowsManualRefresh(lastAttempt: settings.lastAttemptAt, now: now) else { return .cooldown }
+        do {
+            try settingsStore.save(XNewsRefreshSettings(
+                cadence: settings.cadence,
+                consentVersion: settings.consentVersion,
+                lastAttemptAt: now
+            ))
+        } catch {
+            return .failed
+        }
+
+        refreshInFlight = true
+        defer { refreshInFlight = false }
+        let source = GrokXNewsSource(cache: cache)
+        do {
+            _ = try await Task.detached(priority: .utility) {
+                try source.refresh(explicitlyAllowsGrokTools: true, now: now)
+            }.value
+            return .updated
+        } catch {
+            return .failed
+        }
+    }
+
     public func considerRefresh(now: Date = Date(), calendar: Calendar = .current) {
         guard !refreshInFlight else { return }
         let settings = settingsStore.load()
@@ -688,6 +736,14 @@ public actor XNewsRefreshCoordinator {
     private func refreshFinished() {
         refreshInFlight = false
     }
+}
+
+public enum XNewsManualRefreshOutcome: String, Equatable, Sendable {
+    case updated
+    case disabled
+    case cooldown
+    case busy
+    case failed
 }
 
 private enum JSONDocumentScanner {

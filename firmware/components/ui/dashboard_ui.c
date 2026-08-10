@@ -26,7 +26,7 @@
 #define PAGE_COUNT 5
 #define DASHBOARD_VISIBLE_TASKS 3
 #define CODEX_VISIBLE_TASKS 3
-#define X_NEWS_VISIBLE_STORIES 3
+#define X_NEWS_VISIBLE_STORIES DASHBOARD_MAX_NEWS
 #define MINUTE_MS 60000U
 
 static lv_obj_t *connection_label;
@@ -43,11 +43,16 @@ static lv_obj_t *codex_titles[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_summaries[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_dots[CODEX_VISIBLE_TASKS];
 static lv_obj_t *x_news_status_label;
+static lv_obj_t *x_news_scroll;
+static lv_obj_t *x_news_scroll_hint;
 static lv_obj_t *x_news_empty_card;
 static lv_obj_t *x_news_rows[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_titles[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_summaries[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_meta[X_NEWS_VISIBLE_STORIES];
+static dashboard_x_news_refresh_callback_t x_news_refresh_callback;
+static int32_t x_news_pull_distance;
+static bool x_news_refresh_in_flight;
 static lv_obj_t *page_eyebrow_label;
 static lv_obj_t *page_title_label;
 static lv_obj_t *tileview;
@@ -88,6 +93,7 @@ static weather_model_t latest_weather_model;
 static bool latest_weather_valid;
 
 static void render_weather(const weather_model_t *model);
+static void x_news_scroll_event(lv_event_t *event);
 
 static const char *page_eyebrows[PAGE_COUNT] = {
     "ILO / WORK PULSE", "ILO / CODEX", "ILO / X NEWS", "ILO / WEATHER", "ILO / SETTINGS"
@@ -341,6 +347,57 @@ static void build_weather_page(lv_obj_t *page)
     lv_obj_align(weather_day_labels[2], LV_ALIGN_LEFT_MID, 18, 0);
 }
 
+static void show_model_x_news_status(void)
+{
+    if (x_news_status_label == NULL || !latest_model_valid) return;
+    if (latest_model.news_count > 0) {
+        char status[40];
+        snprintf(status, sizeof(status), "%u VERIFIED STORIES", (unsigned int)latest_model.news_count);
+        lv_label_set_text(x_news_status_label, status);
+        lv_obj_set_style_text_color(x_news_status_label, COLOR_SIGNAL, 0);
+        if (x_news_empty_card != NULL) lv_obj_add_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_label_set_text(x_news_status_label, "WAITING FOR VERIFIED MAC FEED");
+        lv_obj_set_style_text_color(x_news_status_label, COLOR_AMBER, 0);
+        if (x_news_empty_card != NULL) lv_obj_remove_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void x_news_scroll_event(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    lv_obj_t *scroll = lv_event_get_current_target(event);
+    if (code == LV_EVENT_SCROLL && !x_news_refresh_in_flight) {
+        int32_t y = lv_obj_get_scroll_y(scroll);
+        if (y < 0) {
+            int32_t distance = -y;
+            if (distance > x_news_pull_distance) x_news_pull_distance = distance;
+            lv_label_set_text(
+                x_news_status_label,
+                x_news_pull_distance >= 72 ? "RELEASE TO FETCH LATEST NEWS" : "PULL DOWN TO REFRESH"
+            );
+            lv_obj_set_style_text_color(x_news_status_label, COLOR_CYAN, 0);
+        }
+        return;
+    }
+    if (code != LV_EVENT_SCROLL_END || x_news_refresh_in_flight) return;
+
+    bool should_refresh = x_news_pull_distance >= 72;
+    x_news_pull_distance = 0;
+    if (!should_refresh) {
+        show_model_x_news_status();
+        return;
+    }
+    if (x_news_refresh_callback != NULL && x_news_refresh_callback()) {
+        x_news_refresh_in_flight = true;
+        lv_label_set_text(x_news_status_label, "FETCHING LATEST AI NEWS...");
+        lv_obj_set_style_text_color(x_news_status_label, COLOR_SIGNAL, 0);
+    } else {
+        lv_label_set_text(x_news_status_label, "MAC OFFLINE - REFRESH NOT SENT");
+        lv_obj_set_style_text_color(x_news_status_label, COLOR_AMBER, 0);
+    }
+}
+
 static void build_x_news_page(lv_obj_t *page)
 {
     lv_obj_t *title = create_label(page, "AI + humanoid robotics", &lv_font_montserrat_20, COLOR_MIST);
@@ -348,8 +405,17 @@ static void build_x_news_page(lv_obj_t *page)
     x_news_status_label = create_label(page, "WAITING FOR VERIFIED MAC FEED", &lv_font_montserrat_14, COLOR_AMBER);
     lv_obj_align(x_news_status_label, LV_ALIGN_TOP_RIGHT, -22, 12);
 
+    x_news_scroll = lv_obj_create(page);
+    set_clean_box(x_news_scroll, COLOR_CARBON, 0);
+    lv_obj_set_size(x_news_scroll, 998, 354);
+    lv_obj_set_pos(x_news_scroll, 10, 46);
+    lv_obj_set_scroll_dir(x_news_scroll, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(x_news_scroll, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_add_flag(x_news_scroll, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+    lv_obj_add_event_cb(x_news_scroll, x_news_scroll_event, LV_EVENT_ALL, NULL);
+
     for (int i = 0; i < X_NEWS_VISIBLE_STORIES; ++i) {
-        x_news_rows[i] = create_card(page, 22, 50 + (i * 112), 974, 102, 14);
+        x_news_rows[i] = create_card(x_news_scroll, 12, 4 + (i * 112), 964, 102, 14);
         lv_obj_add_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
         x_news_titles[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_MIST);
         lv_obj_set_width(x_news_titles[i], 700);
@@ -366,7 +432,7 @@ static void build_x_news_page(lv_obj_t *page)
         lv_obj_set_style_text_align(x_news_meta[i], LV_TEXT_ALIGN_RIGHT, 0);
     }
 
-    x_news_empty_card = create_card(page, 22, 50, 974, 326, 16);
+    x_news_empty_card = create_card(x_news_scroll, 12, 4, 964, 326, 16);
     lv_obj_t *empty_title = create_label(x_news_empty_card, "No verified stories cached", &lv_font_montserrat_28, COLOR_MIST);
     lv_obj_align(empty_title, LV_ALIGN_CENTER, 0, -42);
     lv_obj_t *empty_help = create_label(
@@ -378,6 +444,10 @@ static void build_x_news_page(lv_obj_t *page)
     lv_obj_set_style_text_align(empty_help, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_line_space(empty_help, 8, 0);
     lv_obj_align(empty_help, LV_ALIGN_CENTER, 0, 24);
+
+    x_news_scroll_hint = create_label(page, "SWIPE UP FOR MORE", &lv_font_montserrat_14, COLOR_CYAN);
+    lv_obj_align(x_news_scroll_hint, LV_ALIGN_BOTTOM_RIGHT, -28, -4);
+    lv_obj_add_flag(x_news_scroll_hint, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void format_minutes(char *buffer, size_t size, uint16_t minutes)
@@ -773,7 +843,8 @@ static void build_ui(void)
     tiles[0] = lv_tileview_add_tile(tileview, 0, 0, LV_DIR_RIGHT);
     tiles[1] = lv_tileview_add_tile(tileview, 1, 0, (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT));
     tiles[2] = lv_tileview_add_tile(tileview, 2, 0, (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT));
-    tiles[3] = lv_tileview_add_tile(tileview, 3, 0, LV_DIR_LEFT);
+    tiles[3] = lv_tileview_add_tile(tileview, 3, 0, (lv_dir_t)(LV_DIR_LEFT | LV_DIR_RIGHT));
+    tiles[4] = lv_tileview_add_tile(tileview, 4, 0, LV_DIR_LEFT);
     for (int i = 0; i < PAGE_COUNT; ++i) {
         set_clean_box(tiles[i], COLOR_CARBON, 0);
         lv_obj_set_scrollbar_mode(tiles[i], LV_SCROLLBAR_MODE_OFF);
@@ -1029,17 +1100,14 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         }
         lv_obj_set_style_bg_color(codex_dots[i], dot, 0);
     }
-    if (x_news_status_label != NULL) {
-        if (model->news_count > 0) {
-            char status[40];
-            snprintf(status, sizeof(status), "%u VERIFIED STORIES", (unsigned int)model->news_count);
-            lv_label_set_text(x_news_status_label, status);
-            lv_obj_set_style_text_color(x_news_status_label, COLOR_SIGNAL, 0);
-            if (x_news_empty_card != NULL) lv_obj_add_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+    if (!x_news_refresh_in_flight && x_news_pull_distance == 0) {
+        show_model_x_news_status();
+    }
+    if (x_news_scroll_hint != NULL) {
+        if (model->news_count > 3) {
+            lv_obj_remove_flag(x_news_scroll_hint, LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_label_set_text(x_news_status_label, "WAITING FOR VERIFIED MAC FEED");
-            lv_obj_set_style_text_color(x_news_status_label, COLOR_AMBER, 0);
-            if (x_news_empty_card != NULL) lv_obj_remove_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(x_news_scroll_hint, LV_OBJ_FLAG_HIDDEN);
         }
     }
     for (int i = 0; i < X_NEWS_VISIBLE_STORIES; ++i) {
@@ -1090,6 +1158,46 @@ void dashboard_ui_set_connection_state(dashboard_connection_state_t state)
     if (screensaver_status_dot != NULL) {
         lv_obj_set_style_bg_color(screensaver_status_dot, color, 0);
     }
+    lvgl_port_unlock();
+}
+
+void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_t callback)
+{
+    x_news_refresh_callback = callback;
+}
+
+void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t state)
+{
+    if (x_news_status_label == NULL) return;
+    const char *text = "NO VERIFIED UPDATE ACCEPTED";
+    lv_color_t color = COLOR_AMBER;
+    switch (state) {
+    case DASHBOARD_X_NEWS_REFRESH_FETCHING:
+        text = "FETCHING LATEST AI NEWS...";
+        color = COLOR_SIGNAL;
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_UPDATED:
+        text = "LATEST VERIFIED STORIES READY";
+        color = COLOR_SIGNAL;
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_DISABLED:
+        text = "ENABLE X NEWS ON THE MAC FIRST";
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_COOLDOWN:
+        text = "REFRESH COOLDOWN - TRY LATER";
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_BUSY:
+        text = "NEWS REFRESH ALREADY RUNNING";
+        color = COLOR_CYAN;
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_FAILED:
+    default:
+        break;
+    }
+    lvgl_port_lock(0);
+    x_news_refresh_in_flight = state == DASHBOARD_X_NEWS_REFRESH_FETCHING;
+    lv_label_set_text(x_news_status_label, text);
+    lv_obj_set_style_text_color(x_news_status_label, color, 0);
     lvgl_port_unlock();
 }
 

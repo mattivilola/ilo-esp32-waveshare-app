@@ -92,6 +92,21 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     }
 }
 
+@Test func staleStoryIsDroppedWhenTwoFullyVerifiedStoriesRemain() throws {
+    let mixed = feed(topics: [
+        topic(category: "AI", headline: "Old item", handle: "@old", date: referenceNow.addingTimeInterval(-86_401)),
+        topic(category: "AI", headline: "Fresh AI item", handle: "@fresh_ai", date: referenceNow.addingTimeInterval(-600)),
+        topic(category: "Robotics", headline: "Fresh robotics item", handle: "@fresh_bot", date: referenceNow.addingTimeInterval(-900)),
+    ])
+
+    let parsed = try GrokXNewsParser.parse(
+        grokOutput: grokEnvelope(feedDocuments: [mixed]),
+        now: referenceNow
+    )
+
+    #expect(parsed.stories.map(\.title) == ["Fresh AI item", "Fresh robotics item"])
+}
+
 @Test func mismatchedHandleAndUnboundedTextAreRejected() throws {
     var mismatch = feed(topics: [
         topic(category: "AI", headline: "One", handle: "@one", date: referenceNow.addingTimeInterval(-600)),
@@ -187,6 +202,23 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     try store.save(settings)
 
     #expect(store.load() == settings)
+}
+
+@Test func boardRefreshRequestRequiresMacConsentAndHonorsCooldown() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-x-news-board-request-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let settingsStore = XNewsRefreshSettingsStore(url: directory.appendingPathComponent("settings.json"))
+    let cache = XNewsFeedCache(url: directory.appendingPathComponent("feed.json"))
+    let coordinator = XNewsRefreshCoordinator(settingsStore: settingsStore, cache: cache)
+
+    #expect(await coordinator.requestManualRefresh(now: referenceNow) == .disabled)
+
+    try settingsStore.save(XNewsRefreshSettings(
+        cadence: .daily,
+        lastAttemptAt: referenceNow.addingTimeInterval(-60)
+    ))
+    #expect(await coordinator.requestManualRefresh(now: referenceNow) == .cooldown)
 }
 
 private func topic(

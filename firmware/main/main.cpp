@@ -22,9 +22,10 @@ extern "C" void app_main()
 
     ESP_ERROR_CHECK(ota_policy_begin());
 
-    ESP_LOGI(TAG, "Starting ILO Board protocol v1 (read-only)");
+    ESP_LOGI(TAG, "Starting ILO Board protocol v1 (Codex control disabled)");
     ESP_ERROR_CHECK(board_waveshare_5_init());
     ESP_ERROR_CHECK(dashboard_ui_init(board_waveshare_5_lcd()));
+    dashboard_ui_set_x_news_refresh_callback(mac_transport_request_x_news_refresh);
     ESP_ERROR_CHECK(ota_policy_confirm_after_stability());
 
     dashboard_model_t initial = dashboard_model_demo();

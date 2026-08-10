@@ -165,11 +165,44 @@ public struct ClientMessage: Codable, Equatable, Sendable {
 public struct HelloAcknowledgement: Encodable, Equatable, Sendable {
     public let type = "helloAck"
     public let protocolVersion = boardProtocolVersion
-    public let capabilities = ["tasks.read", "macPower.read"]
+    public let capabilities = ["tasks.read", "macPower.read", "xNews.refresh.request"]
     public let serverTime: Date
 
     public init(serverTime: Date = Date()) {
         self.serverTime = serverTime
+    }
+}
+
+public struct XNewsRefreshRequest: Codable, Equatable, Sendable {
+    public let type: String
+    public let requestID: String
+
+    public init(requestID: String) {
+        type = "xNewsRefreshRequest"
+        self.requestID = requestID
+    }
+}
+
+public enum XNewsRefreshStatus: String, Codable, Equatable, Sendable {
+    case fetching
+    case updated
+    case disabled
+    case cooldown
+    case busy
+    case failed
+}
+
+public struct XNewsRefreshStatusMessage: Codable, Equatable, Sendable {
+    public let type: String
+    public let requestID: String
+    public let status: XNewsRefreshStatus
+    public let message: String
+
+    public init(requestID: String, status: XNewsRefreshStatus, message: String) {
+        type = "xNewsRefreshStatus"
+        self.requestID = requestID
+        self.status = status
+        self.message = message
     }
 }
 

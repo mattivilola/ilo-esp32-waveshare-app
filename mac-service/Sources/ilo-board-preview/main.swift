@@ -4,6 +4,8 @@ import SwiftUI
 
 @main
 enum ILOBoardPreviewCommand {
+    @MainActor private static var previewWindowDelegate: PreviewWindowDelegate?
+
     @MainActor
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
@@ -51,6 +53,9 @@ enum ILOBoardPreviewCommand {
             defer: false
         )
         window.title = "ILO Board · 1024×600 UI Preview"
+        let windowDelegate = PreviewWindowDelegate()
+        previewWindowDelegate = windowDelegate
+        window.delegate = windowDelegate
         window.contentView = NSHostingView(rootView: view)
         window.center()
         window.makeKeyAndOrderFront(nil)
@@ -106,6 +111,12 @@ enum ILOBoardPreviewCommand {
     private static func value(after option: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: option), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
+    }
+}
+
+private final class PreviewWindowDelegate: NSObject, NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        NSApplication.shared.terminate(nil)
     }
 }
 

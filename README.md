@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server and shares only a bounded MacBook battery percentage/charging state; deterministic mock task data remains available for demos and tests. Delivering those new sources to the board has not yet been rechecked on hardware. The five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, optional Mac-verified X News feed, and Mac power card are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 keeps Codex and Mac control read-only. The only board-originated action is a narrowly bounded, rate-limited X News refresh request that still requires prior Mac-side opt-in. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server and shares only a bounded MacBook battery percentage/charging state; deterministic mock task data remains available for demos and tests. Delivering those new sources to the board has not yet been rechecked on hardware. The five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, optional Mac-verified X News feed/pull-to-refresh, and Mac power card are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -133,7 +133,7 @@ There is deliberately no OTA upload or install command yet. `make ota-status` is
 
 ### Screenshots
 
-Open the interactive desktop representation with `make ui-preview`. Swipe horizontally with the trackpad, drag with the pointer, or click Dashboard/Codex/X News/Weather/Settings. Export deterministic 1024×600 PNGs with:
+Open the interactive desktop representation with `make ui-preview`. Swipe horizontally with the trackpad, drag with the pointer, or click Dashboard/Codex/X News/Weather/Settings. The X News page scrolls vertically; pull down while already at the top to preview its refresh states. Closing the preview window also stops the underlying Swift/Python command and returns the terminal prompt. Export deterministic 1024×600 PNGs with:
 
 ```bash
 make ui-screenshots
@@ -155,11 +155,11 @@ The command waits up to 45 seconds for the paired board, requests exactly one 10
 
 1. **Dashboard** — the glanceable work pulse: attention count, active work, connection state, and current focus.
 2. **Codex** — recent sanitized task status and a visible read-only safety boundary.
-3. **X News** — an optional rolling 24-hour AI/robotics brief containing only locally validated direct X citations.
+3. **X News** — an optional rolling 24-hour AI/robotics brief containing only locally validated direct X citations. Vertically scroll up to five stories; horizontal swipes still move between screens.
 4. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
 5. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
 
-The page order is fixed and tested. Horizontal swipe is the primary gesture, while the always-visible bottom navigation provides discovery and direct access.
+The page order is fixed and tested. Horizontal swipe is the primary page gesture, while the always-visible bottom navigation provides discovery and direct access. On X News, direction-aware gesture handling reserves vertical drags for the story feed and lets horizontal drags continue to Weather or Codex. A compact “more” cue appears only when the feed exceeds the first three visible stories. Pull down from the top to request a refresh; the board shows pull/release/fetching/result states rather than freezing the old content or claiming success early.
 
 These are deterministic desktop renders with sample data, not photographs of the physical panel:
 
@@ -235,7 +235,9 @@ Enable one automatic run at 08:00 local each day, optionally adding a 14:00 run,
 
 The scheduler runs while the menu companion or headless host is running. Manual and failed scheduled attempts are rate-limited, so a failure is not retried every minute. Each request supplies a rolling UTC `since`/`until` window, asks Grok to use keyword and semantic X search, requests 2–5 AI/robotics stories, and preserves only a bounded cache.
 
-The JSON schema is treated as a hint, not a trust boundary. The Mac independently requires high/medium confidence, bounded single-line text, 1–3 matching `@handle` citations per story, and direct `https://x.com/<handle>/status/<id>` URLs. It decodes the X status ID timestamp and rejects posts outside the requested 24 hours or inconsistent with `posted_at`. If Grok concatenates multiple documents, only documents that independently pass the complete contract participate; the final document has priority, then duplicate headlines/citation URLs and already-cached sources are removed before the result is capped at five. Invalid, unsourced, oversized, stale, or future output never replaces the last good feed. The board receives only the verified cache, not Grok reasoning, session IDs, usage, prompts, or credentials.
+The paired board can request that same manual refresh by pulling down at the top of X News. This works only after X News has been explicitly enabled on the Mac, and it still enforces the 15-minute cooldown and one in-flight Grok process. The board receives bounded `fetching`, `updated`, `disabled`, `cooldown`, `busy`, or `failed` state—not Grok output or error details. An accepted refresh appears on the next five-second snapshot; a rejected refresh leaves the previous verified feed unchanged.
+
+The JSON schema is treated as a hint, not a trust boundary. The Mac independently requires high/medium confidence, bounded single-line text, 1–3 matching `@handle` citations per story, and direct `https://x.com/<handle>/status/<id>` URLs. It decodes the X status ID timestamp and drops stories outside the requested 24 hours or inconsistent with `posted_at`; at least two fully verified stories must survive or the complete refresh is rejected. If Grok concatenates multiple documents, only documents with a valid rolling window and enough verified stories participate; the final document has priority, then duplicate headlines/citation URLs and already-cached sources are removed before the result is capped at five. Invalid, unsourced, oversized, stale, or future output never replaces the last good feed. The board receives only the verified cache, not Grok reasoning, session IDs, usage, prompts, or credentials.
 
 The local Grok 1.0.0 tests proved why this gate is necessary: the schema-based attempts still reported structured-output errors; one returned only root X URLs, while the improved prompt found direct posts but concatenated two JSON documents. The adapter therefore fails closed instead of trusting `--json-schema` by itself.
 

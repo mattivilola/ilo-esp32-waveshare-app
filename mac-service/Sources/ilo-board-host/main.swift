@@ -112,7 +112,7 @@ struct ILOBoardHostCommand {
             print("Saved authenticated 1024x600 board capture: \(outputURL.path)")
         case "doctor":
             print("ILO Board Host")
-            print("  protocol: v\(boardProtocolVersion), tasks.read + macPower.read + xNews.read + display.capture.rgb565")
+            print("  protocol: v\(boardProtocolVersion), tasks.read + macPower.read + xNews.read/refresh.request + display.capture.rgb565")
             print("  service: _iloboard._tcp")
             print("  transport: TLS 1.2 PSK")
             print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")
