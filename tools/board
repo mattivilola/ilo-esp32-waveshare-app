@@ -118,6 +118,29 @@ def build(_: argparse.Namespace) -> None:
     run([str(IDF), "idf.py", "-D", "IDF_TARGET=esp32s3", "build"], cwd=FIRMWARE)
 
 
+def swift_preview(*arguments: str) -> None:
+    swift = shutil.which("swift")
+    if swift is None:
+        raise SystemExit("Swift is not installed. Install Xcode Command Line Tools first.")
+    run([swift, "run", "--package-path", str(HOST_PACKAGE), "ilo-board-preview", *arguments])
+
+
+def ui_preview(_: argparse.Namespace) -> None:
+    swift_preview("preview")
+
+
+def ui_screenshot(args: argparse.Namespace) -> None:
+    if args.all:
+        arguments = ["screenshots"]
+        if args.output:
+            arguments.extend(("--output-dir", args.output))
+    else:
+        arguments = ["screenshot", "--screen", args.screen]
+        if args.output:
+            arguments.extend(("--output", args.output))
+    swift_preview(*arguments)
+
+
 def flash(args: argparse.Namespace) -> None:
     port = resolve_port(args.port)
     run([str(IDF), "idf.py", "-p", port, "flash"], cwd=FIRMWARE)
@@ -283,6 +306,15 @@ def parser() -> argparse.ArgumentParser:
     provision_parser = sub.add_parser("provision", help="securely pair Wi-Fi and the Mac host through USB")
     provision_parser.add_argument("--port", help="serial port; auto-detected when omitted")
     provision_parser.set_defaults(handler=provision)
+
+    preview_parser = sub.add_parser("ui-preview", help="open the desktop-rendered 1024x600 device UI (no board required)")
+    preview_parser.set_defaults(handler=ui_preview)
+
+    screenshot_parser = sub.add_parser("ui-screenshot", help="render simulator PNGs; this is not a live board framebuffer capture")
+    screenshot_parser.add_argument("--screen", choices=("dashboard", "codex", "weather", "settings"), default="dashboard")
+    screenshot_parser.add_argument("--all", action="store_true", help="render all four screens")
+    screenshot_parser.add_argument("--output", help="output PNG path, or output directory with --all")
+    screenshot_parser.set_defaults(handler=ui_screenshot)
     sub.add_parser("build", help="configure and build firmware").set_defaults(handler=build)
     erase_parser = sub.add_parser("erase", help="erase the entire board (explicit confirmation required)")
     erase_parser.add_argument("--port")

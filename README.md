@@ -97,6 +97,9 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Compile firmware | `make firmware-build` | No |
 | Flash firmware | `make firmware-flash` | Yes, USB |
 | Open serial monitor | `make firmware-monitor` | Yes, USB |
+| Open interactive 1024×600 UI preview | `make ui-preview` | No |
+| Export all four simulator screenshots | `make ui-screenshots` | No |
+| Export one simulator screenshot | `./tools/board ui-screenshot --screen codex` | No |
 | Identify chip | `./tools/board chip-id` | Yes, USB |
 | Back up the complete 16 MB flash | `./tools/board backup` | Yes, USB |
 | Securely provision Wi-Fi/pairing | `./tools/board provision` | Yes, USB |
@@ -113,7 +116,40 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 
 ### Screenshots
 
-There is not yet a truthful `board screenshot` command in the flashed firmware. A photo is currently the only representation of the actual panel. A desktop-rendered 1024×600 preview and screenshot command is being added so layout can be reviewed without hardware; a later live framebuffer capture will still require a connected board. This distinction matters because a simulator screenshot cannot prove RGB output, touch mapping, or physical legibility.
+Open the interactive desktop representation with `make ui-preview`. Swipe horizontally with the trackpad, drag with the pointer, or click Dashboard/Codex/Weather/Settings. Export deterministic 1024×600 PNGs with:
+
+```bash
+make ui-screenshots
+./tools/board ui-screenshot --screen settings --output /tmp/ilo-settings.png
+```
+
+Generated files go to `artifacts/ui-previews/` by default. They use sample data and represent the intended layout. They do not prove RGB output, physical legibility, touch mapping, backlight behavior, or frame timing.
+
+There is not yet a live `board screenshot` framebuffer command in the flashed firmware. Until that transport exists, a photo is the only faithful capture of the actual panel.
+
+### Four-screen information architecture
+
+1. **Dashboard** — the glanceable work pulse: attention count, active work, connection state, and current focus.
+2. **Codex** — recent sanitized task status and a visible read-only safety boundary.
+3. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
+4. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
+
+The page order is fixed and tested. Horizontal swipe is the primary gesture, while the always-visible bottom navigation provides discovery and direct access.
+
+These are deterministic desktop renders with sample data, not photographs of the physical panel:
+
+<p align="center">
+  <img src="docs/images/ui-preview/dashboard.png" alt="ILO Board Dashboard simulator screen" width="49%">
+  <img src="docs/images/ui-preview/codex.png" alt="ILO Board Codex simulator screen" width="49%">
+</p>
+<p align="center">
+  <img src="docs/images/ui-preview/weather.png" alt="ILO Board Weather simulator screen" width="49%">
+  <img src="docs/images/ui-preview/settings.png" alt="ILO Board Settings simulator screen" width="49%">
+</p>
+
+The first settings surface covers brightness, idle dim timeout, screen-off timeout, screensaver mode, Wi-Fi/Mac/weather status, and privacy mode. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
+
+An old-school screensaver does make sense here as a product feature: a slow pulse clock with the ILO roundel and one small status indicator. Because this is an LCD rather than OLED, its main benefits are ambience and glanceability; actual power savings come from dimming or switching off the backlight.
 
 ## Connecting to Codex
 

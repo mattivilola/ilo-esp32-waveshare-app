@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: help doctor firmware-setup firmware-build firmware-flash firmware-monitor mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test
+.PHONY: help doctor firmware-setup firmware-build firmware-flash firmware-monitor ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test
 
 help:
 	@printf "ILO Board commands\n\n"
@@ -9,6 +9,8 @@ help:
 	@printf "  make firmware-build      Compile firmware without hardware\n"
 	@printf "  make firmware-flash      Flash a connected Waveshare 5B\n"
 	@printf "  make firmware-monitor    Open the board serial monitor\n"
+	@printf "  make ui-preview          Open the desktop 1024x600 device UI preview\n"
+	@printf "  make ui-screenshots      Export PNG previews for all four device screens\n"
 	@printf "  make mac-build           Build the Swift package\n"
 	@printf "  make mac-test            Run all macOS host tests\n"
 	@printf "  make mac-menu            Run the menu-bar app from SwiftPM\n"
@@ -35,6 +37,12 @@ firmware-flash:
 
 firmware-monitor:
 	./tools/board monitor
+
+ui-preview:
+	./tools/board ui-preview
+
+ui-screenshots:
+	./tools/board ui-screenshot --all
 
 mac-build:
 	./tools/host build
