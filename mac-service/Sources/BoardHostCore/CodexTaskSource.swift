@@ -279,6 +279,7 @@ public actor CodexHistoryTaskSource: TaskSource {
 
     public func snapshot(revision: UInt64) async throws -> DashboardSnapshot {
         let now = Date()
+        let xNewsStatus = XNewsFeatureController().status()
         let threads: [CodexThreadRecord]
         if now.timeIntervalSince(cachedAt) < 15, !cachedThreads.isEmpty {
             threads = cachedThreads
@@ -291,7 +292,8 @@ public actor CodexHistoryTaskSource: TaskSource {
             revision: revision,
             generatedAt: now,
             tasks: threads.prefix(6).map(CodexHistoryMapper.task),
-            newsFeed: XNewsWireMapper.cachedSnapshot(now: now)
+            xNewsEnabled: xNewsStatus.isEnabled,
+            newsFeed: xNewsStatus.isEnabled ? XNewsWireMapper.cachedSnapshot(now: now) : nil
         )
     }
 }

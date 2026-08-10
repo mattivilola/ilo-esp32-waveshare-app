@@ -401,6 +401,7 @@ private final class BoardConnection: @unchecked Sendable {
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: tasks,
+                xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,
                 macPower: macPower
             )

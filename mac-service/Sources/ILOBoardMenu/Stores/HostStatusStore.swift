@@ -12,29 +12,37 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var lastSync: Date?
     @Published private(set) var connectionHistory: [ConnectionHistoryEntry]
     @Published private(set) var macPowerStatus: MacPowerStatus?
+    @Published private(set) var xNewsStatus: XNewsFeatureStatus
+    @Published private(set) var xNewsNotice: String?
 
     private var server: BoardServer?
     private var historyLog: ConnectionHistoryLog
     private let defaults: UserDefaults
     private let powerStatusSource: any MacPowerStatusProviding
+    private let xNewsFeatureController: XNewsFeatureController
     private var powerMonitorTask: Task<Void, Never>?
     private static let historyDefaultsKey = "ilo-board.connection-history.v1"
 
     init(
         defaults: UserDefaults = .standard,
-        powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource()
+        powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
+        xNewsFeatureController: XNewsFeatureController = XNewsFeatureController()
     ) {
         self.defaults = defaults
         self.powerStatusSource = powerStatusSource
+        self.xNewsFeatureController = xNewsFeatureController
         historyLog = ConnectionHistoryLog.decode(defaults.data(forKey: Self.historyDefaultsKey))
         connectionHistory = historyLog.entries
         macPowerStatus = nil
+        xNewsStatus = xNewsFeatureController.status()
+        xNewsNotice = nil
         start()
         powerMonitorTask = Task { [weak self, powerStatusSource] in
             while !Task.isCancelled {
                 let status = await powerStatusSource.currentStatus()
                 guard let self else { return }
                 self.macPowerStatus = status
+                self.refreshXNewsStatus()
                 try? await Task.sleep(for: .seconds(30))
             }
         }
@@ -81,6 +89,34 @@ final class HostStatusStore: ObservableObject {
         guard boardID != "—" else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(boardID, forType: .string)
+    }
+
+    func refreshXNewsStatus() {
+        xNewsStatus = xNewsFeatureController.status()
+    }
+
+    func enableXNews(cadence: XNewsRefreshCadence = .daily) {
+        do {
+            try xNewsFeatureController.enable(cadence: cadence, explicitlyAllowsGrokTools: true)
+            xNewsNotice = cadence == .daily
+                ? "X News enabled daily; the board screen will appear on its next sync."
+                : "X News enabled twice daily; the board screen will appear on its next sync."
+        } catch GrokXNewsError.executableNotFound {
+            xNewsNotice = "Grok CLI is not installed or executable. X News remains hidden."
+        } catch {
+            xNewsNotice = "Couldn’t enable X News. Its previous setting was preserved."
+        }
+        refreshXNewsStatus()
+    }
+
+    func disableXNews() {
+        do {
+            try xNewsFeatureController.disable()
+            xNewsNotice = "X News disabled; its board screen will hide on the next sync."
+        } catch {
+            xNewsNotice = "Couldn’t disable X News. Its previous setting was preserved."
+        }
+        refreshXNewsStatus()
     }
 
     func diagnosticSummary(launchAtLogin: LaunchAtLoginState) -> String {

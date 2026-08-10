@@ -204,6 +204,30 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     #expect(store.load() == settings)
 }
 
+@Test func xNewsFeatureRequiresGrokAndExplicitConsentAndCanBeDisabled() throws {
+    let temporaryURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-x-news-feature-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: temporaryURL) }
+    let store = XNewsRefreshSettingsStore(url: temporaryURL)
+
+    let unavailable = XNewsFeatureController(settingsStore: store, grokAvailable: false)
+    #expect(unavailable.status() == XNewsFeatureStatus(cadence: .off, grokAvailable: false))
+    #expect(throws: GrokXNewsError.self) {
+        try unavailable.enable(cadence: .daily, explicitlyAllowsGrokTools: true)
+    }
+
+    let available = XNewsFeatureController(settingsStore: store, grokAvailable: true)
+    #expect(throws: GrokXNewsError.self) {
+        try available.enable(cadence: .daily, explicitlyAllowsGrokTools: false)
+    }
+    try available.enable(cadence: .morningAndAfternoon, explicitlyAllowsGrokTools: true)
+    #expect(available.status().isEnabled)
+    #expect(available.status().cadence == .morningAndAfternoon)
+
+    try available.disable()
+    #expect(available.status() == XNewsFeatureStatus(cadence: .off, grokAvailable: true))
+}
+
 @Test func boardRefreshRequestRequiresMacConsentAndHonorsCooldown() async throws {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("ilo-board-x-news-board-request-\(UUID().uuidString)", isDirectory: true)

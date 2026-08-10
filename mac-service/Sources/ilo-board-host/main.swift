@@ -40,6 +40,7 @@ struct ILOBoardHostCommand {
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: raw.tasks.map(TaskSanitizer.sanitize),
+                xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,
                 macPower: macPower
             )
@@ -200,14 +201,12 @@ struct ILOBoardHostCommand {
                 throw GrokXNewsError.explicitConsentRequired
             }
             let cadence: XNewsRefreshCadence = arguments.contains("--twice-daily") ? .morningAndAfternoon : .daily
-            let store = XNewsRefreshSettingsStore()
-            try store.save(XNewsRefreshSettings(cadence: cadence, lastAttemptAt: store.load().lastAttemptAt))
+            try XNewsFeatureController().enable(cadence: cadence, explicitlyAllowsGrokTools: true)
             print(cadence == .daily
                 ? "Enabled X News at 08:00 local each day."
                 : "Enabled X News at 08:00 and 14:00 local each day.")
         case "disable":
-            let store = XNewsRefreshSettingsStore()
-            try store.save(XNewsRefreshSettings(cadence: .off, lastAttemptAt: store.load().lastAttemptAt))
+            try XNewsFeatureController().disable()
             print("Disabled automatic X News refresh. The last verified cache was preserved.")
         default:
             throw XNewsCommandError.invalidAction

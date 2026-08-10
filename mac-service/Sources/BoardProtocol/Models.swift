@@ -126,6 +126,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let hostState: HostState
     public let capabilities: [String]
     public let tasks: [TaskCard]
+    public let xNewsEnabled: Bool
     public let newsFeed: NewsFeedSnapshot?
     public let macPower: MacPowerStatus?
 
@@ -134,6 +135,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         generatedAt: Date = Date(),
         hostState: HostState = .online,
         tasks: [TaskCard],
+        xNewsEnabled: Bool? = nil,
         newsFeed: NewsFeedSnapshot? = nil,
         macPower: MacPowerStatus? = nil
     ) {
@@ -145,6 +147,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
             ? ["tasks.read", "macPower.read"]
             : ["tasks.read", "macPower.read", "xNews.read"]
         self.tasks = Array(tasks.prefix(12))
+        self.xNewsEnabled = xNewsEnabled ?? (newsFeed != nil)
         self.newsFeed = newsFeed
         self.macPower = macPower
     }

@@ -28,6 +28,8 @@ import Testing
     let encodedPower = try #require(object["macPower"] as? [String: Any])
 
     #expect(snapshot.capabilities == ["tasks.read", "macPower.read"])
+    #expect(snapshot.xNewsEnabled == false)
+    #expect(object["xNewsEnabled"] as? Bool == false)
     #expect(snapshot.macPower?.levelPercent == 100)
     #expect(encodedPower.keys.sorted() == ["levelPercent", "state"])
     #expect(encodedPower["levelPercent"] as? Int == 100)
