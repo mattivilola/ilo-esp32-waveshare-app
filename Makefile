@@ -11,7 +11,7 @@ help:
 	@printf "  make firmware-flash      Flash a connected Waveshare 5B\n"
 	@printf "  make firmware-monitor    Open the board serial monitor\n"
 	@printf "  make ui-preview          Open the desktop 1024x600 device UI preview\n"
-	@printf "  make ui-screenshots      Export PNG previews for all four device screens\n"
+	@printf "  make ui-screenshots      Export PNG previews for all five device screens\n"
 	@printf "  make mac-build           Build the Swift package\n"
 	@printf "  make mac-test            Run all macOS host tests\n"
 	@printf "  make mac-menu            Run the menu-bar app from SwiftPM\n"

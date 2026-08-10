@@ -104,7 +104,7 @@ The dashboard should aggregate only the top one or two of these. Dedicated pages
 
 The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages.
 
-The first LVGL port now mirrors the four-page structure with `lv_tileview`, fixed bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
+The first LVGL port now mirrors the five-page structure with `lv_tileview`, fixed bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, verified cached X News, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side validation. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
 
 ## macOS menu-bar companion
 
