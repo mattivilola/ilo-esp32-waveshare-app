@@ -7,6 +7,7 @@ load_release_config
 
 for script in \
   build_icon.sh \
+  generate_firmware_icon.sh \
   build_app.sh \
   package_dmg.sh \
   sign_release.sh \

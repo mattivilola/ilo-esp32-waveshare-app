@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The current snapshot source is deterministic mock task data. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The current snapshot source is deterministic mock task data. The four-page LVGL navigation, shared icon, Weather/Settings surfaces, and Pulse screensaver are firmware-compiled but await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -92,6 +92,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Goal | Command | Board required |
 | --- | --- | --- |
 | Show all common commands | `make help` | No |
+| Regenerate shared macOS/firmware icon assets | `make assets` | No |
 | Check local prerequisites and USB detection | `make doctor` | Only for USB status |
 | Install pinned ESP-IDF 5.5.2 | `make firmware-setup` | No |
 | Compile firmware | `make firmware-build` | No |
@@ -111,6 +112,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Build universal `.app` | `make app` | No |
 | Build local DMG | `make package-dmg` | No |
 | Run every hardware-independent test | `make test` | No |
+| Test host/release tooling and compile firmware | `make verify` | No |
 
 `./tools/board --help` and `./tools/host --help` are the authoritative detailed command lists.
 
@@ -148,6 +150,8 @@ These are deterministic desktop renders with sample data, not photographs of the
 </p>
 
 The first settings surface covers brightness, idle dim timeout, screen-off timeout, screensaver mode, Wi-Fi/Mac/weather status, and privacy mode. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
+
+The matching LVGL structure is already compiled into firmware, including horizontal tile gestures and the embedded ILO roundel. Do not treat it as hardware-verified yet: swipe behavior, memory headroom, text clipping, icon alpha/color order, screensaver timeout/wake, and real touch targets must be checked on the 5B before flashing this build is called stable.
 
 An old-school screensaver does make sense here as a product feature: a slow pulse clock with the ILO roundel and one small status indicator. Because this is an LCD rather than OLED, its main benefits are ambience and glanceability; actual power savings come from dimming or switching off the backlight.
 

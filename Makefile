@@ -1,10 +1,11 @@
 SHELL := /bin/zsh
 
-.PHONY: help doctor firmware-setup firmware-build firmware-flash firmware-monitor ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test
+.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test verify
 
 help:
 	@printf "ILO Board commands\n\n"
 	@printf "  make doctor              Check board and Mac development prerequisites\n"
+	@printf "  make assets              Regenerate macOS and firmware icon assets\n"
 	@printf "  make firmware-setup      Install the pinned ESP-IDF toolchain\n"
 	@printf "  make firmware-build      Compile firmware without hardware\n"
 	@printf "  make firmware-flash      Flash a connected Waveshare 5B\n"
@@ -22,9 +23,14 @@ help:
 	@printf "  make release-local       Build, sign, package, notarize, and staple\n"
 	@printf "  make release-distribute  Upload verified DMGs to the configured GCS bucket\n"
 	@printf "  make test                Run all hardware-independent tests\n"
+	@printf "  make verify              Run tests plus a complete firmware compile\n"
 
 doctor:
 	./tools/board doctor
+
+assets:
+	./scripts/build_icon.sh
+	./scripts/generate_firmware_icon.sh
 
 firmware-setup:
 	./tools/setup-idf
@@ -79,3 +85,5 @@ release-distribute:
 
 test: mac-test
 	./scripts/test_release_tools.sh
+
+verify: test firmware-build
