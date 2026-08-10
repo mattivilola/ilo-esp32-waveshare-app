@@ -9,6 +9,10 @@ public enum BoardPage: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    public static func visiblePages(xNewsEnabled: Bool) -> [BoardPage] {
+        xNewsEnabled ? allCases : allCases.filter { $0 != .xNews }
+    }
+
     public var title: String {
         switch self {
         case .dashboard: "Dashboard"

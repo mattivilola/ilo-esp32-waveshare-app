@@ -5,12 +5,15 @@ public struct BoardDeviceView: View {
     private let interactive: Bool
     private let fixedPage: BoardPage?
     private let scenario: BoardPreviewScenario?
+    private let xNewsEnabled: Bool
 
-    public init(page: BoardPage = .dashboard, interactive: Bool = true) {
-        _page = State(initialValue: page)
+    public init(page: BoardPage = .dashboard, interactive: Bool = true, xNewsEnabled: Bool = true) {
+        let initialPage = !xNewsEnabled && page == .xNews ? .weather : page
+        _page = State(initialValue: initialPage)
         self.interactive = interactive
-        fixedPage = interactive ? nil : page
+        fixedPage = interactive ? nil : initialPage
         scenario = nil
+        self.xNewsEnabled = xNewsEnabled
     }
 
     public init(scenario: BoardPreviewScenario) {
@@ -18,6 +21,7 @@ public struct BoardDeviceView: View {
         interactive = false
         fixedPage = scenario.page
         self.scenario = scenario
+        xNewsEnabled = true
     }
 
     public var body: some View {
@@ -104,14 +108,14 @@ public struct BoardDeviceView: View {
             case .codex: CodexPage()
             case .xNews: XNewsPage(interactive: interactive)
             case .weather: WeatherPage()
-            case .settings: SettingsPage()
+            case .settings: SettingsPage(xNewsEnabled: xNewsEnabled)
             }
         }
     }
 
     private var navigation: some View {
         HStack(spacing: 8) {
-            ForEach(BoardPage.allCases) { candidate in
+            ForEach(visiblePages) { candidate in
                 Button {
                     guard interactive else { return }
                     page = candidate
@@ -138,7 +142,7 @@ public struct BoardDeviceView: View {
             .onEnded { value in
                 guard interactive else { return }
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                let pages = BoardPage.allCases
+                let pages = visiblePages
                 guard let index = pages.firstIndex(of: visiblePage) else { return }
                 if value.translation.width < -55, index < pages.count - 1 {
                     page = pages[index + 1]
@@ -150,5 +154,9 @@ public struct BoardDeviceView: View {
 
     private var visiblePage: BoardPage {
         fixedPage ?? page
+    }
+
+    private var visiblePages: [BoardPage] {
+        BoardPage.visiblePages(xNewsEnabled: xNewsEnabled)
     }
 }

@@ -4,6 +4,8 @@ import Testing
 @Test func boardPageOrderMatchesSwipeInformationArchitecture() {
     #expect(BoardPage.allCases == [.dashboard, .codex, .xNews, .weather, .settings])
     #expect(BoardPage.allCases.map(\.title) == ["Dashboard", "Codex", "X News", "Weather", "Settings"])
+    #expect(BoardPage.visiblePages(xNewsEnabled: true) == BoardPage.allCases)
+    #expect(BoardPage.visiblePages(xNewsEnabled: false) == [.dashboard, .codex, .weather, .settings])
 }
 
 @Test func validationScenarioOrderAndTargetPagesStayStable() {

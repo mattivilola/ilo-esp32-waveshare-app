@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsPage: View {
+    let xNewsEnabled: Bool
     @State private var screensaverMinutes = 2
     @State private var displayOffMinutes = 10
     @State private var privacyMode = false
@@ -50,9 +51,14 @@ struct SettingsPage: View {
                         connectionRow("Wi-Fi", "KNOWN NETWORK", BoardPalette.signal)
                         connectionRow("Mac companion", "PAIRED", BoardPalette.signal)
                         connectionRow("Weather", "DIRECT READY", BoardPalette.cyan)
+                        connectionRow(
+                            "X News",
+                            xNewsEnabled ? "MAC ENABLED" : "MAC DISABLED",
+                            xNewsEnabled ? BoardPalette.signal : BoardPalette.fog
+                        )
                     }
                 }
-                .frame(height: 112)
+                .frame(height: 160)
                 PulseCard {
                     HStack(spacing: 15) {
                         Image(nsImage: BrandAsset.image())
@@ -72,7 +78,7 @@ struct SettingsPage: View {
                         DeviceToggle(isOn: $privacyMode)
                     }
                 }
-                .frame(height: 105)
+                .frame(height: 95)
             }
         }
         .padding(.vertical, 4)

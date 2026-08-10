@@ -13,7 +13,7 @@ enum ILOBoardPreviewCommand {
         do {
             switch command {
             case "preview":
-                runPreview()
+                runPreview(arguments: arguments)
             case "screenshot":
                 let page = try pageArgument(arguments)
                 let output = value(after: "--output", in: arguments) ?? "artifacts/ui-previews/\(page.rawValue).png"
@@ -42,10 +42,10 @@ enum ILOBoardPreviewCommand {
     }
 
     @MainActor
-    private static func runPreview() {
+    private static func runPreview(arguments: [String]) {
         let application = NSApplication.shared
         application.setActivationPolicy(.regular)
-        let view = BoardDeviceView()
+        let view = BoardDeviceView(xNewsEnabled: !arguments.contains("--without-x-news"))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1024, height: 600),
             styleMask: [.titled, .closable, .miniaturizable],

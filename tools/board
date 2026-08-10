@@ -276,8 +276,11 @@ def swift_preview(*arguments: str) -> None:
     run([swift, "run", "--package-path", str(HOST_PACKAGE), "ilo-board-preview", *arguments])
 
 
-def ui_preview(_: argparse.Namespace) -> None:
-    swift_preview("preview")
+def ui_preview(args: argparse.Namespace) -> None:
+    arguments = ["preview"]
+    if args.without_x_news:
+        arguments.append("--without-x-news")
+    swift_preview(*arguments)
 
 
 def ui_screenshot(args: argparse.Namespace) -> None:
@@ -490,6 +493,7 @@ def parser() -> argparse.ArgumentParser:
     provision_parser.set_defaults(handler=provision)
 
     preview_parser = sub.add_parser("ui-preview", help="open the desktop-rendered 1024x600 device UI (no board required)")
+    preview_parser.add_argument("--without-x-news", action="store_true", help="preview the four-page layout used when X News is disabled")
     preview_parser.set_defaults(handler=ui_preview)
 
     screenshot_parser = sub.add_parser("ui-screenshot", help="render simulator PNGs; this is not a live board framebuffer capture")
