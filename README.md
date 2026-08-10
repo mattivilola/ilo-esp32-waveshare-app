@@ -2,7 +2,7 @@
 
 Touch-first companion software for the Waveshare ESP32-S3-Touch-LCD-5B and macOS.
 
-> **macOS download:** the stable public URL is reserved, but no notarized public build has been published yet. Until the first release, build locally with `make app`. The download button will be enabled only after `make release-distribute` has successfully published and the URL has been verified.
+> **macOS download:** [Download the latest notarized universal DMG](https://storage.googleapis.com/ilo-public/ilo-board/ILOBoard-latest.dmg) for macOS 13 or newer. Move **ILO Board.app** to Applications after opening the DMG; future releases can then update in place through the signed Sparkle feed.
 
 ## Supported hardware
 
@@ -120,6 +120,10 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Capture the live board framebuffer | `./tools/host screenshot --output board.png` | Yes, Wi-Fi |
 | Build universal `.app` | `make app` | No |
 | Build local DMG | `make package-dmg` | No |
+| Show release version/build | `make release-version` | No |
+| Prepare next patch release | `make version-patch` | No |
+| Build and notarize release | `make release-local` | No |
+| Upload DMGs and signed Sparkle feed | `make release-distribute` | No |
 | Run every hardware-independent test | `make test` | No |
 | Test host/release tooling and compile firmware | `make verify` | No |
 
@@ -251,9 +255,9 @@ Direct Codex control is a different security class. Codex App Server runs locall
 
 ## macOS packaging and public releases
 
-The source icon is used in the menu dashboard and converted into the packaged app's `.icns`. `make app` creates an ad-hoc-signed universal Apple Silicon + Intel bundle at `artifacts/ILO Board.app`; `make package-dmg` creates a local DMG. These are developer artifacts, not public releases.
+The source icon is used in the menu dashboard and converted into the packaged app's `.icns`. `make app` creates an ad-hoc-signed universal Apple Silicon + Intel bundle at `artifacts/ILO Board.app`; `make package-dmg` creates a local DMG. These are developer artifacts, not public releases. The menu dashboard shows the installed version/build and offers **Check for Updates…** in signed builds.
 
-For Developer ID signing, Apple notarization, and Google Cloud Storage delivery, follow [macOS distribution](docs/macos-distribution.md). The release pipeline refuses to upload unless the versioned DMG has a valid stapled notarization ticket and the stable alias is byte-for-byte identical. No credentials are committed, and GCS upload happens only when `make release-distribute` is run explicitly.
+For Developer ID signing, Apple notarization, Sparkle EdDSA signing, and Google Cloud Storage delivery, follow [macOS distribution](docs/macos-distribution.md). The release pipeline refuses to upload unless the versioned DMG has a valid stapled notarization ticket, the stable alias is byte-for-byte identical, and a signed appcast with bounded `CHANGELOG.md` history can be generated. No credentials are committed, `make release-local` never uploads, and GCS writes happen only when `make release-distribute` is run explicitly. The versioned DMG and stable alias are uploaded before `appcast.xml`, so clients never discover an unavailable archive.
 
 ### If flashing cannot connect
 

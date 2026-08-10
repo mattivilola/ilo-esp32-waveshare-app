@@ -5,6 +5,7 @@ import SwiftUI
 struct MenuDashboardView: View {
     @ObservedObject var store: HostStatusStore
     @ObservedObject var launchAtLogin: LaunchAtLoginController
+    @ObservedObject var updater: SparkleUpdaterController
     @State private var diagnosticNotice: String?
 
     var body: some View {
@@ -91,6 +92,7 @@ struct MenuDashboardView: View {
             detailRow("MacBook", value: macPowerDescription)
             detailRow("Source", value: "Codex recent history")
             detailRow("Security", value: "TLS 1.2 · Read only")
+            detailRow("App", value: appReleaseInfo.displayVersion)
         }
     }
 
@@ -193,23 +195,37 @@ struct MenuDashboardView: View {
     }
 
     private var actions: some View {
-        HStack {
-            if store.state == .stopped || store.state == .notProvisioned || isFailure {
-                Button("Start Service") { store.start() }
-                    .buttonStyle(.borderedProminent)
-            } else {
-                Button("Stop Service") { store.stop() }
+        VStack(spacing: 10) {
+            HStack {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.isAvailable)
+                Spacer()
+                Text(updater.isAvailable ? "Signed update feed ready" : "Updates available in signed builds")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            Button("Copy Board ID") { store.copyBoardID() }
-                .disabled(store.boardID == "—")
-            Spacer()
-            Button {
-                NSApplication.shared.terminate(nil)
-            } label: {
-                Image(systemName: "power")
+            HStack {
+                if store.state == .stopped || store.state == .notProvisioned || isFailure {
+                    Button("Start Service") { store.start() }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Stop Service") { store.stop() }
+                }
+                Button("Copy Board ID") { store.copyBoardID() }
+                    .disabled(store.boardID == "—")
+                Spacer()
+                Button {
+                    NSApplication.shared.terminate(nil)
+                } label: {
+                    Image(systemName: "power")
+                }
+                .help("Quit ILO Board")
             }
-            .help("Quit ILO Board")
         }
+    }
+
+    private var appReleaseInfo: AppReleaseInfo {
+        AppReleaseInfo(infoDictionary: Bundle.main.infoDictionary)
     }
 
     private var diagnosticSummary: String {

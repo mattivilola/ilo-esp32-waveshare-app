@@ -10,6 +10,9 @@ require_signing_identity
 app_path="$(release_app_path)"
 [[ -d "$app_path" ]] || fail "App bundle not found. Run make app first."
 
+require_sparkle_public_key
+validate_sparkle_configuration "$app_path"
+sign_sparkle_framework "$app_path" "$ILO_BOARD_SIGNING_IDENTITY"
 codesign --force --options runtime --timestamp --sign "$ILO_BOARD_SIGNING_IDENTITY" "$app_path"
 codesign --verify --deep --strict "$app_path"
 

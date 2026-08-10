@@ -84,12 +84,9 @@ final class HostStatusStore: ObservableObject {
     }
 
     func diagnosticSummary(launchAtLogin: LaunchAtLoginState) -> String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "development"
-        let build = info?["CFBundleVersion"] as? String
-        let displayVersion = build.map { "\(version) (\($0))" } ?? version
+        let releaseInfo = AppReleaseInfo(infoDictionary: Bundle.main.infoDictionary)
         let snapshot = DiagnosticSnapshot(
-            appVersion: displayVersion,
+            appVersion: releaseInfo.displayVersion,
             macOSVersion: ProcessInfo.processInfo.operatingSystemVersionString,
             serviceState: state.diagnosticTitle,
             launchAtLoginState: launchAtLogin,

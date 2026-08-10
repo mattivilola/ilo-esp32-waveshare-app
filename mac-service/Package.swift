@@ -13,6 +13,9 @@ let package = Package(
         .executable(name: "ilo-board-preview", targets: ["ilo-board-preview"]),
         .executable(name: "ILOBoardMenu", targets: ["ILOBoardMenu"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.9.2"),
+    ],
     targets: [
         .target(name: "BoardProtocol"),
         .target(name: "BoardUIPrototype"),
@@ -41,7 +44,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "ILOBoardMenu",
-            dependencies: ["BoardProtocol", "BoardHostCore", "ILOBoardMenuSupport"],
+            dependencies: [
+                "BoardProtocol",
+                "BoardHostCore",
+                "ILOBoardMenuSupport",
+                .product(name: "Sparkle", package: "Sparkle"),
+            ],
             exclude: ["Resources"]
         ),
         .testTarget(name: "BoardProtocolTests", dependencies: ["BoardProtocol"]),

@@ -13,6 +13,7 @@ macOS user service
   Codex recent-history source (default)
   deterministic mock source (tests/demos)
   SwiftUI MenuBarExtra status dashboard
+  pinned Sparkle updater + signed GCS appcast
   SwiftUI 1024x600 device UI prototype + PNG renderer
         │ one-shot JSONL/stdio
         ▼
@@ -37,6 +38,7 @@ Codex app-server
 - Live screenshots reuse the authenticated framed connection. A one-shot host sends a versioned capture request only after hello/subscription, firmware copies one full LVGL RGB565 buffer into temporary PSRAM, and returns bounded base64 chunks plus SHA-256. The host validates metadata, exact sequence/offset/length, and checksum before converting to PNG; neither side exposes an HTTP listener.
 - Optional X News is a Mac-side adapter, not direct ESP32 Internet access. An explicitly enabled scheduler or authenticated pull-to-refresh request runs headless `grok -p`, validates direct X citations and their ID-derived timestamps, caches only the bounded accepted feed, and adds that cache to the status snapshot. The fifth LVGL page never executes Grok or holds X credentials; its request cannot enable consent or bypass cooldown/validation.
 - The macOS companion is intentionally menu-bar-only during development and uses accessory activation, so it does not add a Dock icon.
+- The packaged Mac companion embeds pinned Sparkle 2.9.2, displays its version/build, and reads an HTTPS appcast from public GCS. Release tooling signs the notarized DMG with a Keychain-backed EdDSA key, uploads immutable and stable DMGs first, and publishes the appcast last. Local builds, tests, and `release-local` do not write to GCS.
 
 ## Why ESP-IDF
 

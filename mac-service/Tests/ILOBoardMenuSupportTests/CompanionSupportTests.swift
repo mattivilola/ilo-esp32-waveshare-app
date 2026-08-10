@@ -52,6 +52,16 @@ import Testing
     #expect(text.contains("identifiers, network addresses, ports, file paths"))
 }
 
+@Test func appReleaseInfoShowsMarketingVersionAndBuild() {
+    let info = AppReleaseInfo(infoDictionary: [
+        "CFBundleShortVersionString": "1.2.3",
+        "CFBundleVersion": "45",
+    ])
+
+    #expect(info.displayVersion == "1.2.3 (45)")
+    #expect(AppReleaseInfo(infoDictionary: nil).displayVersion == "development")
+}
+
 @MainActor
 @Test func launchAtLoginChangesOnlyAfterExplicitAction() {
     let service = TestLaunchAtLoginService()

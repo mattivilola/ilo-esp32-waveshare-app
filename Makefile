@@ -1,6 +1,6 @@
 SHELL := /bin/zsh
 
-.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ota-status ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test verify
+.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ota-status ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
 
 help:
 	@printf "ILO Board commands\n\n"
@@ -21,8 +21,16 @@ help:
 	@printf "  make sign-release        Developer ID-sign the app and DMG\n"
 	@printf "  make notarize            Submit the DMG to Apple notarization\n"
 	@printf "  make staple              Staple and validate the notarization ticket\n"
+	@printf "  make sparkle-generate-keys  Create/read the Sparkle EdDSA key in Keychain\n"
+	@printf "  make release-version     Show the current app version and build\n"
+	@printf "  make version-patch       Prepare the next patch version and changelog\n"
+	@printf "  make version-minor       Prepare the next minor version and changelog\n"
+	@printf "  make version-major       Prepare the next major version and changelog\n"
+	@printf "  make release-commit      Commit prepared version and changelog files\n"
+	@printf "  make release-tag         Tag the committed current version\n"
+	@printf "  make release-push        Push the current branch and release tag\n"
 	@printf "  make release-local       Build, sign, package, notarize, and staple\n"
-	@printf "  make release-distribute  Upload verified DMGs to the configured GCS bucket\n"
+	@printf "  make release-distribute  Upload DMGs and signed Sparkle appcast to GCS\n"
 	@printf "  make test                Run all hardware-independent tests\n"
 	@printf "  make verify              Run tests plus a complete firmware compile\n"
 
@@ -80,6 +88,30 @@ notarize:
 
 staple:
 	./scripts/staple.sh
+
+sparkle-generate-keys: mac-build
+	./scripts/sparkle_keys.sh
+
+release-version:
+	./scripts/version.sh current
+
+version-patch:
+	./scripts/version.sh bump patch
+
+version-minor:
+	./scripts/version.sh bump minor
+
+version-major:
+	./scripts/version.sh bump major
+
+release-commit:
+	./scripts/release_commit.sh
+
+release-tag:
+	./scripts/release_tag.sh
+
+release-push:
+	./scripts/release_push.sh
 
 release-local:
 	./scripts/release_local.sh

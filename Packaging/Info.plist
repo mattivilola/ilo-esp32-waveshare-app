@@ -38,5 +38,9 @@
     <string>ILO Board uses your local network to exchange encrypted status updates with your paired display.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+    <key>SUFeedURL</key>
+    <string>https://storage.googleapis.com/ilo-public/ilo-board/appcast.xml</string>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
 </dict>
 </plist>

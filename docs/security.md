@@ -32,6 +32,10 @@ Optional X News remains Mac-mediated and disabled by default. Enabling or manual
 
 Pull-to-refresh is a narrow authenticated request, not a general command channel. It is accepted only after TLS hello/subscription, carries a random bounded request ID and no prompt, and cannot enable Grok consent. The Mac independently enforces opt-in, a 15-minute cost cooldown, one process at a time, the same three-minute timeout/validator, and last-good-cache preservation. The board receives only one of six coarse result states and never sees raw process errors.
 
+The Mac companion update channel is separate from firmware OTA. Public releases are Developer-ID signed, notarized, stapled, and additionally signed with Sparkle EdDSA. The private update key remains in the login Keychain; only its public key is embedded in the app. The HTTPS appcast contains bounded changelog text and an immutable versioned GCS URL. Distribution validates the stapled DMG and byte-identical latest alias before signing, then uploads the appcast last. A compromised public bucket cannot produce an accepted replacement DMG without the Apple and EdDSA signing identities.
+
+Ad-hoc `make app` builds use `disable-library-validation` only so a Team-ID-less development executable can load the prebuilt Sparkle framework. `sign_release.sh` never applies that entitlement: Developer ID releases explicitly re-sign Sparkle's nested helpers/framework and the app with the same Apple identity before notarization.
+
 ## Explicit exclusions
 
 The device cannot currently:
