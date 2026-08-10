@@ -30,6 +30,7 @@ static esp_lcd_panel_io_handle_t touch_io;
 static esp_lcd_touch_handle_t touch_panel;
 static esp_lcd_touch_io_gt911_config_t touch_driver_config;
 static bool initialized;
+static bool backlight_enabled;
 
 static esp_err_t add_i2c_device(uint16_t address, i2c_master_dev_handle_t *device)
 {
@@ -157,6 +158,7 @@ extern "C" esp_err_t board_waveshare_5_init(void)
     ESP_RETURN_ON_ERROR(init_touch(), TAG, "Touch startup failed");
     // Waveshare's published 0x1E pattern enables DISP on EXIO2.
     ESP_RETURN_ON_ERROR(ch422g_write(ch422g_io_device, 0x1E), TAG, "Backlight enable failed");
+    backlight_enabled = true;
 
     initialized = true;
     ESP_LOGI(TAG, "Waveshare 5B 1024x600 display and GT911 touch initialized");
@@ -184,4 +186,26 @@ extern "C" bool board_waveshare_5_read_touch(uint16_t *x, uint16_t *y)
     *x = point.x;
     *y = point.y;
     return true;
+}
+
+extern "C" esp_err_t board_waveshare_5_set_backlight(bool enabled)
+{
+    if (!initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (enabled == backlight_enabled) {
+        return ESP_OK;
+    }
+    // DISP is CH422G EXIO2 on this exact Waveshare 5B profile. It is a
+    // binary enable line, not a PWM brightness channel.
+    esp_err_t status = ch422g_write(ch422g_io_device, enabled ? 0x1E : 0x1A);
+    if (status == ESP_OK) {
+        backlight_enabled = enabled;
+    }
+    return status;
+}
+
+extern "C" bool board_waveshare_5_backlight_enabled(void)
+{
+    return backlight_enabled;
 }

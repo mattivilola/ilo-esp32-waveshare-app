@@ -1,22 +1,24 @@
 import SwiftUI
 
 struct SettingsPage: View {
-    @State private var brightness = 0.72
-    @State private var privacyMode = true
+    @State private var screensaverMinutes = 2
+    @State private var displayOffMinutes = 10
+    @State private var privacyMode = false
 
     var body: some View {
         HStack(spacing: 16) {
             PulseCard {
                 VStack(alignment: .leading, spacing: 13) {
                     SectionLabel(title: "Display")
-                    settingHeader("Brightness", value: "72%")
-                    DeviceSlider(value: $brightness)
-                    Divider().overlay(BoardPalette.steel)
-                    settingRow("Idle dim", "2 minutes")
-                    settingRow("Screen off", "10 minutes")
-                    settingRow("Screensaver", "Pulse clock")
+                    settingButton("Pulse screensaver", value: minutes(screensaverMinutes)) {
+                        screensaverMinutes = next(screensaverMinutes, in: [0, 2, 5])
+                    }
+                    settingButton("Display off", value: minutes(displayOffMinutes)) {
+                        displayOffMinutes = next(displayOffMinutes, in: [0, 5, 10, 30])
+                    }
+                    settingButton("Turn display off now", value: "SLEEP") {}
                     Spacer()
-                    Text("Dimming the backlight saves power. The LCD itself is not OLED, so the screensaver is primarily ambience and glanceable status.")
+                    Text("This exact 5B board exposes binary backlight on/off, not PWM brightness. The first wake touch is consumed so it cannot activate a hidden control.")
                         .font(.board(11))
                         .foregroundStyle(BoardPalette.fog)
                         .lineSpacing(3)
@@ -44,7 +46,7 @@ struct SettingsPage: View {
                             .frame(width: 54, height: 54)
                             .clipShape(Circle())
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("Privacy mode")
+                            Text("Task summaries")
                                 .font(.board(15, weight: .semibold))
                                 .foregroundStyle(BoardPalette.mist)
                             Text("Hide task summaries on the board")
@@ -61,26 +63,22 @@ struct SettingsPage: View {
         .padding(.vertical, 4)
     }
 
-    private func settingHeader(_ title: String, value: String) -> some View {
-        HStack {
-            Text(title)
-                .font(.board(15, weight: .semibold))
-                .foregroundStyle(BoardPalette.mist)
-            Spacer()
-            Text(value)
-                .font(.board(13, weight: .bold))
-                .foregroundStyle(BoardPalette.signal)
+    private func settingButton(_ title: String, value: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .font(.board(13, weight: .semibold))
+                    .foregroundStyle(BoardPalette.mist)
+                Spacer()
+                Text(value)
+                    .font(.board(12, weight: .bold))
+                    .foregroundStyle(BoardPalette.signal)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .background(BoardPalette.steel, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
         }
-    }
-
-    private func settingRow(_ title: String, _ value: String) -> some View {
-        HStack {
-            Text(title).foregroundStyle(BoardPalette.mist)
-            Spacer()
-            Text(value).foregroundStyle(BoardPalette.fog)
-        }
-        .font(.board(13, weight: .semibold))
-        .padding(.vertical, 2)
+        .buttonStyle(.plain)
     }
 
     private func connectionRow(_ title: String, _ value: String, _ tint: Color) -> some View {
@@ -96,5 +94,14 @@ struct SettingsPage: View {
                 .foregroundStyle(tint)
         }
         .padding(.vertical, 2)
+    }
+
+    private func minutes(_ value: Int) -> String {
+        value == 0 ? "Never" : "\(value) min"
+    }
+
+    private func next(_ value: Int, in choices: [Int]) -> Int {
+        guard let index = choices.firstIndex(of: value) else { return choices[0] }
+        return choices[(index + 1) % choices.count]
     }
 }

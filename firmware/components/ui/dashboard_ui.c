@@ -7,6 +7,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "board_waveshare_5.h"
+#include "device_settings.h"
 #include "ilo_icon_48.h"
 
 #define COLOR_CARBON  lv_color_hex(0x0A0F14)
@@ -21,7 +22,7 @@
 #define PAGE_COUNT 4
 #define DASHBOARD_VISIBLE_TASKS 4
 #define CODEX_VISIBLE_TASKS 3
-#define SCREENSAVER_TIMEOUT_MS 120000
+#define MINUTE_MS 60000U
 
 static lv_obj_t *connection_label;
 static lv_obj_t *attention_count_label;
@@ -41,8 +42,18 @@ static lv_obj_t *tiles[PAGE_COUNT];
 static lv_obj_t *nav_buttons[PAGE_COUNT];
 static lv_obj_t *nav_labels[PAGE_COUNT];
 static lv_obj_t *screensaver;
+static lv_obj_t *screensaver_content;
 static lv_obj_t *screensaver_status_dot;
+static lv_obj_t *settings_screensaver_value;
+static lv_obj_t *settings_display_off_value;
+static lv_obj_t *settings_privacy_value;
 static lv_display_t *ui_display;
+static device_settings_t current_settings;
+static dashboard_model_t latest_model;
+static bool latest_model_valid;
+static bool display_asleep;
+static bool consuming_wake_touch;
+static uint32_t screensaver_tick;
 
 static const char *page_eyebrows[PAGE_COUNT] = {
     "ILO / WORK PULSE", "ILO / CODEX", "ILO / WEATHER", "ILO / SETTINGS"
@@ -57,10 +68,30 @@ static void touch_read(lv_indev_t *input, lv_indev_data_t *data)
     uint16_t x = 0;
     uint16_t y = 0;
     if (board_waveshare_5_read_touch(&x, &y)) {
+        if (display_asleep) {
+            board_waveshare_5_set_backlight(true);
+            display_asleep = false;
+            consuming_wake_touch = true;
+            if (ui_display != NULL) {
+                lv_display_trigger_activity(ui_display);
+            }
+            if (screensaver != NULL) {
+                lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+            }
+            // Consume the wake touch so it cannot activate a control hidden
+            // behind the sleeping display.
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;
+        }
+        if (consuming_wake_touch) {
+            data->state = LV_INDEV_STATE_RELEASED;
+            return;
+        }
         data->point.x = x;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
     } else {
+        consuming_wake_touch = false;
         data->state = LV_INDEV_STATE_RELEASED;
     }
 }
@@ -197,22 +228,126 @@ static void build_weather_page(lv_obj_t *page)
     lv_obj_align(later_text, LV_ALIGN_LEFT_MID, 18, 0);
 }
 
+static void format_minutes(char *buffer, size_t size, uint16_t minutes)
+{
+    if (minutes == 0) {
+        snprintf(buffer, size, "Never");
+    } else {
+        snprintf(buffer, size, "%u min", (unsigned int)minutes);
+    }
+}
+
+static void refresh_settings_labels(void)
+{
+    char value[20];
+    if (settings_screensaver_value != NULL) {
+        format_minutes(value, sizeof(value), current_settings.screensaver_minutes);
+        lv_label_set_text(settings_screensaver_value, value);
+    }
+    if (settings_display_off_value != NULL) {
+        format_minutes(value, sizeof(value), current_settings.display_off_minutes);
+        lv_label_set_text(settings_display_off_value, value);
+    }
+    if (settings_privacy_value != NULL) {
+        lv_label_set_text(settings_privacy_value, current_settings.hide_task_summaries ? "HIDDEN" : "VISIBLE");
+        lv_obj_set_style_text_color(
+            settings_privacy_value,
+            current_settings.hide_task_summaries ? COLOR_AMBER : COLOR_SIGNAL,
+            0
+        );
+    }
+}
+
+static void refresh_task_summaries(void)
+{
+    if (!latest_model_valid) {
+        return;
+    }
+    const char *hidden = "Summary hidden by privacy setting";
+    for (int index = 0; index < DASHBOARD_VISIBLE_TASKS && index < latest_model.task_count; ++index) {
+        lv_label_set_text(
+            task_summaries[index],
+            current_settings.hide_task_summaries ? hidden : latest_model.tasks[index].summary
+        );
+    }
+    for (int index = 0; index < CODEX_VISIBLE_TASKS && index < latest_model.task_count; ++index) {
+        lv_label_set_text(
+            codex_summaries[index],
+            current_settings.hide_task_summaries ? hidden : latest_model.tasks[index].summary
+        );
+    }
+}
+
+static void screensaver_setting_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    current_settings.screensaver_minutes = device_settings_next_screensaver(current_settings.screensaver_minutes);
+    device_settings_save(&current_settings);
+    refresh_settings_labels();
+    lv_display_trigger_activity(ui_display);
+}
+
+static void display_off_setting_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    current_settings.display_off_minutes = device_settings_next_display_off(current_settings.display_off_minutes);
+    device_settings_save(&current_settings);
+    refresh_settings_labels();
+    lv_display_trigger_activity(ui_display);
+}
+
+static void privacy_setting_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    current_settings.hide_task_summaries = !current_settings.hide_task_summaries;
+    device_settings_save(&current_settings);
+    refresh_settings_labels();
+    refresh_task_summaries();
+    lv_display_trigger_activity(ui_display);
+}
+
+static void sleep_now_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_RELEASED) return;
+    lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+    if (board_waveshare_5_set_backlight(false) == ESP_OK) {
+        display_asleep = true;
+    }
+}
+
+static lv_obj_t *create_setting_row(
+    lv_obj_t *parent,
+    int y,
+    const char *title,
+    lv_event_cb_t callback,
+    lv_obj_t **value_label
+)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    set_clean_box(button, COLOR_STEEL, 12);
+    lv_obj_set_size(button, 436, 62);
+    lv_obj_set_pos(button, 22, y);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_ALL, NULL);
+    lv_obj_t *label = create_label(button, title, &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_align(label, LV_ALIGN_LEFT_MID, 16, 0);
+    *value_label = create_label(button, "", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_align(*value_label, LV_ALIGN_RIGHT_MID, -16, 0);
+    return button;
+}
+
 static void build_settings_page(lv_obj_t *page)
 {
     lv_obj_t *display = create_card(page, 22, 8, 480, 386, 16);
     lv_obj_t *display_title = create_label(display, "DISPLAY", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(display_title, LV_ALIGN_TOP_LEFT, 18, 18);
-    lv_obj_t *display_values = create_label(
-        display,
-        "Brightness                  72%\n\nIdle dim                 2 minutes\n\nScreen off              10 minutes\n\nScreensaver            Pulse clock",
-        &lv_font_montserrat_14,
-        COLOR_MIST
-    );
-    lv_obj_set_style_text_line_space(display_values, 8, 0);
-    lv_obj_align(display_values, LV_ALIGN_TOP_LEFT, 18, 58);
+    create_setting_row(display, 50, "Pulse screensaver", screensaver_setting_tapped, &settings_screensaver_value);
+    create_setting_row(display, 120, "Display off", display_off_setting_tapped, &settings_display_off_value);
+    lv_obj_t *sleep_value = NULL;
+    create_setting_row(display, 190, "Turn display off now", sleep_now_tapped, &sleep_value);
+    lv_label_set_text(sleep_value, "SLEEP");
     lv_obj_t *power_note = create_label(
         display,
-        "Backlight dim/off saves power.\nHardware controls await board verification.",
+        "This 5B exposes binary backlight on/off, not PWM.\nWake touch is consumed to prevent accidental actions.",
         &lv_font_montserrat_14,
         COLOR_FOG
     );
@@ -239,19 +374,22 @@ static void build_settings_page(lv_obj_t *page)
     lv_obj_align(wifi_note, LV_ALIGN_BOTTOM_LEFT, 18, -18);
 
     lv_obj_t *privacy = create_card(page, 518, 282, 478, 112, 16);
+    lv_obj_add_flag(privacy, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(privacy, privacy_setting_tapped, LV_EVENT_CLICKED, NULL);
     lv_obj_t *privacy_icon = lv_image_create(privacy);
     lv_image_set_src(privacy_icon, &ilo_icon_48);
     lv_obj_align(privacy_icon, LV_ALIGN_LEFT_MID, 18, 0);
     lv_obj_t *privacy_text = create_label(
         privacy,
-        "Privacy mode\nTask summaries visible",
+        "Task summaries\nTap to change board visibility",
         &lv_font_montserrat_14,
         COLOR_MIST
     );
     lv_obj_set_style_text_line_space(privacy_text, 8, 0);
     lv_obj_align(privacy_text, LV_ALIGN_LEFT_MID, 84, 0);
-    lv_obj_t *privacy_state = create_label(privacy, "ON", &lv_font_montserrat_14, COLOR_SIGNAL);
-    lv_obj_align(privacy_state, LV_ALIGN_RIGHT_MID, -20, 0);
+    settings_privacy_value = create_label(privacy, "VISIBLE", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_align(settings_privacy_value, LV_ALIGN_RIGHT_MID, -20, 0);
+    refresh_settings_labels();
 }
 
 static int active_page_index(void)
@@ -298,6 +436,8 @@ static void nav_tapped(lv_event_t *event)
 static void screensaver_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_PRESSED) {
+        board_waveshare_5_set_backlight(true);
+        display_asleep = false;
         lv_display_trigger_activity(ui_display);
         lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
     }
@@ -307,10 +447,32 @@ static void screensaver_timer(lv_timer_t *timer)
 {
     (void)timer;
     uint32_t inactive = lv_display_get_inactive_time(ui_display);
-    if (inactive >= SCREENSAVER_TIMEOUT_MS) {
+    uint32_t saver_timeout = (uint32_t)current_settings.screensaver_minutes * MINUTE_MS;
+    uint32_t off_timeout = (uint32_t)current_settings.display_off_minutes * MINUTE_MS;
+
+    if (!display_asleep && off_timeout > 0 && inactive >= off_timeout) {
         lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
-    } else if (inactive < 1000) {
+        if (board_waveshare_5_set_backlight(false) == ESP_OK) {
+            display_asleep = true;
+        }
+        return;
+    }
+    if (display_asleep) {
+        return;
+    }
+    if (saver_timeout > 0 && inactive >= saver_timeout) {
+        lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+        ++screensaver_tick;
+        if (screensaver_tick % 5 == 0 && screensaver_content != NULL) {
+            static const int offsets[][2] = {
+                { -160, -100 }, { 150, -80 }, { 130, 95 }, { -145, 90 }, { 0, 0 },
+            };
+            size_t index = (screensaver_tick / 5) % (sizeof(offsets) / sizeof(offsets[0]));
+            lv_obj_align(screensaver_content, LV_ALIGN_CENTER, offsets[index][0], offsets[index][1]);
+        }
+    } else {
         lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+        screensaver_tick = 0;
     }
 }
 
@@ -324,17 +486,24 @@ static void build_screensaver(lv_obj_t *screen)
     lv_obj_clear_flag(screensaver, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(screensaver, screensaver_tapped, LV_EVENT_PRESSED, NULL);
 
-    lv_obj_t *icon = lv_image_create(screensaver);
+    screensaver_content = lv_obj_create(screensaver);
+    lv_obj_set_style_bg_opa(screensaver_content, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(screensaver_content, 0, 0);
+    lv_obj_set_size(screensaver_content, 360, 150);
+    lv_obj_clear_flag(screensaver_content, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(screensaver_content);
+
+    lv_obj_t *icon = lv_image_create(screensaver_content);
     lv_image_set_src(icon, &ilo_icon_48);
-    lv_obj_align(icon, LV_ALIGN_CENTER, -92, -20);
-    lv_obj_t *pulse = create_label(screensaver, "ILO / PULSE", &lv_font_montserrat_28, COLOR_MIST);
-    lv_obj_align(pulse, LV_ALIGN_CENTER, 36, -30);
-    lv_obj_t *wake = create_label(screensaver, "Touch to wake", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(wake, LV_ALIGN_CENTER, 36, 14);
-    screensaver_status_dot = lv_obj_create(screensaver);
+    lv_obj_align(icon, LV_ALIGN_CENTER, -120, -20);
+    lv_obj_t *pulse = create_label(screensaver_content, "ILO / PULSE", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_align(pulse, LV_ALIGN_CENTER, 8, -30);
+    lv_obj_t *wake = create_label(screensaver_content, "Touch to wake", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(wake, LV_ALIGN_CENTER, 8, 14);
+    screensaver_status_dot = lv_obj_create(screensaver_content);
     set_clean_box(screensaver_status_dot, COLOR_FOG, LV_RADIUS_CIRCLE);
     lv_obj_set_size(screensaver_status_dot, 10, 10);
-    lv_obj_align(screensaver_status_dot, LV_ALIGN_CENTER, -22, 62);
+    lv_obj_align(screensaver_status_dot, LV_ALIGN_CENTER, -50, 62);
 
     lv_timer_create(screensaver_timer, 1000, NULL);
 }
@@ -521,6 +690,7 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
     lv_indev_set_read_cb(touch, touch_read);
 
     ui_display = display;
+    current_settings = device_settings_load();
     build_ui();
     lvgl_port_unlock();
     return ESP_OK;
@@ -532,6 +702,8 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         return;
     }
     lvgl_port_lock(0);
+    latest_model = *model;
+    latest_model_valid = true;
     int attention_count = 0;
     for (int i = 0; i < model->task_count && i < DASHBOARD_MAX_TASKS; ++i) {
         if (model->tasks[i].attention != DASHBOARD_ATTENTION_NONE) {
@@ -546,7 +718,10 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         const dashboard_task_t *task = &model->tasks[i];
         lv_obj_remove_flag(task_rows[i], LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(task_titles[i], task->title);
-        lv_label_set_text(task_summaries[i], task->summary);
+        lv_label_set_text(
+            task_summaries[i],
+            current_settings.hide_task_summaries ? "Summary hidden by privacy setting" : task->summary
+        );
         lv_color_t dot = COLOR_STEEL;
         if (task->attention != DASHBOARD_ATTENTION_NONE) {
             dot = COLOR_AMBER;
@@ -563,7 +738,10 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         const dashboard_task_t *task = &model->tasks[i];
         lv_obj_remove_flag(codex_rows[i], LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(codex_titles[i], task->title);
-        lv_label_set_text(codex_summaries[i], task->summary);
+        lv_label_set_text(
+            codex_summaries[i],
+            current_settings.hide_task_summaries ? "Summary hidden by privacy setting" : task->summary
+        );
         lv_color_t dot = COLOR_STEEL;
         if (task->attention != DASHBOARD_ATTENTION_NONE) {
             dot = COLOR_AMBER;

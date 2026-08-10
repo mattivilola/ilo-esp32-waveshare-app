@@ -151,11 +151,11 @@ These are deterministic desktop renders with sample data, not photographs of the
   <img src="docs/images/ui-preview/settings.png" alt="ILO Board Settings simulator screen" width="49%">
 </p>
 
-The first settings surface covers brightness, idle dim timeout, screen-off timeout, screensaver mode, Wi-Fi/Mac/weather status, and privacy mode. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
+The Settings screen now cycles and persists the Pulse screensaver timeout (`Never`, 2, or 5 minutes), display-off timeout (`Never`, 5, 10, or 30 minutes), and whether task summaries are visible. It also offers **Turn display off now**. Settings live in their own NVS namespace and survive normal reboot/firmware updates; full USB reprovisioning replaces the NVS partition and returns them to defaults. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
 
-The matching LVGL structure is already compiled into firmware, including horizontal tile gestures and the embedded ILO roundel. Do not treat it as hardware-verified yet: swipe behavior, memory headroom, text clipping, icon alpha/color order, screensaver timeout/wake, and real touch targets must be checked on the 5B before flashing this build is called stable.
+The matching LVGL structure is already compiled into firmware, including horizontal tile gestures, persistent setting controls, the embedded ILO roundel, a moving Pulse saver, binary backlight sleep, and a wake touch that is consumed rather than passed through to a hidden control. Do not treat it as hardware-verified yet: swipe behavior, text clipping, icon alpha/color order, CH422G backlight off/on, timeout/wake behavior, and real touch targets must be checked on the 5B before flashing this build is called stable.
 
-An old-school screensaver does make sense here as a product feature: a slow pulse clock with the ILO roundel and one small status indicator. Because this is an LCD rather than OLED, its main benefits are ambience and glanceability; actual power savings come from dimming or switching off the backlight.
+An old-school screensaver does make sense here as a product feature: the ILO roundel and status move slowly around the screen. Because this is an LCD rather than OLED, its main benefits are ambience and glanceability; actual power savings come when the backlight is switched off. The exact 5B exposes `DISP` as a binary CH422G expander output, not a PWM brightness channel, so the UX does not promise a fake brightness slider.
 
 ## Connecting to Codex
 

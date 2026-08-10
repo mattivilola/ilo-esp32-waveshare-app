@@ -28,6 +28,8 @@ Codex app-server
 - The separately launched server can list recent Desktop-created tasks, but those tasks report `notLoaded`; the mapper labels them as recent history and never as live. Only tasks loaded by that App Server may expose authoritative active/waiting state.
 - The narrow decoder admits only thread ID, name, update time, and status. Board payloads exclude prompt preview, working directory, turns, source metadata, Git data, and file contents.
 - Board-specific LCD, touch, backlight, and IO-expander behavior for the 1024×600 5B stays behind `board_waveshare_5`.
+- User display/privacy settings live in the separate `ilo_settings` NVS namespace. Normal app flashes and reboots preserve them; the deliberate full-NVS USB provisioning flow resets them with the rest of provisioned state.
+- The 5B `DISP` line is a binary CH422G output. `board_waveshare_5` therefore exposes backlight on/off only; no firmware layer pretends that PWM brightness is available.
 - UI components consume a view model and do not perform networking.
 - `BoardUIPrototype` mirrors the intended device information architecture for visual iteration and screenshots; LVGL remains the shipping device UI and physical hardware remains the final verification target.
 - The shared 512×512 PNG is transformed deterministically into macOS `.icns` and a 48×48 LVGL ARGB descriptor by `make assets`; generated firmware bytes contain no runtime PNG decoder dependency.

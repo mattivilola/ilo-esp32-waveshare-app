@@ -62,10 +62,9 @@ The board optimizes for the next few hours and today rather than dense meteorolo
 
 The first device-manageable preferences are:
 
-- brightness;
-- idle dim timeout;
-- screen-off timeout;
-- screensaver mode;
+- Pulse screensaver timeout (`Never`, 2, or 5 minutes);
+- binary display-off timeout (`Never`, 5, 10, or 30 minutes) and “off now”;
+- task-summary visibility on the board;
 - Celsius/Fahrenheit and 12/24-hour display;
 - weather location and refresh state;
 - whether task summaries are visible in privacy mode;
@@ -76,14 +75,14 @@ Reboot, pairing reset, erase, and update installation require a separate confirm
 
 ## Screensaver and power
 
-The default concept is “Pulse clock”: a slow-moving ILO roundel, large time, and one small connection/attention indicator on an otherwise black screen. Touch wakes immediately. New genuine attention may wake to a dim attention summary, subject to quiet-hours settings.
+The first implementation is “Pulse”: a slow-moving ILO roundel and one small connection indicator on an otherwise black screen. Touch wakes immediately. When waking from backlight-off sleep, the firmware consumes the entire first touch until release so it cannot accidentally activate a control underneath.
 
-This IPS LCD is not primarily at risk of OLED burn-in. A moving screensaver is therefore an ambient experience, while the backlight policy delivers power savings:
+This IPS LCD is not primarily at risk of OLED burn-in. A moving screensaver is therefore an ambient experience. The exact 5B routes `DISP` through a CH422G expander output and does not expose PWM brightness control, so the honest power policy is:
 
-1. normal brightness during interaction;
-2. dim after the idle timeout;
-3. screensaver at a low backlight level;
-4. backlight off after the screen-off timeout.
+1. backlight on during interaction;
+2. moving Pulse screen after the configured idle timeout;
+3. backlight fully off after the display-off timeout;
+4. consume the first touch, restore the backlight, and return to the previous page.
 
 ## Work-pulse extensions
 
@@ -105,7 +104,7 @@ The dashboard should aggregate only the top one or two of these. Dedicated pages
 
 The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages.
 
-The first LVGL port now mirrors the four-page structure with `lv_tileview`, fixed bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, sample Weather, non-destructive Settings status, and a two-minute Pulse screensaver. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
+The first LVGL port now mirrors the four-page structure with `lv_tileview`, fixed bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
 
 ## macOS menu-bar companion
 
