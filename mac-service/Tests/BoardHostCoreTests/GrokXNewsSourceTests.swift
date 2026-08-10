@@ -32,6 +32,9 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     #expect(parsed.stories.map(\.category) == [.ai, .robotics])
     #expect(parsed.stories[0].sources[0].handle == "@example_ai")
     #expect(parsed.stories[0].sources[0].xURL.host == "x.com")
+    let wire = XNewsWireMapper.snapshot(from: parsed)
+    #expect(wire.stories.count == 2)
+    #expect(wire.stories[0].sources[0].postURL.hasPrefix("https://x.com/example_ai/status/"))
 }
 
 @Test func oneValidDocumentCanBeSelectedFromConcatenatedGrokOutput() throws {
@@ -52,17 +55,17 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     #expect(parsed.stories.map(\.title) == ["Verified one", "Verified two"])
 }
 
-@Test func ambiguousRootAndOldXStatusResultsAreRejected() throws {
+@Test func multipleValidDocumentsMergeDeterministicallyWhileUnsafeResultsAreRejected() throws {
     let valid = feed(topics: [
         topic(category: "AI", headline: "One", handle: "@one", date: referenceNow.addingTimeInterval(-600)),
         topic(category: "Robotics", headline: "Two", handle: "@two", date: referenceNow.addingTimeInterval(-900)),
     ])
-    #expect(throws: GrokXNewsError.self) {
-        try GrokXNewsParser.parse(
-            grokOutput: grokEnvelope(feedDocuments: [valid, valid]),
-            now: referenceNow
-        )
-    }
+    let merged = try GrokXNewsParser.parse(
+        grokOutput: grokEnvelope(feedDocuments: [valid, valid]),
+        now: referenceNow
+    )
+    #expect(merged.stories.count == 2)
+    #expect(Set(merged.stories.flatMap(\.sources).map(\.xURL)).count == 2)
 
     var rootURL = valid
     var rootTopics = rootURL["topics"] as! [[String: Any]]
@@ -148,6 +151,42 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     #expect(throws: GrokXNewsError.self) {
         try source.refresh(explicitlyAllowsGrokTools: false, now: referenceNow)
     }
+}
+
+@Test func refreshPolicyDefaultsToOneMorningRunAndCanOfferTwoRuns() throws {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = try #require(TimeZone(secondsFromGMT: 2 * 60 * 60))
+    let morning = try #require(ISO8601DateFormatter().date(from: "2026-08-10T06:30:00Z")) // 08:30 local
+
+    let daily = XNewsRefreshPolicy()
+    #expect(daily.cadence == .daily)
+    #expect(daily.nextAutomaticRefresh(after: morning, calendar: calendar) ==
+        ISO8601DateFormatter().date(from: "2026-08-11T06:00:00Z"))
+
+    let twice = XNewsRefreshPolicy(cadence: .morningAndAfternoon)
+    #expect(twice.nextAutomaticRefresh(after: morning, calendar: calendar) ==
+        ISO8601DateFormatter().date(from: "2026-08-10T12:00:00Z"))
+}
+
+@Test func manualRefreshHasAShortCostSafetyCooldown() {
+    let policy = XNewsRefreshPolicy()
+    #expect(policy.allowsManualRefresh(lastAttempt: nil, now: referenceNow))
+    #expect(!policy.allowsManualRefresh(lastAttempt: referenceNow.addingTimeInterval(-899), now: referenceNow))
+    #expect(policy.allowsManualRefresh(lastAttempt: referenceNow.addingTimeInterval(-900), now: referenceNow))
+}
+
+@Test func refreshOptInSettingsRoundTripAndDefaultOff() throws {
+    let temporaryURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-x-news-settings-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: temporaryURL) }
+    let store = XNewsRefreshSettingsStore(url: temporaryURL)
+    #expect(store.load().cadence == .off)
+
+    let attempt = referenceNow.addingTimeInterval(-300)
+    let settings = XNewsRefreshSettings(cadence: .morningAndAfternoon, lastAttemptAt: attempt)
+    try store.save(settings)
+
+    #expect(store.load() == settings)
 }
 
 private func topic(

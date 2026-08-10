@@ -57,6 +57,15 @@ def screenshot(arguments: argparse.Namespace) -> None:
     run(command)
 
 
+def x_news(arguments: argparse.Namespace) -> None:
+    command = ["run", "ilo-board-host", "x-news", arguments.action]
+    if arguments.allow_grok_tools:
+        command.append("--allow-grok-tools")
+    if arguments.twice_daily:
+        command.append("--twice-daily")
+    run(command)
+
+
 def doctor(_: argparse.Namespace) -> None:
     run(["run", "ilo-board-host", "doctor"])
 
@@ -72,6 +81,7 @@ def parser() -> argparse.ArgumentParser:
         ("serve", "run the headless Codex status service", serve),
         ("doctor", "show host protocol capabilities", doctor),
         ("screenshot", "capture the authenticated live board framebuffer as PNG", screenshot),
+        ("x-news", "inspect or refresh the optional verified Grok X News cache", x_news),
     ):
         command = commands.add_parser(name, help=help_text)
         if name in ("snapshot", "serve"):
@@ -80,6 +90,18 @@ def parser() -> argparse.ArgumentParser:
             command.add_argument("--output", required=True, help="destination PNG path")
             command.add_argument("--timeout", type=int, help="seconds to wait for the paired board (default: 45)")
             command.add_argument("--force", action="store_true", help="replace an existing output file")
+        if name == "x-news":
+            command.add_argument("action", choices=("status", "refresh", "enable", "disable"))
+            command.add_argument(
+                "--allow-grok-tools",
+                action="store_true",
+                help="explicitly allow the authenticated Grok CLI to search X for this refresh",
+            )
+            command.add_argument(
+                "--twice-daily",
+                action="store_true",
+                help="when enabling, refresh at 08:00 and 14:00 local instead of once daily",
+            )
         command.set_defaults(handler=handler)
     return result
 

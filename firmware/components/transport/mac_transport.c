@@ -555,6 +555,24 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
         target->state = task_state(cJSON_IsString(state) ? state->valuestring : NULL);
         target->attention = attention(cJSON_IsString(attention_item) ? attention_item->valuestring : NULL);
     }
+    cJSON *news_feed = cJSON_GetObjectItemCaseSensitive(snapshot, "newsFeed");
+    cJSON *stories = cJSON_GetObjectItemCaseSensitive(news_feed, "stories");
+    if (cJSON_IsArray(stories)) {
+        cJSON *story = NULL;
+        cJSON_ArrayForEach(story, stories) {
+            if (model->news_count >= DASHBOARD_MAX_NEWS) break;
+            dashboard_news_story_t *target = &model->news[model->news_count++];
+            copy_json_string(story, "category", target->category, sizeof(target->category));
+            copy_json_string(story, "headline", target->headline, sizeof(target->headline));
+            copy_json_string(story, "summary", target->summary, sizeof(target->summary));
+            copy_json_string(story, "confidence", target->confidence, sizeof(target->confidence));
+            cJSON *sources = cJSON_GetObjectItemCaseSensitive(story, "sources");
+            cJSON *source = cJSON_IsArray(sources) ? cJSON_GetArrayItem(sources, 0) : NULL;
+            if (cJSON_IsObject(source)) {
+                copy_json_string(source, "handle", target->handle, sizeof(target->handle));
+            }
+        }
+    }
     return true;
 }
 

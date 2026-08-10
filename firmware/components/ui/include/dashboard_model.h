@@ -7,6 +7,7 @@ extern "C" {
 #endif
 
 #define DASHBOARD_MAX_TASKS 6
+#define DASHBOARD_MAX_NEWS 5
 
 typedef enum {
     DASHBOARD_TASK_ACTIVE,
@@ -31,9 +32,19 @@ typedef struct {
 } dashboard_task_t;
 
 typedef struct {
+    char category[10];
+    char headline[71];
+    char summary[221];
+    char confidence[7];
+    char handle[17];
+} dashboard_news_story_t;
+
+typedef struct {
     uint64_t revision;
     uint8_t task_count;
     dashboard_task_t tasks[DASHBOARD_MAX_TASKS];
+    uint8_t news_count;
+    dashboard_news_story_t news[DASHBOARD_MAX_NEWS];
 } dashboard_model_t;
 
 dashboard_model_t dashboard_model_demo(void);
@@ -41,4 +52,3 @@ dashboard_model_t dashboard_model_demo(void);
 #ifdef __cplusplus
 }
 #endif
-

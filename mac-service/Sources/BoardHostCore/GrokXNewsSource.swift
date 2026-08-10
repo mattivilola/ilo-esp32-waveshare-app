@@ -1,4 +1,5 @@
 import Darwin
+import BoardProtocol
 import Foundation
 
 public enum XNewsCategory: String, Codable, CaseIterable, Sendable {
@@ -55,6 +56,93 @@ public struct XNewsFeed: Codable, Equatable, Sendable {
     }
 }
 
+public enum XNewsRefreshCadence: String, Codable, CaseIterable, Sendable {
+    case off
+    case daily
+    case morningAndAfternoon
+
+    public var scheduledLocalHours: [Int] {
+        switch self {
+        case .off: []
+        case .daily: [8]
+        case .morningAndAfternoon: [8, 14]
+        }
+    }
+}
+
+public struct XNewsRefreshPolicy: Equatable, Sendable {
+    public static let manualCooldown: TimeInterval = 15 * 60
+    public let cadence: XNewsRefreshCadence
+
+    public init(cadence: XNewsRefreshCadence = .daily) {
+        self.cadence = cadence
+    }
+
+    public func nextAutomaticRefresh(after date: Date, calendar: Calendar = .current) -> Date? {
+        guard !cadence.scheduledLocalHours.isEmpty else { return nil }
+        let startOfDay = calendar.startOfDay(for: date)
+        for dayOffset in 0...2 {
+            guard let day = calendar.date(byAdding: .day, value: dayOffset, to: startOfDay) else { continue }
+            for hour in cadence.scheduledLocalHours {
+                guard let candidate = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day),
+                      candidate > date
+                else {
+                    continue
+                }
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    public func allowsManualRefresh(lastAttempt: Date?, now: Date = Date()) -> Bool {
+        guard let lastAttempt else { return true }
+        return now.timeIntervalSince(lastAttempt) >= Self.manualCooldown
+    }
+}
+
+public struct XNewsRefreshSettings: Codable, Equatable, Sendable {
+    public let cadence: XNewsRefreshCadence
+    public let consentVersion: Int
+    public let lastAttemptAt: Date?
+
+    public init(cadence: XNewsRefreshCadence = .off, consentVersion: Int = 1, lastAttemptAt: Date? = nil) {
+        self.cadence = cadence
+        self.consentVersion = consentVersion
+        self.lastAttemptAt = lastAttemptAt
+    }
+}
+
+public struct XNewsRefreshSettingsStore: Sendable {
+    public let url: URL
+
+    public init(url: URL = Self.defaultURL) {
+        self.url = url
+    }
+
+    public static var defaultURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/ILO Board Host/x-news-settings.json")
+    }
+
+    public func load() -> XNewsRefreshSettings {
+        guard let data = try? Data(contentsOf: url),
+              let settings = try? JSONDecoder().decode(XNewsRefreshSettings.self, from: data),
+              settings.consentVersion == 1
+        else {
+            return XNewsRefreshSettings()
+        }
+        return settings
+    }
+
+    public func save(_ settings: XNewsRefreshSettings) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(settings).write(to: url, options: [.atomic, .completeFileProtection])
+    }
+}
+
 public enum GrokXNewsError: Error, LocalizedError, Sendable {
     case executableNotFound
     case explicitConsentRequired
@@ -64,6 +152,7 @@ public enum GrokXNewsError: Error, LocalizedError, Sendable {
     case malformedFeed
     case invalidFeed(String)
     case noCachedFeed
+    case refreshCooldown
 
     public var errorDescription: String? {
         switch self {
@@ -83,6 +172,8 @@ public enum GrokXNewsError: Error, LocalizedError, Sendable {
             "Grok X-news output was rejected: \(reason). The previous verified feed was preserved."
         case .noCachedFeed:
             "No verified X-news feed is cached yet."
+        case .refreshCooldown:
+            "Wait 15 minutes before starting another X-news refresh."
         }
     }
 }
@@ -227,12 +318,39 @@ public enum GrokXNewsParser {
                 firstValidationError = firstValidationError ?? error
             }
         }
-        guard validFeeds.count <= 1 else {
-            throw GrokXNewsError.invalidFeed("multiple valid JSON feeds make the result ambiguous")
-        }
-        if let feed = validFeeds.first { return feed }
+        if !validFeeds.isEmpty { return merge(validFeeds) }
         if let firstValidationError { throw firstValidationError }
         throw GrokXNewsError.malformedFeed
+    }
+
+    private static func merge(_ feeds: [XNewsFeed]) -> XNewsFeed {
+        var seenURLs = Set<String>()
+        var seenHeadlines = Set<String>()
+        var stories = [XNewsStory]()
+        for feed in feeds.reversed() {
+            for story in feed.stories {
+                let headlineKey = story.title.lowercased()
+                    .filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
+                    .split(whereSeparator: \.isWhitespace)
+                    .joined(separator: " ")
+                guard seenHeadlines.insert(headlineKey).inserted else { continue }
+                let newSources = story.sources.filter { seenURLs.insert($0.xURL.absoluteString).inserted }
+                guard !newSources.isEmpty else { continue }
+                stories.append(XNewsStory(
+                    title: story.title,
+                    summary: story.summary,
+                    category: story.category,
+                    confidence: story.confidence,
+                    sources: newSources
+                ))
+                if stories.count == GrokXNewsContract.maximumStories { break }
+            }
+            if stories.count == GrokXNewsContract.maximumStories { break }
+        }
+        return XNewsFeed(
+            generatedAt: feeds.map(\.generatedAt).max() ?? Date.distantPast,
+            stories: stories
+        )
     }
 
     private static func validate(_ raw: RawFeed, now: Date) throws -> XNewsFeed {
@@ -366,12 +484,20 @@ public struct XNewsFeedCache: Sendable {
     }
 
     public func load(now: Date = Date()) throws -> XNewsFeed {
+        let feed = try loadIncludingStale()
+        guard now.timeIntervalSince(feed.generatedAt) >= -10 * 60,
+              now.timeIntervalSince(feed.generatedAt) <= GrokXNewsContract.maximumAge
+        else {
+            throw GrokXNewsError.noCachedFeed
+        }
+        return feed
+    }
+
+    public func loadIncludingStale() throws -> XNewsFeed {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: url),
-              let feed = try? decoder.decode(XNewsFeed.self, from: data),
-              now.timeIntervalSince(feed.generatedAt) >= -10 * 60,
-              now.timeIntervalSince(feed.generatedAt) <= GrokXNewsContract.maximumAge
+              let feed = try? decoder.decode(XNewsFeed.self, from: data)
         else {
             throw GrokXNewsError.noCachedFeed
         }
@@ -385,6 +511,31 @@ public struct XNewsFeedCache: Sendable {
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(feed).write(to: url, options: [.atomic, .completeFileProtection])
+    }
+}
+
+public enum XNewsWireMapper {
+    public static func snapshot(from feed: XNewsFeed) -> NewsFeedSnapshot {
+        NewsFeedSnapshot(
+            generatedAt: feed.generatedAt,
+            stories: feed.stories.enumerated().map { index, story in
+                NewsStory(
+                    id: story.sources.first?.xURL.absoluteString ?? "story-\(index)",
+                    category: story.category.rawValue,
+                    headline: story.title,
+                    summary: story.summary,
+                    confidence: story.confidence.rawValue,
+                    sources: story.sources.map {
+                        NewsCitation(handle: $0.handle, postedAt: $0.postedAt, postURL: $0.xURL.absoluteString)
+                    }
+                )
+            }
+        )
+    }
+
+    public static func cachedSnapshot(now: Date = Date(), cache: XNewsFeedCache = XNewsFeedCache()) -> NewsFeedSnapshot? {
+        guard let feed = try? cache.load(now: now) else { return nil }
+        return snapshot(from: feed)
     }
 }
 
@@ -464,9 +615,78 @@ public struct GrokXNewsSource: Sendable {
         guard outputSize <= 1_000_000 else {
             throw GrokXNewsError.invalidFeed("response exceeds the one-megabyte safety limit")
         }
-        let feed = try GrokXNewsParser.parse(grokOutput: Data(contentsOf: stdoutURL), now: now)
+        let candidate = try GrokXNewsParser.parse(grokOutput: Data(contentsOf: stdoutURL), now: now)
+        let feed = deduplicating(candidate, against: try? cache.loadIncludingStale())
+        guard !feed.stories.isEmpty else {
+            throw GrokXNewsError.invalidFeed("no newly cited development remains after cache deduplication")
+        }
         try cache.save(feed)
         return feed
+    }
+
+    private func deduplicating(_ candidate: XNewsFeed, against previous: XNewsFeed?) -> XNewsFeed {
+        let previousURLs = Set(previous?.stories.flatMap(\.sources).map { $0.xURL.absoluteString } ?? [])
+        guard !previousURLs.isEmpty else { return candidate }
+        return XNewsFeed(
+            generatedAt: candidate.generatedAt,
+            stories: candidate.stories.filter { story in
+                story.sources.contains { !previousURLs.contains($0.xURL.absoluteString) }
+            }
+        )
+    }
+}
+
+public actor XNewsRefreshCoordinator {
+    public static let shared = XNewsRefreshCoordinator()
+
+    private let settingsStore: XNewsRefreshSettingsStore
+    private let cache: XNewsFeedCache
+    private var refreshInFlight = false
+
+    public init(
+        settingsStore: XNewsRefreshSettingsStore = XNewsRefreshSettingsStore(),
+        cache: XNewsFeedCache = XNewsFeedCache()
+    ) {
+        self.settingsStore = settingsStore
+        self.cache = cache
+    }
+
+    public func run() async {
+        while !Task.isCancelled {
+            considerRefresh()
+            try? await Task.sleep(for: .seconds(60))
+        }
+    }
+
+    public func considerRefresh(now: Date = Date(), calendar: Calendar = .current) {
+        guard !refreshInFlight else { return }
+        let settings = settingsStore.load()
+        guard settings.consentVersion == 1, settings.cadence != .off else { return }
+        let policy = XNewsRefreshPolicy(cadence: settings.cadence)
+        guard policy.allowsManualRefresh(lastAttempt: settings.lastAttemptAt, now: now) else { return }
+        let previous = try? cache.loadIncludingStale()
+        let mostRecentReference = [previous?.generatedAt, settings.lastAttemptAt].compactMap { $0 }.max()
+        let isDue = mostRecentReference == nil || policy.nextAutomaticRefresh(
+            after: mostRecentReference ?? now,
+            calendar: calendar
+        ).map { $0 <= now } == true
+        guard isDue else { return }
+
+        try? settingsStore.save(XNewsRefreshSettings(
+            cadence: settings.cadence,
+            consentVersion: settings.consentVersion,
+            lastAttemptAt: now
+        ))
+        refreshInFlight = true
+        let source = GrokXNewsSource(cache: cache)
+        Task.detached(priority: .utility) { [weak self] in
+            _ = try? source.refresh(explicitlyAllowsGrokTools: true)
+            await self?.refreshFinished()
+        }
+    }
+
+    private func refreshFinished() {
+        refreshInFlight = false
     }
 }
 

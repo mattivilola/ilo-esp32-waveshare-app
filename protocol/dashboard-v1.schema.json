@@ -12,7 +12,7 @@
     "hostState": { "enum": ["online", "sleeping", "degraded"] },
     "capabilities": {
       "type": "array",
-      "items": { "enum": ["tasks.read"] },
+      "items": { "enum": ["tasks.read", "xNews.read"] },
       "uniqueItems": true
     },
     "tasks": {
@@ -31,7 +31,45 @@
           "shortSummary": { "type": "string", "maxLength": 180 }
         }
       }
+    },
+    "newsFeed": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["generatedAt", "stories"],
+      "properties": {
+        "generatedAt": { "type": "string", "format": "date-time" },
+        "stories": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "category", "headline", "summary", "confidence", "sources"],
+            "properties": {
+              "id": { "type": "string", "maxLength": 120 },
+              "category": { "enum": ["AI", "Robotics"] },
+              "headline": { "type": "string", "maxLength": 70 },
+              "summary": { "type": "string", "maxLength": 220 },
+              "confidence": { "enum": ["high", "medium"] },
+              "sources": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["handle", "postedAt", "postURL"],
+                  "properties": {
+                    "handle": { "type": "string", "pattern": "^@[A-Za-z0-9_]{1,15}$" },
+                    "postedAt": { "type": "string", "format": "date-time" },
+                    "postURL": { "type": "string", "pattern": "^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
-

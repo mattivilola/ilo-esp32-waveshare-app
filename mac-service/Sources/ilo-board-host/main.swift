@@ -34,7 +34,8 @@ struct ILOBoardHostCommand {
                 revision: raw.revision,
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
-                tasks: raw.tasks.map(TaskSanitizer.sanitize)
+                tasks: raw.tasks.map(TaskSanitizer.sanitize),
+                newsFeed: raw.newsFeed
             )
             let data = try ProtocolJSON.encoder().encode(snapshot)
             print(String(decoding: data, as: UTF8.self))
@@ -48,6 +49,8 @@ struct ILOBoardHostCommand {
             try server.start(port: port)
             print(arguments.contains("--mock") ? "Serving sanitized mock task status." : "Serving sanitized Codex recent-task history.")
             print("Remote actions are disabled.")
+            let xNewsScheduleTask = Task { await XNewsRefreshCoordinator.shared.run() }
+            defer { xNewsScheduleTask.cancel() }
             await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
         case "screenshot":
             guard let outputPath = value(after: "--output", in: arguments) else {
@@ -94,11 +97,15 @@ struct ILOBoardHostCommand {
             print("Saved authenticated 1024x600 board capture: \(outputURL.path)")
         case "doctor":
             print("ILO Board Host")
-            print("  protocol: v\(boardProtocolVersion), tasks.read only")
+            print("  protocol: v\(boardProtocolVersion), tasks.read + xNews.read + display.capture.rgb565")
             print("  service: _iloboard._tcp")
             print("  transport: TLS 1.2 PSK")
             print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")
             print("  Desktop task status: recent history only unless owned by this App Server")
+            print("  Optional Grok adapter: \(GrokExecutableResolver.resolve()?.path ?? "CLI not found")")
+            print("  X News: opt-in; verified cache only; daily policy available")
+        case "x-news":
+            try runXNews(arguments: Array(arguments.dropFirst()))
         default:
             printUsage()
         }
@@ -131,6 +138,62 @@ struct ILOBoardHostCommand {
         return seconds
     }
 
+    private static func runXNews(arguments: [String]) throws {
+        switch arguments.first ?? "status" {
+        case "status":
+            print("Grok CLI: \(GrokExecutableResolver.resolve()?.path ?? "not found")")
+            if let feed = try? XNewsFeedCache().load() {
+                let timestamp = ISO8601DateFormatter().string(from: feed.generatedAt)
+                print("Verified cache: \(feed.stories.count) stories generated \(timestamp)")
+            } else {
+                print("Verified cache: unavailable")
+            }
+            let settings = XNewsRefreshSettingsStore().load()
+            print("Automatic refresh: \(settings.cadence.rawValue)")
+            print("Available schedules: daily at 08:00, or 08:00 + 14:00 local")
+            print("Manual refresh cooldown: 15 minutes")
+        case "refresh":
+            guard arguments.contains("--allow-grok-tools") else {
+                throw GrokXNewsError.explicitConsentRequired
+            }
+            let settingsStore = XNewsRefreshSettingsStore()
+            let settings = settingsStore.load()
+            let now = Date()
+            guard XNewsRefreshPolicy(cadence: settings.cadence).allowsManualRefresh(
+                lastAttempt: settings.lastAttemptAt,
+                now: now
+            ) else {
+                throw GrokXNewsError.refreshCooldown
+            }
+            try settingsStore.save(XNewsRefreshSettings(
+                cadence: settings.cadence,
+                consentVersion: settings.consentVersion,
+                lastAttemptAt: now
+            ))
+            let feed = try GrokXNewsSource().refresh(
+                explicitlyAllowsGrokTools: true,
+                now: now
+            )
+            print("Accepted and cached \(feed.stories.count) newly cited X News stories.")
+        case "enable":
+            guard arguments.contains("--allow-grok-tools") else {
+                throw GrokXNewsError.explicitConsentRequired
+            }
+            let cadence: XNewsRefreshCadence = arguments.contains("--twice-daily") ? .morningAndAfternoon : .daily
+            let store = XNewsRefreshSettingsStore()
+            try store.save(XNewsRefreshSettings(cadence: cadence, lastAttemptAt: store.load().lastAttemptAt))
+            print(cadence == .daily
+                ? "Enabled X News at 08:00 local each day."
+                : "Enabled X News at 08:00 and 14:00 local each day.")
+        case "disable":
+            let store = XNewsRefreshSettingsStore()
+            try store.save(XNewsRefreshSettings(cadence: .off, lastAttemptAt: store.load().lastAttemptAt))
+            print("Disabled automatic X News refresh. The last verified cache was preserved.")
+        default:
+            throw XNewsCommandError.invalidAction
+        }
+    }
+
     private static func waitForCapture(
         events: AsyncStream<Result<CapturedScreen, ScreenCaptureError>>,
         timeoutSeconds: Int
@@ -159,7 +222,19 @@ struct ILOBoardHostCommand {
           ilo-board-host pair --board-id ID --secret-stdin
           ilo-board-host serve [--mock] [--board-id ID] [--port PORT]
           ilo-board-host screenshot --output FILE.png [--timeout SECONDS] [--force]
+          ilo-board-host x-news status
+          ilo-board-host x-news refresh --allow-grok-tools
+          ilo-board-host x-news enable [--twice-daily] --allow-grok-tools
+          ilo-board-host x-news disable
         """)
+    }
+}
+
+private enum XNewsCommandError: Error, LocalizedError {
+    case invalidAction
+
+    var errorDescription: String? {
+        "X News action must be status or refresh."
     }
 }
 

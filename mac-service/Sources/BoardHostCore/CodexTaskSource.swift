@@ -290,7 +290,8 @@ public actor CodexHistoryTaskSource: TaskSource {
         return DashboardSnapshot(
             revision: revision,
             generatedAt: now,
-            tasks: threads.prefix(6).map(CodexHistoryMapper.task)
+            tasks: threads.prefix(6).map(CodexHistoryMapper.task),
+            newsFeed: XNewsWireMapper.cachedSnapshot(now: now)
         )
     }
 }

@@ -26,6 +26,8 @@ Live framebuffer capture has no unauthenticated HTTP or discovery endpoint. The 
 
 Direct weather is the only current board-originated Internet request. It sends configured latitude/longitude and ordinary HTTP metadata to `api.open-meteo.com`; it sends no board ID, pairing secret, Wi-Fi password, Codex data, or Mac data. The response is bounded to 8 KiB and HTTPS uses ESP-IDF's CA certificate bundle after SNTP clock synchronization. Weather is optional public-data access, not a general proxy or arbitrary URL feature.
 
+Optional X News remains Mac-mediated and disabled by default. Enabling or manually refreshing it requires explicit CLI consent because the authenticated Grok process uses `--yolo` for X search and may consume paid capacity. The process runs from an isolated temporary directory with memory/subagents disabled, a three-minute deadline, and a 1 MB output cap. Output is rejected unless bounded stories contain matching direct X status URLs whose Snowflake timestamps independently fall inside the requested 24-hour window. Invalid output never replaces the previous cache. Only the verified bounded cache crosses TLS to the board; Grok/X credentials, reasoning, sessions, prompts, usage, stderr, and raw output stay off the wire.
+
 ## Explicit exclusions
 
 The device cannot currently:

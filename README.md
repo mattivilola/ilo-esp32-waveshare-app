@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server; deterministic mock data remains available for demos and tests. Delivering that new source to the board has not yet been rechecked on hardware. The four-page LVGL navigation, shared icon, persistent Settings, Pulse screensaver/backlight sleep, and direct HTTPS weather client are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server; deterministic mock data remains available for demos and tests. Delivering that new source to the board has not yet been rechecked on hardware. The five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, and optional Mac-verified X News feed are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -45,6 +45,7 @@ Hardware-independent development can continue without a board: the Swift service
 - macOS Keychain access. Pairing stores the per-board TLS secret in the login Keychain; the prompt expects your normal Mac login password.
 - Local Network permission for the packaged menu-bar app.
 - For Codex integration: a supported local `codex` CLI that is installed and authenticated. No Codex token is stored on the board.
+- Optional X News integration: `grok` CLI 1.0.0 or a compatible newer build, authenticated with an account that can search X. Set `ILO_BOARD_GROK_PATH` if it is not on `PATH` or under `~/.local/bin`. Grok authentication remains on the Mac.
 
 ### Network
 
@@ -99,7 +100,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Flash firmware | `make firmware-flash` | Yes, USB |
 | Open serial monitor | `make firmware-monitor` | Yes, USB |
 | Open interactive 1024×600 UI preview | `make ui-preview` | No |
-| Export all four simulator screenshots | `make ui-screenshots` | No |
+| Export all five simulator screenshots | `make ui-screenshots` | No |
 | Export one simulator screenshot | `./tools/board ui-screenshot --screen codex` | No |
 | Identify chip | `./tools/board chip-id` | Yes, USB |
 | Back up the complete 16 MB flash | `./tools/board backup` | Yes, USB |
@@ -111,6 +112,9 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Run the menu-bar app from source | `make mac-menu` | No; board status stays offline |
 | Run the headless Codex service | `make mac-run` or `./tools/host serve` | No; board status stays offline |
 | Run the service with sample tasks | `./tools/host serve --mock` | No |
+| Inspect optional X News state | `./tools/host x-news status` | No |
+| Fetch a verified rolling 24h X feed | `./tools/host x-news refresh --allow-grok-tools` | No |
+| Enable daily X News | `./tools/host x-news enable --allow-grok-tools` | No |
 | Capture the live board framebuffer | `./tools/host screenshot --output board.png` | Yes, Wi-Fi |
 | Build universal `.app` | `make app` | No |
 | Build local DMG | `make package-dmg` | No |
@@ -121,7 +125,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 
 ### Screenshots
 
-Open the interactive desktop representation with `make ui-preview`. Swipe horizontally with the trackpad, drag with the pointer, or click Dashboard/Codex/Weather/Settings. Export deterministic 1024×600 PNGs with:
+Open the interactive desktop representation with `make ui-preview`. Swipe horizontally with the trackpad, drag with the pointer, or click Dashboard/Codex/X News/Weather/Settings. Export deterministic 1024×600 PNGs with:
 
 ```bash
 make ui-screenshots
@@ -139,12 +143,13 @@ The updated firmware also supports an authenticated live framebuffer capture:
 
 The command waits up to 45 seconds for the paired board, requests exactly one 1024×600 RGB565-LE frame over the existing TLS-PSK connection, verifies 100 strictly ordered bounded chunks and the final SHA-256 digest, then writes a PNG atomically. It refuses to replace an existing file unless `--force` is explicit; `--timeout 1..120` changes the wait. There is no HTTP screenshot endpoint and an unpaired LAN client cannot request a capture. Firmware, protocol validation, worst-case frame sizing, RGB565 conversion, and PNG dimensions are hardware-independently verified. Actual panel color order, buffer freshness, tearing, capture latency, and peak PSRAM still require the physical board.
 
-### Four-screen information architecture
+### Five-screen information architecture
 
 1. **Dashboard** — the glanceable work pulse: attention count, active work, connection state, and current focus.
 2. **Codex** — recent sanitized task status and a visible read-only safety boundary.
-3. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
-4. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
+3. **X News** — an optional rolling 24-hour AI/robotics brief containing only locally validated direct X citations.
+4. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
+5. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
 
 The page order is fixed and tested. Horizontal swipe is the primary gesture, while the always-visible bottom navigation provides discovery and direct access.
 
@@ -155,11 +160,14 @@ These are deterministic desktop renders with sample data, not photographs of the
   <img src="docs/images/ui-preview/codex.png" alt="ILO Board Codex simulator screen" width="49%">
 </p>
 <p align="center">
+  <img src="docs/images/ui-preview/x-news.png" alt="ILO Board X News simulator screen" width="49%">
   <img src="docs/images/ui-preview/weather.png" alt="ILO Board Weather simulator screen" width="49%">
+</p>
+<p align="center">
   <img src="docs/images/ui-preview/settings.png" alt="ILO Board Settings simulator screen" width="49%">
 </p>
 
-The Settings screen now cycles and persists the Pulse screensaver timeout (`Never`, 2, or 5 minutes), display-off timeout (`Never`, 5, 10, or 30 minutes), and whether task summaries are visible. It also offers **Turn display off now**. Settings live in their own NVS namespace and survive normal reboot/firmware updates; full USB reprovisioning replaces the NVS partition and returns them to defaults. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
+The Settings screen now cycles and persists the clock format (12/24 hour), temperature units, focus duration (25/45/60 minutes), Pulse screensaver timeout (`Never`, 2, or 5 minutes), display-off timeout (`Never`, 5, 10, or 30 minutes), and whether task summaries are visible. It also offers **Turn display off now**. Settings live in their own NVS namespace and survive normal reboot/firmware updates; full USB reprovisioning replaces the NVS partition and returns them to defaults. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
 
 The matching LVGL structure is already compiled into firmware, including horizontal tile gestures, persistent setting controls, the embedded ILO roundel, a moving Pulse saver, binary backlight sleep, and a wake touch that is consumed rather than passed through to a hidden control. Do not treat it as hardware-verified yet: swipe behavior, text clipping, icon alpha/color order, CH422G backlight off/on, timeout/wake behavior, and real touch targets must be checked on the 5B before flashing this build is called stable.
 
@@ -193,6 +201,35 @@ The first real adapter is intentionally read-only:
 - Remote answers, approvals, command execution, and task steering remain disabled in Phase 1.
 
 Do not copy Codex credentials into firmware or NVS. Any future write/control capability must be separately paired, narrowly scoped, visibly confirmed, replay-protected, and auditable.
+
+## Optional X News via Grok
+
+X News is Mac-mediated and disabled by default. It uses the authenticated top-level headless command `grok -p`; it does not use `grok agent`, and no Grok/X credential is copied to the board. Check availability and the last verified cache with:
+
+```bash
+grok --version
+./tools/host x-news status
+```
+
+A manual refresh is explicit because Grok may use paid model/tool capacity:
+
+```bash
+./tools/host x-news refresh --allow-grok-tools
+```
+
+Enable one automatic run at 08:00 local each day, optionally adding a 14:00 run, or disable it without deleting the last verified cache:
+
+```bash
+./tools/host x-news enable --allow-grok-tools
+./tools/host x-news enable --twice-daily --allow-grok-tools
+./tools/host x-news disable
+```
+
+The scheduler runs while the menu companion or headless host is running. Manual and failed scheduled attempts are rate-limited, so a failure is not retried every minute. Each request supplies a rolling UTC `since`/`until` window, asks Grok to use keyword and semantic X search, requests 2–5 AI/robotics stories, and preserves only a bounded cache.
+
+The JSON schema is treated as a hint, not a trust boundary. The Mac independently requires high/medium confidence, bounded single-line text, 1–3 matching `@handle` citations per story, and direct `https://x.com/<handle>/status/<id>` URLs. It decodes the X status ID timestamp and rejects posts outside the requested 24 hours or inconsistent with `posted_at`. If Grok concatenates multiple documents, only documents that independently pass the complete contract participate; the final document has priority, then duplicate headlines/citation URLs and already-cached sources are removed before the result is capped at five. Invalid, unsourced, oversized, stale, or future output never replaces the last good feed. The board receives only the verified cache, not Grok reasoning, session IDs, usage, prompts, or credentials.
+
+The local Grok 1.0.0 tests proved why this gate is necessary: the schema-based attempts still reported structured-output errors; one returned only root X URLs, while the improved prompt found direct posts but concatenated two JSON documents. The adapter therefore fails closed instead of trusting `--json-schema` by itself.
 
 ## Internet access without the Mac
 

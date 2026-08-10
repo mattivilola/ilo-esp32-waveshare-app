@@ -23,9 +23,10 @@
 #define COLOR_FOG     lv_color_hex(0x8EA2B2)
 #define COLOR_CYAN    lv_color_hex(0x37B3D9)
 
-#define PAGE_COUNT 4
+#define PAGE_COUNT 5
 #define DASHBOARD_VISIBLE_TASKS 3
 #define CODEX_VISIBLE_TASKS 3
+#define X_NEWS_VISIBLE_STORIES 3
 #define MINUTE_MS 60000U
 
 static lv_obj_t *connection_label;
@@ -39,6 +40,12 @@ static lv_obj_t *codex_rows[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_titles[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_summaries[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_dots[CODEX_VISIBLE_TASKS];
+static lv_obj_t *x_news_status_label;
+static lv_obj_t *x_news_empty_card;
+static lv_obj_t *x_news_rows[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_titles[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_summaries[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_meta[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *page_eyebrow_label;
 static lv_obj_t *page_title_label;
 static lv_obj_t *tileview;
@@ -81,10 +88,10 @@ static bool latest_weather_valid;
 static void render_weather(const weather_model_t *model);
 
 static const char *page_eyebrows[PAGE_COUNT] = {
-    "ILO / WORK PULSE", "ILO / CODEX", "ILO / WEATHER", "ILO / SETTINGS"
+    "ILO / WORK PULSE", "ILO / CODEX", "ILO / X NEWS", "ILO / WEATHER", "ILO / SETTINGS"
 };
 static const char *page_titles[PAGE_COUNT] = {
-    "Dashboard", "Codex", "Weather", "Settings"
+    "Dashboard", "Codex", "X News", "Weather", "Settings"
 };
 
 static void touch_read(lv_indev_t *input, lv_indev_data_t *data)
@@ -330,6 +337,45 @@ static void build_weather_page(lv_obj_t *page)
     weather_day_labels[2] = create_label(later, "+2 DAYS\nWaiting", &lv_font_montserrat_14, COLOR_MIST);
     lv_obj_set_style_text_line_space(weather_day_labels[2], 10, 0);
     lv_obj_align(weather_day_labels[2], LV_ALIGN_LEFT_MID, 18, 0);
+}
+
+static void build_x_news_page(lv_obj_t *page)
+{
+    lv_obj_t *title = create_label(page, "AI + humanoid robotics", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_pos(title, 22, 8);
+    x_news_status_label = create_label(page, "WAITING FOR VERIFIED MAC FEED", &lv_font_montserrat_14, COLOR_AMBER);
+    lv_obj_align(x_news_status_label, LV_ALIGN_TOP_RIGHT, -22, 12);
+
+    for (int i = 0; i < X_NEWS_VISIBLE_STORIES; ++i) {
+        x_news_rows[i] = create_card(page, 22, 50 + (i * 112), 974, 102, 14);
+        lv_obj_add_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
+        x_news_titles[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_MIST);
+        lv_obj_set_width(x_news_titles[i], 700);
+        lv_label_set_long_mode(x_news_titles[i], LV_LABEL_LONG_DOT);
+        lv_obj_align(x_news_titles[i], LV_ALIGN_TOP_LEFT, 18, 16);
+        x_news_summaries[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_FOG);
+        lv_obj_set_width(x_news_summaries[i], 700);
+        lv_label_set_long_mode(x_news_summaries[i], LV_LABEL_LONG_DOT);
+        lv_obj_align(x_news_summaries[i], LV_ALIGN_BOTTOM_LEFT, 18, -16);
+        x_news_meta[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_SIGNAL);
+        lv_obj_set_width(x_news_meta[i], 220);
+        lv_label_set_long_mode(x_news_meta[i], LV_LABEL_LONG_DOT);
+        lv_obj_align(x_news_meta[i], LV_ALIGN_RIGHT_MID, -18, 0);
+        lv_obj_set_style_text_align(x_news_meta[i], LV_TEXT_ALIGN_RIGHT, 0);
+    }
+
+    x_news_empty_card = create_card(page, 22, 50, 974, 326, 16);
+    lv_obj_t *empty_title = create_label(x_news_empty_card, "No verified stories cached", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_align(empty_title, LV_ALIGN_CENTER, 0, -42);
+    lv_obj_t *empty_help = create_label(
+        x_news_empty_card,
+        "Enable the optional Grok adapter on the Mac, then run\n./tools/host x-news refresh --allow-grok-tools",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_set_style_text_align(empty_help, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_line_space(empty_help, 8, 0);
+    lv_obj_align(empty_help, LV_ALIGN_CENTER, 0, 24);
 }
 
 static void format_minutes(char *buffer, size_t size, uint16_t minutes)
@@ -798,14 +844,15 @@ static void build_ui(void)
     refresh_focus_label();
 
     build_codex_page(tiles[1]);
-    build_weather_page(tiles[2]);
-    build_settings_page(tiles[3]);
+    build_x_news_page(tiles[2]);
+    build_weather_page(tiles[3]);
+    build_settings_page(tiles[4]);
 
     for (int i = 0; i < PAGE_COUNT; ++i) {
         nav_buttons[i] = lv_button_create(screen);
         set_clean_box(nav_buttons[i], i == 0 ? COLOR_STEEL : COLOR_CARBON, LV_RADIUS_CIRCLE);
-        lv_obj_set_size(nav_buttons[i], 238, 42);
-        lv_obj_set_pos(nav_buttons[i], 22 + (i * 248), 550);
+        lv_obj_set_size(nav_buttons[i], 188, 42);
+        lv_obj_set_pos(nav_buttons[i], 22 + (i * 198), 550);
         lv_obj_add_event_cb(nav_buttons[i], nav_tapped, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         nav_labels[i] = create_label(
             nav_buttons[i],
@@ -935,6 +982,32 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
             dot = COLOR_SIGNAL;
         }
         lv_obj_set_style_bg_color(codex_dots[i], dot, 0);
+    }
+    if (x_news_status_label != NULL) {
+        if (model->news_count > 0) {
+            char status[40];
+            snprintf(status, sizeof(status), "%u VERIFIED STORIES", (unsigned int)model->news_count);
+            lv_label_set_text(x_news_status_label, status);
+            lv_obj_set_style_text_color(x_news_status_label, COLOR_SIGNAL, 0);
+            if (x_news_empty_card != NULL) lv_obj_add_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_label_set_text(x_news_status_label, "WAITING FOR VERIFIED MAC FEED");
+            lv_obj_set_style_text_color(x_news_status_label, COLOR_AMBER, 0);
+            if (x_news_empty_card != NULL) lv_obj_remove_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    for (int i = 0; i < X_NEWS_VISIBLE_STORIES; ++i) {
+        if (i >= model->news_count) {
+            lv_obj_add_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        const dashboard_news_story_t *story = &model->news[i];
+        lv_obj_remove_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(x_news_titles[i], story->headline);
+        lv_label_set_text(x_news_summaries[i], story->summary);
+        char meta[48];
+        snprintf(meta, sizeof(meta), "%s · %s · %s", story->category, story->confidence, story->handle);
+        lv_label_set_text(x_news_meta[i], meta);
     }
     char count[8];
     snprintf(count, sizeof(count), "%d", attention_count);

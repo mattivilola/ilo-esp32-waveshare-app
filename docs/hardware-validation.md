@@ -42,7 +42,7 @@ Never put the Wi-Fi password, pairing secret, complete board ID, local IP addres
 | --- | --- | --- | --- | --- |
 | HW-001 | Photograph the product label/PCB, run `./tools/board chip-id`, and retain the cold-boot memory lines. | Label/profile is 5B/SKU 28151; chip is ESP32-S3; boot log agrees with the documented 16 MB flash/8 MB PSRAM profile. | Redacted photo + terminal excerpt | NOT RUN |
 | HW-002 | Cold boot from disconnected USB while serial monitoring is ready. | One normal boot reaches Dashboard without a reset loop, panic, watchdog, or ROM download prompt. | Complete redacted boot log | NOT RUN |
-| HW-003 | Compare Dashboard, Codex, Weather, and Settings with `docs/images/ui-preview/`. | Content fills 1024×600; no 800×480 crop/stretch, tearing, unexpected rotation, or edge offset. | One straight-on photo per page | NOT RUN |
+| HW-003 | Compare Dashboard, Codex, X News, Weather, and Settings with `docs/images/ui-preview/`. | Content fills 1024×600; no 800×480 crop/stretch, tearing, unexpected rotation, or edge offset. | One straight-on photo per page | NOT RUN |
 | HW-004 | Inspect the ILO roundel, mint bar, amber states, text, gradients/shadows, and dark cards. | Icon alpha is clean; red/blue channels are not swapped; text is legible; no persistent corruption or flicker. | Close-up photo | NOT RUN |
 | HW-005 | Leave the normal Dashboard visible for 15 minutes. | No panel corruption, visible frame jitter, reset, or growing redraw artifact. | Start/end photo + serial log | NOT RUN |
 
@@ -93,7 +93,8 @@ Use [the deterministic state gallery](ui-state-validation.md) as a semantic refe
 | HW-404 | Keep the Mac off and reboot the board with working Wi-Fi. | Direct weather synchronizes time, verifies HTTPS, and reaches `LIVE` independently. | Photo + certificate/time/weather log lines | NOT RUN |
 | HW-405 | With the Mac companion running, compare one sanitized Codex snapshot with the panel. | Counts/coarse states match; no prompt, transcript, local path, credential, or unbounded private text reaches the board. | Redacted host payload + photo | NOT RUN |
 | HW-406 | Change to an unknown Wi-Fi network. | Board gives clear offline/setup guidance and never exposes the stored SSID password on screen or serial output. | Photo + redacted log | NOT RUN |
-| HW-407 | Stop the menu companion and run `./tools/host screenshot --output /tmp/ilo-board-live.png`; repeat on all four pages and once during animation. | Each authenticated capture completes without reset or UI freeze; PNG is exactly 1024×600; orientation, red/blue channels, alpha-rendered icon, visible page, and freshness match a simultaneous panel photo; no tearing appears; a second run refuses to overwrite without `--force`. | Four PNG/photo pairs + redacted host/serial timing | NOT RUN |
+| HW-407 | Stop the menu companion and run `./tools/host screenshot --output /tmp/ilo-board-live.png`; repeat on all five pages and once during animation. | Each authenticated capture completes without reset or UI freeze; PNG is exactly 1024×600; orientation, red/blue channels, alpha-rendered icon, visible page, and freshness match a simultaneous panel photo; no tearing appears; a second run refuses to overwrite without `--force`. | Five PNG/photo pairs + redacted host/serial timing | NOT RUN |
+| HW-408 | With X News explicitly enabled on the Mac, refresh once and compare the verified host cache with the fifth page; then disable Grok and age/fail the cache. | At most five bounded stories appear in the right order with matching category/confidence/source handle; no raw Grok output or credentials appear; missing/rejected/stale data is labeled honestly and never fabricated. | Redacted cache fields + page photos + host log | NOT RUN |
 
 ## F. Endurance and release decision
 

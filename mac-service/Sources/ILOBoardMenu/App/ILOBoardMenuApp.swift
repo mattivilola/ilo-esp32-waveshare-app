@@ -1,11 +1,21 @@
 import AppKit
+import BoardHostCore
 import ILOBoardMenuSupport
 import SwiftUI
 
 final class ILOBoardAppDelegate: NSObject, NSApplicationDelegate {
+    private var xNewsScheduleTask: Task<Void, Never>?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         NSApp.applicationIconImage = BrandImage.image
+        xNewsScheduleTask = Task {
+            await XNewsRefreshCoordinator.shared.run()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        xNewsScheduleTask?.cancel()
     }
 }
 

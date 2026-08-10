@@ -55,6 +55,53 @@ public struct TaskCard: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+public struct NewsCitation: Codable, Equatable, Sendable {
+    public let handle: String
+    public let postedAt: Date
+    public let postURL: String
+
+    public init(handle: String, postedAt: Date, postURL: String) {
+        self.handle = handle
+        self.postedAt = postedAt
+        self.postURL = postURL
+    }
+}
+
+public struct NewsStory: Codable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let category: String
+    public let headline: String
+    public let summary: String
+    public let confidence: String
+    public let sources: [NewsCitation]
+
+    public init(
+        id: String,
+        category: String,
+        headline: String,
+        summary: String,
+        confidence: String,
+        sources: [NewsCitation]
+    ) {
+        self.id = id
+        self.category = category
+        self.headline = headline
+        self.summary = summary
+        self.confidence = confidence
+        self.sources = Array(sources.prefix(3))
+    }
+}
+
+public struct NewsFeedSnapshot: Codable, Equatable, Sendable {
+    public let generatedAt: Date
+    public let stories: [NewsStory]
+
+    public init(generatedAt: Date, stories: [NewsStory]) {
+        self.generatedAt = generatedAt
+        self.stories = Array(stories.prefix(5))
+    }
+}
+
 public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let protocolVersion: Int
     public let revision: UInt64
@@ -62,19 +109,22 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let hostState: HostState
     public let capabilities: [String]
     public let tasks: [TaskCard]
+    public let newsFeed: NewsFeedSnapshot?
 
     public init(
         revision: UInt64,
         generatedAt: Date = Date(),
         hostState: HostState = .online,
-        tasks: [TaskCard]
+        tasks: [TaskCard],
+        newsFeed: NewsFeedSnapshot? = nil
     ) {
         self.protocolVersion = boardProtocolVersion
         self.revision = revision
         self.generatedAt = generatedAt
         self.hostState = hostState
-        self.capabilities = ["tasks.read"]
+        self.capabilities = newsFeed == nil ? ["tasks.read"] : ["tasks.read", "xNews.read"]
         self.tasks = Array(tasks.prefix(12))
+        self.newsFeed = newsFeed
     }
 }
 

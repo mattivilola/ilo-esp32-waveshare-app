@@ -341,7 +341,8 @@ private final class BoardConnection: @unchecked Sendable {
                 revision: raw.revision,
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
-                tasks: tasks
+                tasks: tasks,
+                newsFeed: raw.newsFeed
             )
             send(SnapshotMessage(snapshot: snapshot))
             onSnapshot(Date())
