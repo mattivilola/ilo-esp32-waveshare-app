@@ -28,14 +28,20 @@ struct ILOBoardHostCommand {
             try KeychainPSKStore().save(secret: secret, boardID: boardID)
             print("Pairing stored securely in the macOS Keychain for board \(boardID).")
         case "snapshot":
-            let source: any TaskSource = arguments.contains("--mock") ? MockTaskSource() : CodexHistoryTaskSource()
+            let mock = arguments.contains("--mock")
+            let source: any TaskSource = mock ? MockTaskSource() : CodexHistoryTaskSource()
+            let powerSource: any MacPowerStatusProviding = mock
+                ? MockMacPowerStatusSource()
+                : CachedMacPowerStatusSource()
             let raw = try await source.snapshot(revision: 1)
+            let macPower = await powerSource.currentStatus()
             let snapshot = DashboardSnapshot(
                 revision: raw.revision,
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: raw.tasks.map(TaskSanitizer.sanitize),
-                newsFeed: raw.newsFeed
+                newsFeed: raw.newsFeed,
+                macPower: macPower
             )
             let data = try ProtocolJSON.encoder().encode(snapshot)
             print(String(decoding: data, as: UTF8.self))
@@ -44,8 +50,17 @@ struct ILOBoardHostCommand {
             let boardID = value(after: "--board-id", in: arguments) ?? configuration.boardID
             let port = UInt16(value(after: "--port", in: arguments) ?? "") ?? configuration.port
             let secret = try KeychainPSKStore().load(boardID: boardID)
-            let source: any TaskSource = arguments.contains("--mock") ? MockTaskSource() : CodexHistoryTaskSource()
-            let server = BoardServer(boardID: boardID, secret: secret, source: source)
+            let mock = arguments.contains("--mock")
+            let source: any TaskSource = mock ? MockTaskSource() : CodexHistoryTaskSource()
+            let powerSource: any MacPowerStatusProviding = mock
+                ? MockMacPowerStatusSource()
+                : CachedMacPowerStatusSource()
+            let server = BoardServer(
+                boardID: boardID,
+                secret: secret,
+                source: source,
+                powerStatusSource: powerSource
+            )
             try server.start(port: port)
             print(arguments.contains("--mock") ? "Serving sanitized mock task status." : "Serving sanitized Codex recent-task history.")
             print("Remote actions are disabled.")
@@ -97,13 +112,18 @@ struct ILOBoardHostCommand {
             print("Saved authenticated 1024x600 board capture: \(outputURL.path)")
         case "doctor":
             print("ILO Board Host")
-            print("  protocol: v\(boardProtocolVersion), tasks.read + xNews.read + display.capture.rgb565")
+            print("  protocol: v\(boardProtocolVersion), tasks.read + macPower.read + xNews.read + display.capture.rgb565")
             print("  service: _iloboard._tcp")
             print("  transport: TLS 1.2 PSK")
             print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")
             print("  Desktop task status: recent history only unless owned by this App Server")
             print("  Optional Grok adapter: \(GrokExecutableResolver.resolve()?.path ?? "CLI not found")")
             print("  X News: opt-in; verified cache only; daily policy available")
+            if let power = await CachedMacPowerStatusSource().currentStatus() {
+                print("  Mac power: \(power.levelPercent)% \(power.state.rawValue)")
+            } else {
+                print("  Mac power: internal battery unavailable")
+            }
         case "x-news":
             try runXNews(arguments: Array(arguments.dropFirst()))
         default:

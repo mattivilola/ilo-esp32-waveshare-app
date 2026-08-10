@@ -25,6 +25,7 @@ public final class BoardServer: @unchecked Sendable {
     private let boardID: String
     private let secret: Data
     private let source: any TaskSource
+    private let powerStatusSource: any MacPowerStatusProviding
     private let eventHandler: @Sendable (BoardServerEvent) -> Void
     private let screenCaptureHandler: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let queue = DispatchQueue(label: "com.iloapps.iloboard.host.network")
@@ -35,11 +36,13 @@ public final class BoardServer: @unchecked Sendable {
         boardID: String,
         secret: Data,
         source: any TaskSource,
+        powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
     ) {
         self.boardID = boardID
         self.secret = secret
         self.source = source
+        self.powerStatusSource = powerStatusSource
         self.screenCaptureHandler = nil
         self.eventHandler = eventHandler
     }
@@ -48,12 +51,14 @@ public final class BoardServer: @unchecked Sendable {
         boardID: String,
         secret: Data,
         source: any TaskSource,
+        powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
         screenCaptureHandler: @escaping @Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void,
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
     ) {
         self.boardID = boardID
         self.secret = secret
         self.source = source
+        self.powerStatusSource = powerStatusSource
         self.screenCaptureHandler = screenCaptureHandler
         self.eventHandler = eventHandler
     }
@@ -141,6 +146,7 @@ public final class BoardServer: @unchecked Sendable {
             connection: connection,
             expectedBoardID: boardID,
             source: source,
+            powerStatusSource: powerStatusSource,
             captureRequest: captureRequest,
             onScreenCapture: screenCaptureHandler,
             onReady: { [eventHandler] in eventHandler(.boardConnected) },
@@ -159,6 +165,7 @@ private final class BoardConnection: @unchecked Sendable {
     private let connection: NWConnection
     private let expectedBoardID: String
     private let source: any TaskSource
+    private let powerStatusSource: any MacPowerStatusProviding
     private let captureRequest: ScreenCaptureRequest?
     private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let onReady: @Sendable () -> Void
@@ -175,6 +182,7 @@ private final class BoardConnection: @unchecked Sendable {
         connection: NWConnection,
         expectedBoardID: String,
         source: any TaskSource,
+        powerStatusSource: any MacPowerStatusProviding,
         captureRequest: ScreenCaptureRequest?,
         onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
         onReady: @escaping @Sendable () -> Void,
@@ -184,6 +192,7 @@ private final class BoardConnection: @unchecked Sendable {
         self.connection = connection
         self.expectedBoardID = expectedBoardID
         self.source = source
+        self.powerStatusSource = powerStatusSource
         self.captureRequest = captureRequest
         self.onScreenCapture = onScreenCapture
         self.captureAssembler = captureRequest.map { ScreenCaptureAssembler(requestID: $0.requestID) }
@@ -336,13 +345,15 @@ private final class BoardConnection: @unchecked Sendable {
         revision += 1
         do {
             let raw = try await source.snapshot(revision: revision)
+            let macPower = await powerStatusSource.currentStatus()
             let tasks = raw.tasks.map(TaskSanitizer.sanitize)
             let snapshot = DashboardSnapshot(
                 revision: raw.revision,
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: tasks,
-                newsFeed: raw.newsFeed
+                newsFeed: raw.newsFeed,
+                macPower: macPower
             )
             send(SnapshotMessage(snapshot: snapshot))
             onSnapshot(Date())

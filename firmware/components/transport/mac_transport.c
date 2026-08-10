@@ -526,6 +526,23 @@ static dashboard_attention_t attention(const char *value)
     return DASHBOARD_ATTENTION_NONE;
 }
 
+static bool mac_power_state(const char *value, dashboard_mac_power_state_t *state)
+{
+    if (value == NULL || state == NULL) return false;
+    if (strcmp(value, "battery") == 0) {
+        *state = DASHBOARD_MAC_POWER_BATTERY;
+    } else if (strcmp(value, "charging") == 0) {
+        *state = DASHBOARD_MAC_POWER_CHARGING;
+    } else if (strcmp(value, "powerAdapter") == 0) {
+        *state = DASHBOARD_MAC_POWER_ADAPTER;
+    } else if (strcmp(value, "full") == 0) {
+        *state = DASHBOARD_MAC_POWER_FULL;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 static void copy_json_string(cJSON *object, const char *name, char *destination, size_t size)
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
@@ -543,6 +560,22 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
     memset(model, 0, sizeof(*model));
     cJSON *revision = cJSON_GetObjectItemCaseSensitive(snapshot, "revision");
     model->revision = cJSON_IsNumber(revision) ? (uint64_t)revision->valuedouble : 0;
+    cJSON *mac_power = cJSON_GetObjectItemCaseSensitive(snapshot, "macPower");
+    if (cJSON_IsObject(mac_power)) {
+        cJSON *level = cJSON_GetObjectItemCaseSensitive(mac_power, "levelPercent");
+        cJSON *state = cJSON_GetObjectItemCaseSensitive(mac_power, "state");
+        int level_value = cJSON_IsNumber(level)
+            && level->valuedouble >= 0.0 && level->valuedouble <= 100.0
+            ? (int)level->valuedouble
+            : -1;
+        if (level_value >= 0
+            && level->valuedouble == (double)level_value
+            && cJSON_IsString(state)
+            && mac_power_state(state->valuestring, &model->mac_power_state)) {
+            model->mac_power_available = true;
+            model->mac_power_percent = (uint8_t)level_value;
+        }
+    }
     cJSON *task = NULL;
     cJSON_ArrayForEach(task, tasks) {
         if (model->task_count >= DASHBOARD_MAX_TASKS) break;

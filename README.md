@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server; deterministic mock data remains available for demos and tests. Delivering that new source to the board has not yet been rechecked on hardware. The five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, and optional Mac-verified X News feed are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server and shares only a bounded MacBook battery percentage/charging state; deterministic mock task data remains available for demos and tests. Delivering those new sources to the board has not yet been rechecked on hardware. The five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, optional Mac-verified X News feed, and Mac power card are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -108,7 +108,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Reboot from download mode | `./tools/board reboot` | Yes, USB |
 | Build the Swift package | `make mac-build` | No |
 | Test the Swift host/protocol | `make mac-test` | No |
-| Inspect one sanitized Codex snapshot | `./tools/host snapshot` | No |
+| Inspect one sanitized status snapshot | `./tools/host snapshot` | No |
 | Run the menu-bar app from source | `make mac-menu` | No; board status stays offline |
 | Run the headless Codex service | `make mac-run` or `./tools/host serve` | No; board status stays offline |
 | Run the service with sample tasks | `./tools/host serve --mock` | No |
@@ -186,7 +186,7 @@ codex login status
 ./tools/host snapshot
 ```
 
-`snapshot` prints exactly the bounded payload that would be sent to a paired board. Use `./tools/host snapshot --mock` or `./tools/host serve --mock` for deterministic sample data. The menu app and headless service use real Codex history by default.
+`snapshot` prints exactly the bounded task, X News, and Mac power payload that would be sent to a paired board. Use `./tools/host snapshot --mock` or `./tools/host serve --mock` for deterministic sample tasks and a simulated charging MacBook. The menu app and headless service use real Codex history and native Mac power data by default.
 
 The packaged menu app searches `PATH`, `/opt/homebrew/bin/codex`, and `/usr/local/bin/codex`. If Codex lives elsewhere, launch it with `ILO_BOARD_CODEX_PATH=/absolute/path/to/codex`. The adapter has been integration-tested with `codex-cli 0.146.0`; its decoder is deliberately narrow, but a materially changed future App Server schema may require an update.
 

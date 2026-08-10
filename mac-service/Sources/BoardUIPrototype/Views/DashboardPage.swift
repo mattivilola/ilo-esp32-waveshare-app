@@ -20,6 +20,19 @@ struct DashboardPage: View {
                         .foregroundStyle(BoardPalette.fog)
                         .padding(.top, 6)
                     Spacer()
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            SectionLabel(title: "MacBook power")
+                            Text("Charging")
+                                .font(.board(13, weight: .semibold))
+                                .foregroundStyle(BoardPalette.signal)
+                        }
+                        Spacer()
+                        Text("82%")
+                            .font(.board(25, weight: .bold))
+                            .foregroundStyle(BoardPalette.signal)
+                    }
+                    .padding(.bottom, 15)
                     Text("READ ONLY")
                         .font(.board(11, weight: .bold))
                         .tracking(1)

@@ -4,7 +4,7 @@ This model covers the firmware built for the Waveshare ESP32-S3-Touch-LCD-5B (SK
 
 ## Phase-1 capability
 
-Board capabilities are read-only: `tasks.read` plus an explicitly requested diagnostic display capture. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, and short summary. Capture returns only the pixels already visible on the paired physical display. Mutating requests fail closed.
+Board capabilities are read-only: `tasks.read`, `macPower.read`, plus an explicitly requested diagnostic display capture. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, short summary, and optional Mac battery percentage/state. Mac power data excludes the computer name, battery serial, hardware identifiers, health/capacity history, adapter details, and time estimates. Capture returns only the pixels already visible on the paired physical display. Mutating requests fail closed.
 
 ## Codex privacy boundary
 

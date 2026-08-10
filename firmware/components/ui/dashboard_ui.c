@@ -32,6 +32,8 @@
 static lv_obj_t *connection_label;
 static lv_obj_t *attention_count_label;
 static lv_obj_t *attention_hint_label;
+static lv_obj_t *mac_power_percent_label;
+static lv_obj_t *mac_power_state_label;
 static lv_obj_t *task_rows[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_titles[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_summaries[DASHBOARD_MAX_TASKS];
@@ -796,6 +798,15 @@ static void build_ui(void)
     lv_obj_set_style_text_font(attention_count_label, &lv_font_montserrat_28, 0);
     lv_obj_align(attention_count_label, LV_ALIGN_TOP_LEFT, 20, 60);
 
+    lv_obj_t *mac_power_title = create_label(attention, "MACBOOK POWER", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(mac_power_title, 20, 154);
+    mac_power_percent_label = create_label(attention, "--", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_set_pos(mac_power_percent_label, 20, 186);
+    mac_power_state_label = create_label(attention, "Waiting for Mac", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_width(mac_power_state_label, 198);
+    lv_label_set_long_mode(mac_power_state_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(mac_power_state_label, 20, 230);
+
     attention_hint_label = lv_label_create(attention);
     lv_label_set_text(attention_hint_label, "Tap to test touch\nRemote actions off");
     lv_obj_set_style_text_color(attention_hint_label, COLOR_FOG, 0);
@@ -937,6 +948,41 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
     lvgl_port_lock(0);
     latest_model = *model;
     latest_model_valid = true;
+    if (mac_power_percent_label != NULL && mac_power_state_label != NULL) {
+        if (model->mac_power_available) {
+            char percent[8];
+            snprintf(percent, sizeof(percent), "%u%%", (unsigned int)model->mac_power_percent);
+            lv_label_set_text(mac_power_percent_label, percent);
+            const char *state = "On battery";
+            lv_color_t color = COLOR_MIST;
+            switch (model->mac_power_state) {
+            case DASHBOARD_MAC_POWER_CHARGING:
+                state = "Charging";
+                color = COLOR_SIGNAL;
+                break;
+            case DASHBOARD_MAC_POWER_ADAPTER:
+                state = "Power adapter";
+                color = COLOR_SIGNAL;
+                break;
+            case DASHBOARD_MAC_POWER_FULL:
+                state = "Fully charged";
+                color = COLOR_SIGNAL;
+                break;
+            case DASHBOARD_MAC_POWER_BATTERY:
+            default:
+                color = model->mac_power_percent <= 20 ? COLOR_AMBER : COLOR_MIST;
+                break;
+            }
+            lv_label_set_text(mac_power_state_label, state);
+            lv_obj_set_style_text_color(mac_power_percent_label, color, 0);
+            lv_obj_set_style_text_color(mac_power_state_label, color, 0);
+        } else {
+            lv_label_set_text(mac_power_percent_label, "--");
+            lv_label_set_text(mac_power_state_label, "Power unavailable");
+            lv_obj_set_style_text_color(mac_power_percent_label, COLOR_FOG, 0);
+            lv_obj_set_style_text_color(mac_power_state_label, COLOR_FOG, 0);
+        }
+    }
     int attention_count = 0;
     for (int i = 0; i < model->task_count && i < DASHBOARD_MAX_TASKS; ++i) {
         if (model->tasks[i].attention != DASHBOARD_ATTENTION_NONE) {

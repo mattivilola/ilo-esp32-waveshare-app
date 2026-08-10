@@ -20,3 +20,16 @@ import Testing
     }
 }
 
+@Test func macPowerSnapshotContainsOnlyPercentageAndCoarseState() throws {
+    let power = MacPowerStatus(levelPercent: 140, state: .charging)
+    let snapshot = DashboardSnapshot(revision: 8, tasks: [], macPower: power)
+    let data = try ProtocolJSON.encoder().encode(snapshot)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let encodedPower = try #require(object["macPower"] as? [String: Any])
+
+    #expect(snapshot.capabilities == ["tasks.read", "macPower.read"])
+    #expect(snapshot.macPower?.levelPercent == 100)
+    #expect(encodedPower.keys.sorted() == ["levelPercent", "state"])
+    #expect(encodedPower["levelPercent"] as? Int == 100)
+    #expect(encodedPower["state"] as? String == "charging")
+}

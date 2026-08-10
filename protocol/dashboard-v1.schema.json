@@ -12,7 +12,7 @@
     "hostState": { "enum": ["online", "sleeping", "degraded"] },
     "capabilities": {
       "type": "array",
-      "items": { "enum": ["tasks.read", "xNews.read"] },
+      "items": { "enum": ["tasks.read", "macPower.read", "xNews.read"] },
       "uniqueItems": true
     },
     "tasks": {
@@ -30,6 +30,15 @@
           "updatedAt": { "type": "string", "format": "date-time" },
           "shortSummary": { "type": "string", "maxLength": 180 }
         }
+      }
+    },
+    "macPower": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["levelPercent", "state"],
+      "properties": {
+        "levelPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "state": { "enum": ["battery", "charging", "powerAdapter", "full"] }
       }
     },
     "newsFeed": {

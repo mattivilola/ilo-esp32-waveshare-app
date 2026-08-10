@@ -93,7 +93,7 @@ Useful future signals should earn dashboard space by being actionable and quickl
 - production incident or uptime alert;
 - priority Slack/Teams mentions, summarized by the Mac;
 - GitHub review/PR attention;
-- Mac battery, charging, thermal pressure, and do-not-disturb state;
+- Mac thermal pressure and do-not-disturb state. Battery percentage and charging state are now implemented as a bounded read-only Work Pulse signal;
 - a focus timer and one selected “next action.”
 
 The dashboard should aggregate only the top one or two of these. Dedicated pages or a later configurable card stack are better than turning the first screen into a wall of metrics.

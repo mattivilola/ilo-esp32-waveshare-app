@@ -1,5 +1,6 @@
 import AppKit
 import BoardHostCore
+import BoardProtocol
 import Foundation
 import ILOBoardMenuSupport
 
@@ -10,17 +11,33 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var servicePort: UInt16?
     @Published private(set) var lastSync: Date?
     @Published private(set) var connectionHistory: [ConnectionHistoryEntry]
+    @Published private(set) var macPowerStatus: MacPowerStatus?
 
     private var server: BoardServer?
     private var historyLog: ConnectionHistoryLog
     private let defaults: UserDefaults
+    private let powerStatusSource: any MacPowerStatusProviding
+    private var powerMonitorTask: Task<Void, Never>?
     private static let historyDefaultsKey = "ilo-board.connection-history.v1"
 
-    init(defaults: UserDefaults = .standard) {
+    init(
+        defaults: UserDefaults = .standard,
+        powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource()
+    ) {
         self.defaults = defaults
+        self.powerStatusSource = powerStatusSource
         historyLog = ConnectionHistoryLog.decode(defaults.data(forKey: Self.historyDefaultsKey))
         connectionHistory = historyLog.entries
+        macPowerStatus = nil
         start()
+        powerMonitorTask = Task { [weak self, powerStatusSource] in
+            while !Task.isCancelled {
+                let status = await powerStatusSource.currentStatus()
+                guard let self else { return }
+                self.macPowerStatus = status
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
     }
 
     func start() {
@@ -35,6 +52,7 @@ final class HostStatusStore: ObservableObject {
                 boardID: configuration.boardID,
                 secret: secret,
                 source: CodexHistoryTaskSource(),
+                powerStatusSource: powerStatusSource,
                 eventHandler: { [weak self] event in
                     Task { @MainActor in self?.handle(event) }
                 }
@@ -47,6 +65,10 @@ final class HostStatusStore: ObservableObject {
             transition(to: .failed(error.localizedDescription), recording: .serviceIssue)
             server = nil
         }
+    }
+
+    deinit {
+        powerMonitorTask?.cancel()
     }
 
     func stop() {

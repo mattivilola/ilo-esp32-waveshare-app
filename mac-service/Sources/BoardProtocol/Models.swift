@@ -30,6 +30,23 @@ public enum HostState: String, Codable, Sendable {
     case degraded
 }
 
+public enum MacPowerState: String, Codable, Sendable, CaseIterable {
+    case battery
+    case charging
+    case powerAdapter
+    case full
+}
+
+public struct MacPowerStatus: Codable, Equatable, Sendable {
+    public let levelPercent: Int
+    public let state: MacPowerState
+
+    public init(levelPercent: Int, state: MacPowerState) {
+        self.levelPercent = min(max(levelPercent, 0), 100)
+        self.state = state
+    }
+}
+
 public struct TaskCard: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let title: String
@@ -110,21 +127,26 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let capabilities: [String]
     public let tasks: [TaskCard]
     public let newsFeed: NewsFeedSnapshot?
+    public let macPower: MacPowerStatus?
 
     public init(
         revision: UInt64,
         generatedAt: Date = Date(),
         hostState: HostState = .online,
         tasks: [TaskCard],
-        newsFeed: NewsFeedSnapshot? = nil
+        newsFeed: NewsFeedSnapshot? = nil,
+        macPower: MacPowerStatus? = nil
     ) {
         self.protocolVersion = boardProtocolVersion
         self.revision = revision
         self.generatedAt = generatedAt
         self.hostState = hostState
-        self.capabilities = newsFeed == nil ? ["tasks.read"] : ["tasks.read", "xNews.read"]
+        self.capabilities = newsFeed == nil
+            ? ["tasks.read", "macPower.read"]
+            : ["tasks.read", "macPower.read", "xNews.read"]
         self.tasks = Array(tasks.prefix(12))
         self.newsFeed = newsFeed
+        self.macPower = macPower
     }
 }
 
@@ -143,7 +165,7 @@ public struct ClientMessage: Codable, Equatable, Sendable {
 public struct HelloAcknowledgement: Encodable, Equatable, Sendable {
     public let type = "helloAck"
     public let protocolVersion = boardProtocolVersion
-    public let capabilities = ["tasks.read"]
+    public let capabilities = ["tasks.read", "macPower.read"]
     public let serverTime: Date
 
     public init(serverTime: Date = Date()) {

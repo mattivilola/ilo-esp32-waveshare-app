@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -23,6 +24,13 @@ typedef enum {
     DASHBOARD_ATTENTION_APPROVAL,
 } dashboard_attention_t;
 
+typedef enum {
+    DASHBOARD_MAC_POWER_BATTERY,
+    DASHBOARD_MAC_POWER_CHARGING,
+    DASHBOARD_MAC_POWER_ADAPTER,
+    DASHBOARD_MAC_POWER_FULL,
+} dashboard_mac_power_state_t;
+
 typedef struct {
     char id[81];
     char title[81];
@@ -41,6 +49,9 @@ typedef struct {
 
 typedef struct {
     uint64_t revision;
+    bool mac_power_available;
+    uint8_t mac_power_percent;
+    dashboard_mac_power_state_t mac_power_state;
     uint8_t task_count;
     dashboard_task_t tasks[DASHBOARD_MAX_TASKS];
     uint8_t news_count;

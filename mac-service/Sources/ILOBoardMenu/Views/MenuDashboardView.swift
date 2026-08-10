@@ -88,6 +88,7 @@ struct MenuDashboardView: View {
             detailRow("Identity", value: shortBoardID)
             detailRow("Service", value: serviceDescription)
             detailRow("Last sync", value: lastSyncDescription)
+            detailRow("MacBook", value: macPowerDescription)
             detailRow("Source", value: "Codex recent history")
             detailRow("Security", value: "TLS 1.2 · Read only")
         }
@@ -236,6 +237,18 @@ struct MenuDashboardView: View {
     private var lastSyncDescription: String {
         guard let lastSync = store.lastSync else { return "Not yet" }
         return lastSync.formatted(.relative(presentation: .named))
+    }
+
+    private var macPowerDescription: String {
+        guard let power = store.macPowerStatus else { return "Battery unavailable" }
+        let state: String
+        switch power.state {
+        case .battery: state = "On battery"
+        case .charging: state = "Charging"
+        case .powerAdapter: state = "Power adapter"
+        case .full: state = "Fully charged"
+        }
+        return "\(power.levelPercent)% · \(state)"
     }
 
     private var isFailure: Bool {
