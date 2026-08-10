@@ -5,6 +5,7 @@
 #include "dashboard_model.h"
 #include "dashboard_ui.h"
 #include "mac_transport.h"
+#include "weather_client.h"
 
 static const char *TAG = "ilo_board";
 
@@ -28,5 +29,7 @@ extern "C" void app_main()
     if (!mac_transport_start(dashboard_ui_set_model)) {
         ESP_LOGW(TAG, "Wireless host is not configured; keeping the offline demo snapshot");
         dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_NOT_CONFIGURED);
+    } else if (!weather_client_start(dashboard_ui_set_weather)) {
+        ESP_LOGW(TAG, "Direct weather is not configured yet");
     }
 }

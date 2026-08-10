@@ -1,15 +1,13 @@
 import SwiftUI
 
 struct WeatherPage: View {
-    private let hours = [("NOW", "14°"), ("11", "15°"), ("12", "16°"), ("13", "16°"), ("14", "15°")]
-
     var body: some View {
         VStack(spacing: 14) {
             HStack {
                 Text("Helsinki")
                     .font(.board(20, weight: .semibold))
                     .foregroundStyle(BoardPalette.mist)
-                Text("SAMPLE DATA")
+                Text("PREVIEW DATA")
                     .font(.board(10, weight: .bold))
                     .tracking(0.9)
                     .foregroundStyle(BoardPalette.amber)
@@ -17,9 +15,9 @@ struct WeatherPage: View {
                     .padding(.vertical, 6)
                     .background(BoardPalette.amber.opacity(0.11), in: Capsule())
                 Spacer()
-                Text("Direct Wi-Fi capable")
+                Text("Weather data by Open-Meteo.com")
                     .font(.board(12, weight: .semibold))
-                    .foregroundStyle(BoardPalette.signal)
+                    .foregroundStyle(BoardPalette.fog)
             }
             HStack(spacing: 16) {
                 PulseCard {
@@ -46,24 +44,14 @@ struct WeatherPage: View {
 
                 PulseCard {
                     VStack(alignment: .leading, spacing: 16) {
-                        SectionLabel(title: "Next hours")
-                        HStack(spacing: 0) {
-                            ForEach(hours, id: \.0) { hour in
-                                VStack(spacing: 13) {
-                                    Text(hour.0)
-                                        .font(.board(11, weight: .bold))
-                                        .foregroundStyle(BoardPalette.fog)
-                                    Capsule()
-                                        .fill(hour.0 == "NOW" ? BoardPalette.cyan : BoardPalette.steel)
-                                        .frame(width: 18, height: 5)
-                                    Text(hour.1)
-                                        .font(.board(18, weight: .semibold))
-                                        .foregroundStyle(BoardPalette.mist)
-                                }
-                                .frame(maxWidth: .infinity)
-                            }
+                        SectionLabel(title: "Independent weather")
+                        VStack(alignment: .leading, spacing: 12) {
+                            architectureRow("HTTPS", "CERTIFICATE VERIFIED")
+                            architectureRow("Clock", "SYNC BEFORE REQUEST")
+                            architectureRow("Refresh", "EVERY 30 MIN")
                         }
-                        Text("Rain eases around 13:00")
+                        Spacer()
+                        Text("Cached values are visibly marked STALE")
                             .font(.board(13, weight: .semibold))
                             .foregroundStyle(BoardPalette.cyan)
                     }
@@ -78,6 +66,19 @@ struct WeatherPage: View {
             .frame(height: 100)
         }
         .padding(.vertical, 4)
+    }
+
+    private func architectureRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.board(13, weight: .semibold))
+                .foregroundStyle(BoardPalette.mist)
+            Spacer()
+            Text(value)
+                .font(.board(10, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(BoardPalette.signal)
+        }
     }
 
     private func forecast(_ day: String, _ temperature: String, _ condition: String, _ tint: Color) -> some View {

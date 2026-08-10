@@ -47,6 +47,12 @@ static lv_obj_t *screensaver_status_dot;
 static lv_obj_t *settings_screensaver_value;
 static lv_obj_t *settings_display_off_value;
 static lv_obj_t *settings_privacy_value;
+static lv_obj_t *weather_location_label;
+static lv_obj_t *weather_state_label;
+static lv_obj_t *weather_temperature_label;
+static lv_obj_t *weather_condition_label;
+static lv_obj_t *weather_details_label;
+static lv_obj_t *weather_day_labels[WEATHER_FORECAST_DAYS];
 static lv_display_t *ui_display;
 static device_settings_t current_settings;
 static dashboard_model_t latest_model;
@@ -183,49 +189,51 @@ static void build_codex_page(lv_obj_t *page)
 
 static void build_weather_page(lv_obj_t *page)
 {
-    lv_obj_t *location = create_label(page, "Helsinki", &lv_font_montserrat_20, COLOR_MIST);
-    lv_obj_set_pos(location, 22, 8);
-    lv_obj_t *sample = create_label(page, "SAMPLE DATA", &lv_font_montserrat_14, COLOR_AMBER);
-    lv_obj_set_pos(sample, 130, 12);
-    lv_obj_t *direct = create_label(page, "Direct Wi-Fi capable", &lv_font_montserrat_14, COLOR_SIGNAL);
-    lv_obj_align(direct, LV_ALIGN_TOP_RIGHT, -22, 12);
+    weather_location_label = create_label(page, "Weather", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_pos(weather_location_label, 22, 8);
+    lv_obj_set_width(weather_location_label, 300);
+    lv_label_set_long_mode(weather_location_label, LV_LABEL_LONG_DOT);
+    weather_state_label = create_label(page, "WAITING", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(weather_state_label, 340, 12);
+    lv_obj_t *attribution = create_label(page, "Weather data by Open-Meteo.com", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(attribution, LV_ALIGN_TOP_RIGHT, -22, 12);
 
     lv_obj_t *now = create_card(page, 22, 52, 350, 230, 16);
     lv_obj_t *now_label = create_label(now, "NOW", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(now_label, LV_ALIGN_TOP_LEFT, 18, 18);
-    lv_obj_t *temperature = create_label(now, "14 C", &lv_font_montserrat_28, COLOR_MIST);
-    lv_obj_align(temperature, LV_ALIGN_TOP_LEFT, 18, 66);
-    lv_obj_t *condition = create_label(now, "Light rain", &lv_font_montserrat_20, COLOR_CYAN);
-    lv_obj_align(condition, LV_ALIGN_TOP_LEFT, 18, 118);
-    lv_obj_t *details = create_label(now, "Feels 12 C  /  Wind 5 m/s", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(details, LV_ALIGN_BOTTOM_LEFT, 18, -18);
+    weather_temperature_label = create_label(now, "-- C", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_align(weather_temperature_label, LV_ALIGN_TOP_LEFT, 18, 66);
+    weather_condition_label = create_label(now, "Waiting for forecast", &lv_font_montserrat_20, COLOR_CYAN);
+    lv_obj_align(weather_condition_label, LV_ALIGN_TOP_LEFT, 18, 118);
+    weather_details_label = create_label(now, "Direct Wi-Fi · Mac not required", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(weather_details_label, LV_ALIGN_BOTTOM_LEFT, 18, -18);
 
     lv_obj_t *hours = create_card(page, 388, 52, 608, 230, 16);
-    lv_obj_t *hours_title = create_label(hours, "NEXT HOURS", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_t *hours_title = create_label(hours, "INDEPENDENT WEATHER", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(hours_title, LV_ALIGN_TOP_LEFT, 18, 18);
     lv_obj_t *hour_values = create_label(
         hours,
-        "NOW       11        12        13        14\n 14 C      15 C      16 C      16 C      15 C",
+        "HTTPS verified with the ESP certificate bundle\nClock synchronized before the secure request\nForecast refreshes every 30 minutes",
         &lv_font_montserrat_14,
         COLOR_MIST
     );
     lv_obj_set_style_text_line_space(hour_values, 18, 0);
     lv_obj_align(hour_values, LV_ALIGN_TOP_LEFT, 18, 62);
-    lv_obj_t *transition = create_label(hours, "Rain eases around 13:00", &lv_font_montserrat_14, COLOR_CYAN);
+    lv_obj_t *transition = create_label(hours, "Cached values are visibly marked STALE", &lv_font_montserrat_14, COLOR_CYAN);
     lv_obj_align(transition, LV_ALIGN_BOTTOM_LEFT, 18, -22);
 
     lv_obj_t *today = create_card(page, 22, 298, 314, 96, 14);
-    lv_obj_t *today_text = create_label(today, "TODAY\nRain         16 C - 10 C", &lv_font_montserrat_14, COLOR_MIST);
-    lv_obj_set_style_text_line_space(today_text, 10, 0);
-    lv_obj_align(today_text, LV_ALIGN_LEFT_MID, 18, 0);
+    weather_day_labels[0] = create_label(today, "TODAY\nWaiting", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_set_style_text_line_space(weather_day_labels[0], 10, 0);
+    lv_obj_align(weather_day_labels[0], LV_ALIGN_LEFT_MID, 18, 0);
     lv_obj_t *tomorrow = create_card(page, 352, 298, 308, 96, 14);
-    lv_obj_t *tomorrow_text = create_label(tomorrow, "TUE\nCloudy      18 C - 11 C", &lv_font_montserrat_14, COLOR_MIST);
-    lv_obj_set_style_text_line_space(tomorrow_text, 10, 0);
-    lv_obj_align(tomorrow_text, LV_ALIGN_LEFT_MID, 18, 0);
+    weather_day_labels[1] = create_label(tomorrow, "TOMORROW\nWaiting", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_set_style_text_line_space(weather_day_labels[1], 10, 0);
+    lv_obj_align(weather_day_labels[1], LV_ALIGN_LEFT_MID, 18, 0);
     lv_obj_t *later = create_card(page, 676, 298, 320, 96, 14);
-    lv_obj_t *later_text = create_label(later, "WED\nClear       20 C - 12 C", &lv_font_montserrat_14, COLOR_MIST);
-    lv_obj_set_style_text_line_space(later_text, 10, 0);
-    lv_obj_align(later_text, LV_ALIGN_LEFT_MID, 18, 0);
+    weather_day_labels[2] = create_label(later, "+2 DAYS\nWaiting", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_set_style_text_line_space(weather_day_labels[2], 10, 0);
+    lv_obj_align(weather_day_labels[2], LV_ALIGN_LEFT_MID, 18, 0);
 }
 
 static void format_minutes(char *buffer, size_t size, uint16_t minutes)
@@ -784,6 +792,91 @@ void dashboard_ui_set_connection_state(dashboard_connection_state_t state)
     lv_obj_set_style_text_color(connection_label, color, 0);
     if (screensaver_status_dot != NULL) {
         lv_obj_set_style_bg_color(screensaver_status_dot, color, 0);
+    }
+    lvgl_port_unlock();
+}
+
+static const char *weather_condition(int code)
+{
+    if (code == 0) return "Clear";
+    if (code <= 3) return "Partly cloudy";
+    if (code == 45 || code == 48) return "Fog";
+    if (code >= 51 && code <= 57) return "Drizzle";
+    if (code >= 61 && code <= 67) return "Rain";
+    if (code >= 71 && code <= 77) return "Snow";
+    if (code >= 80 && code <= 82) return "Rain showers";
+    if (code == 85 || code == 86) return "Snow showers";
+    if (code >= 95) return "Thunderstorm";
+    return "Mixed conditions";
+}
+
+void dashboard_ui_set_weather(const weather_model_t *model)
+{
+    if (model == NULL || weather_location_label == NULL) return;
+    lvgl_port_lock(0);
+    lv_label_set_text(weather_location_label, model->location[0] != 0 ? model->location : "Weather");
+
+    const char *state_text = "OFFLINE";
+    lv_color_t state_color = COLOR_FOG;
+    switch (model->state) {
+    case WEATHER_STATE_LIVE:
+        state_text = "LIVE";
+        state_color = COLOR_SIGNAL;
+        break;
+    case WEATHER_STATE_STALE:
+        state_text = "STALE";
+        state_color = COLOR_AMBER;
+        break;
+    case WEATHER_STATE_LOADING:
+        state_text = "UPDATING";
+        state_color = COLOR_CYAN;
+        break;
+    case WEATHER_STATE_NOT_CONFIGURED:
+        state_text = "SETUP NEEDED";
+        state_color = COLOR_AMBER;
+        break;
+    case WEATHER_STATE_ERROR:
+    default:
+        state_text = "OFFLINE";
+        break;
+    }
+    lv_label_set_text(weather_state_label, state_text);
+    lv_obj_set_style_text_color(weather_state_label, state_color, 0);
+
+    if (model->state == WEATHER_STATE_LIVE || model->state == WEATHER_STATE_STALE) {
+        char text[96];
+        snprintf(text, sizeof(text), "%.0f C", (double)model->temperature_c);
+        lv_label_set_text(weather_temperature_label, text);
+        lv_label_set_text(weather_condition_label, weather_condition(model->weather_code));
+        snprintf(
+            text,
+            sizeof(text),
+            "Feels %.0f C  /  Wind %.1f m/s",
+            (double)model->apparent_c,
+            (double)model->wind_ms
+        );
+        lv_label_set_text(weather_details_label, text);
+        static const char *day_names[WEATHER_FORECAST_DAYS] = { "TODAY", "TOMORROW", "+2 DAYS" };
+        for (int index = 0; index < WEATHER_FORECAST_DAYS && index < model->day_count; ++index) {
+            snprintf(
+                text,
+                sizeof(text),
+                "%s\n%s    %.0f C - %.0f C",
+                day_names[index],
+                weather_condition(model->days[index].weather_code),
+                (double)model->days[index].maximum_c,
+                (double)model->days[index].minimum_c
+            );
+            lv_label_set_text(weather_day_labels[index], text);
+        }
+    } else if (model->state == WEATHER_STATE_NOT_CONFIGURED) {
+        lv_label_set_text(weather_temperature_label, "-- C");
+        lv_label_set_text(weather_condition_label, "Add location over USB");
+        lv_label_set_text(weather_details_label, "Run ./tools/board provision");
+    } else if (model->state == WEATHER_STATE_ERROR) {
+        lv_label_set_text(weather_temperature_label, "-- C");
+        lv_label_set_text(weather_condition_label, "Forecast unavailable");
+        lv_label_set_text(weather_details_label, "Retrying automatically in 1 minute");
     }
     lvgl_port_unlock();
 }

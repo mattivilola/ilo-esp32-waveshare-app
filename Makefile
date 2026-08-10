@@ -84,6 +84,7 @@ release-distribute:
 	./scripts/release_distribute.sh
 
 test: mac-test
+	python3 -m unittest discover -s tests
 	./scripts/test_release_tools.sh
 
 verify: test firmware-build

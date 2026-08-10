@@ -325,3 +325,18 @@ bool mac_transport_start(mac_transport_model_callback_t callback)
     }
     return true;
 }
+
+bool mac_transport_wait_for_network(uint32_t timeout_ms)
+{
+    if (wifi_events == NULL) {
+        return false;
+    }
+    EventBits_t bits = xEventGroupWaitBits(
+        wifi_events,
+        WIFI_READY_BIT,
+        pdFALSE,
+        pdTRUE,
+        pdMS_TO_TICKS(timeout_ms)
+    );
+    return (bits & WIFI_READY_BIT) != 0;
+}

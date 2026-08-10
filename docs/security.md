@@ -22,6 +22,8 @@ The pairing flow creates an opaque board ID and random 32-byte PSK while USB is 
 
 TLS 1.2 PSK protects the local-network link. Phase 1 validates `TLS_PSK_WITH_AES_128_GCM_SHA256` interoperability before the protocol is expanded.
 
+Direct weather is the only current board-originated Internet request. It sends configured latitude/longitude and ordinary HTTP metadata to `api.open-meteo.com`; it sends no board ID, pairing secret, Wi-Fi password, Codex data, or Mac data. The response is bounded to 8 KiB and HTTPS uses ESP-IDF's CA certificate bundle after SNTP clock synchronization. Weather is optional public-data access, not a general proxy or arbitrary URL feature.
+
 ## Explicit exclusions
 
 The device cannot currently:

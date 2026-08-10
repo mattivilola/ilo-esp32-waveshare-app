@@ -54,7 +54,7 @@ When actions are introduced later, “approval needed” must never imply that t
 
 ## Weather
 
-Weather can operate independently of the Mac after direct HTTPS, clock synchronization, caching, and location configuration are complete. Sample data is always labeled. Live data needs generated-at time and a stale/offline state; silently showing old weather as current is not acceptable.
+Weather operates independently of the Mac after USB provisioning supplies a name and coordinates. The board synchronizes time before a certificate-verified HTTPS request, refreshes every 30 minutes, and distinguishes LIVE, STALE, OFFLINE, and SETUP NEEDED. Desktop preview data is labeled PREVIEW DATA; live firmware never silently presents an old result as current. The provider attribution remains visible on the Weather page.
 
 The board optimizes for the next few hours and today rather than dense meteorological detail. Current temperature, condition, precipitation transition, wind, and three compact daily summaries fit the glance use case.
 

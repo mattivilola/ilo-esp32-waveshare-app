@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server; deterministic mock data remains available for demos and tests. Delivering that new source to the board has not yet been rechecked on hardware. The four-page LVGL navigation, shared icon, Weather/Settings surfaces, and Pulse screensaver are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server; deterministic mock data remains available for demos and tests. Delivering that new source to the board has not yet been rechecked on hardware. The four-page LVGL navigation, shared icon, persistent Settings, Pulse screensaver/backlight sleep, and direct HTTPS weather client are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -79,7 +79,7 @@ make firmware-build
 ./tools/host menu
 ```
 
-`board provision` prompts for Wi-Fi details, hides the password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. The hardware-verified bring-up slice records the Mac's local address and fixed service port `47472`; Bonjour address discovery is the next transport increment.
+`board provision` prompts for Wi-Fi details, Mac address, and weather location/coordinates; it hides the Wi-Fi password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. The hardware-verified bring-up slice records the Mac's local address and fixed service port `47472`; Bonjour address discovery is the next transport increment.
 
 `host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
 
@@ -188,7 +188,9 @@ Do not copy Codex credentials into firmware or NVS. Any future write/control cap
 
 ## Internet access without the Mac
 
-Yes, the board can reconnect to stored Wi-Fi after reboot and make direct HTTPS requests. Direct weather is a sensible standalone feature once certificate/time synchronization, caching, location settings, rate limiting, and offline behavior are implemented. The Mac can be absent for that path.
+Yes. Once the updated firmware has been flashed and `./tools/board provision` has stored a weather name/latitude/longitude, the board reconnects to known Wi-Fi after reboot and fetches weather without the Mac. It synchronizes time before TLS, validates HTTPS with the ESP-IDF certificate bundle, requests current conditions plus a three-day forecast, refreshes every 30 minutes, retries failures after one minute, and labels retained data `STALE` instead of silently presenting it as current. This logic is compile-verified and its exact JSON contract has been checked against the live API, but it still needs a physical-board network test.
+
+The development endpoint is the keyless Open-Meteo free API. The Weather screen includes the required attribution. Open-Meteo says its free endpoint is for non-commercial use; a commercial release must use an appropriate subscription/customer endpoint or another licensed provider. See the [forecast API](https://open-meteo.com/en/docs), [licence/attribution](https://open-meteo.com/en/license), and [terms](https://open-meteo.com/en/terms).
 
 Direct Codex control is a different security class. Codex App Server runs locally on the Mac and the ESP32 should not hold ChatGPT credentials or expose a general command channel. Codex status/control therefore remains Mac-mediated. The board can still show its last safe cached snapshot when the Mac is offline.
 
