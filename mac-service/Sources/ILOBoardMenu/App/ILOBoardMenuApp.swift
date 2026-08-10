@@ -4,6 +4,7 @@ import SwiftUI
 final class ILOBoardAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        NSApp.applicationIconImage = BrandImage.image
     }
 }
 

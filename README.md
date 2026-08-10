@@ -2,6 +2,8 @@
 
 Touch-first companion software for the Waveshare ESP32-S3-Touch-LCD-5B and macOS.
 
+> **macOS download:** the stable public URL is reserved, but no notarized public build has been published yet. Until the first release, build locally with `make app`. The download button will be enabled only after `make release-distribute` has successfully published and the URL has been verified.
+
 ## Supported hardware
 
 This firmware targets one exact board profile:
@@ -24,33 +26,55 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 Phase 1 is intentionally read-only. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The current snapshot source is deterministic mock task data. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
-## First commands
+Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
+
+## Requirements
+
+### Hardware
+
+- Waveshare **ESP32-S3-Touch-LCD-5B**, SKU **28151**, 1024×600. The 800×480 no-suffix board is not compatible.
+- A data-capable USB-C cable. A charge-only cable can power the display but cannot flash or provision it.
+- Direct Mac USB or a powered hub capable of supplying the display reliably. Keep the board's battery switch **off** during USB debugging.
+- A 2.4 GHz WPA2/WPA3 Personal Wi-Fi network for wireless operation. The ESP32-S3 does not use a 5 GHz-only network.
+
+### Mac development machine
+
+- macOS 13 Ventura or newer. Development is currently verified on macOS 15.7.7.
+- Xcode Command Line Tools or Xcode with Swift 6.2-compatible tooling: `xcode-select --install`.
+- Git, CMake, Ninja, and Python 3. The pinned ESP-IDF installer reports anything missing.
+- macOS Keychain access. Pairing stores the per-board TLS secret in the login Keychain; the prompt expects your normal Mac login password.
+- Local Network permission for the packaged menu-bar app.
+- For Codex integration: a supported local `codex` CLI that is installed and authenticated. No Codex token is stored on the board.
+
+### Network
+
+- The Mac and board must be able to reach each other on the same LAN.
+- Client/AP isolation must be disabled.
+- Bonjour discovery requires multicast DNS between clients; the provisioned Mac address remains a recovery fallback while discovery support is completed.
+- Wi-Fi provisioning currently accepts WPA2/WPA3 Personal passwords of 8–63 UTF-8 bytes. Enterprise and open Wi-Fi are not supported yet.
+
+## Quick start
 
 ```bash
+make help
+make firmware-setup
+make firmware-build
+make mac-test
+
 ./tools/board doctor
 ./tools/board chip-id
 ./tools/host doctor
-./tools/host test
 ```
 
+`firmware-build`, `mac-build`, `mac-test`, `app`, and the release-tool checks are useful without physical hardware. Commands that query, flash, provision, reboot, monitor, or capture a real board require USB or Wi-Fi access to the board.
 
-Install the pinned ESP-IDF toolchain and build the firmware:
+### First board setup
 
 ```bash
 ./tools/setup-idf
 make firmware-build
-```
-
-After the build succeeds, flash and monitor:
-
-```bash
+./tools/board backup
 ./tools/board flash
-./tools/board monitor
-```
-
-Provision Wi-Fi and the paired Mac after the firmware is flashed:
-
-```bash
 ./tools/board provision
 ./tools/host menu
 ```
@@ -58,6 +82,72 @@ Provision Wi-Fi and the paired Mac after the firmware is flashed:
 `board provision` prompts for Wi-Fi details, hides the password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. The hardware-verified bring-up slice records the Mac's local address and fixed service port `47472`; Bonjour address discovery is the next transport increment.
 
 `host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
+
+When macOS asks whether `ILOBoardMenu` may use the confidential `com.iloapps.iloboard.host.psk` item, enter your normal Mac login password. **Always Allow** is appropriate for the paired menu-bar app; **Allow** grants only the current access.
+
+## Command reference
+
+There is no Node/npm layer in this repository. The stable entry points are `make`, `./tools/board`, and `./tools/host`.
+
+| Goal | Command | Board required |
+| --- | --- | --- |
+| Show all common commands | `make help` | No |
+| Check local prerequisites and USB detection | `make doctor` | Only for USB status |
+| Install pinned ESP-IDF 5.5.2 | `make firmware-setup` | No |
+| Compile firmware | `make firmware-build` | No |
+| Flash firmware | `make firmware-flash` | Yes, USB |
+| Open serial monitor | `make firmware-monitor` | Yes, USB |
+| Identify chip | `./tools/board chip-id` | Yes, USB |
+| Back up the complete 16 MB flash | `./tools/board backup` | Yes, USB |
+| Securely provision Wi-Fi/pairing | `./tools/board provision` | Yes, USB |
+| Reboot from download mode | `./tools/board reboot` | Yes, USB |
+| Build the Swift package | `make mac-build` | No |
+| Test the Swift host/protocol | `make mac-test` | No |
+| Run the menu-bar app from source | `make mac-menu` | No; board status stays offline |
+| Run the headless development service | `make mac-run` | No; board status stays offline |
+| Build universal `.app` | `make app` | No |
+| Build local DMG | `make package-dmg` | No |
+| Run every hardware-independent test | `make test` | No |
+
+`./tools/board --help` and `./tools/host --help` are the authoritative detailed command lists.
+
+### Screenshots
+
+There is not yet a truthful `board screenshot` command in the flashed firmware. A photo is currently the only representation of the actual panel. A desktop-rendered 1024×600 preview and screenshot command is being added so layout can be reviewed without hardware; a later live framebuffer capture will still require a connected board. This distinction matters because a simulator screenshot cannot prove RGB output, touch mapping, or physical legibility.
+
+## Connecting to Codex
+
+The planned supported boundary is the local Codex App Server, launched by the Mac companion over its default JSONL/stdio transport. The board never receives your ChatGPT authentication, API key, full prompts, transcript, working-directory paths, or file contents.
+
+Check the local prerequisite with:
+
+```bash
+codex --version
+codex login status
+```
+
+The first real adapter is intentionally read-only:
+
+- `thread/list` supplies recent task names, timestamps, and status through the exact schema generated by the installed Codex CLI.
+- Board-visible strings are bounded and sanitized before transport.
+- A separately launched App Server can truthfully list recent stored tasks, including tasks created in Codex Desktop.
+- Codex Desktop-owned tasks currently appear as `notLoaded` to that separate server, so it cannot truthfully claim their live running, approval, or question state.
+- Authoritative live status is available only for tasks loaded/owned by the companion's App Server until OpenAI exposes a supported Desktop attachment.
+- Remote answers, approvals, command execution, and task steering remain disabled in Phase 1.
+
+Do not copy Codex credentials into firmware or NVS. Any future write/control capability must be separately paired, narrowly scoped, visibly confirmed, replay-protected, and auditable.
+
+## Internet access without the Mac
+
+Yes, the board can reconnect to stored Wi-Fi after reboot and make direct HTTPS requests. Direct weather is a sensible standalone feature once certificate/time synchronization, caching, location settings, rate limiting, and offline behavior are implemented. The Mac can be absent for that path.
+
+Direct Codex control is a different security class. Codex App Server runs locally on the Mac and the ESP32 should not hold ChatGPT credentials or expose a general command channel. Codex status/control therefore remains Mac-mediated. The board can still show its last safe cached snapshot when the Mac is offline.
+
+## macOS packaging and public releases
+
+The source icon is used in the menu dashboard and converted into the packaged app's `.icns`. `make app` creates an ad-hoc-signed universal Apple Silicon + Intel bundle at `artifacts/ILO Board.app`; `make package-dmg` creates a local DMG. These are developer artifacts, not public releases.
+
+For Developer ID signing, Apple notarization, and Google Cloud Storage delivery, follow [macOS distribution](docs/macos-distribution.md). The release pipeline refuses to upload unless the versioned DMG has a valid stapled notarization ticket and the stable alias is byte-for-byte identical. No credentials are committed, and GCS upload happens only when `make release-distribute` is run explicitly.
 
 ### If flashing cannot connect
 

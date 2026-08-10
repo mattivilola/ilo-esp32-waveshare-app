@@ -18,11 +18,13 @@ struct MenuDashboardView: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            Image(systemName: "rectangle.inset.filled.and.person.filled")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(.white)
+            Image(nsImage: BrandImage.image)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
                 .frame(width: 42, height: 42)
-                .background(.tint, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .accessibilityLabel("ILO Apps")
             VStack(alignment: .leading, spacing: 2) {
                 Text("ILO Board")
                     .font(.headline)

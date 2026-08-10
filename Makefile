@@ -1,4 +1,25 @@
-.PHONY: doctor firmware-setup firmware-build firmware-flash firmware-monitor mac-build mac-test mac-run mac-menu test
+SHELL := /bin/zsh
+
+.PHONY: help doctor firmware-setup firmware-build firmware-flash firmware-monitor mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple release-local release-distribute test
+
+help:
+	@printf "ILO Board commands\n\n"
+	@printf "  make doctor              Check board and Mac development prerequisites\n"
+	@printf "  make firmware-setup      Install the pinned ESP-IDF toolchain\n"
+	@printf "  make firmware-build      Compile firmware without hardware\n"
+	@printf "  make firmware-flash      Flash a connected Waveshare 5B\n"
+	@printf "  make firmware-monitor    Open the board serial monitor\n"
+	@printf "  make mac-build           Build the Swift package\n"
+	@printf "  make mac-test            Run all macOS host tests\n"
+	@printf "  make mac-menu            Run the menu-bar app from SwiftPM\n"
+	@printf "  make app                 Build a universal macOS .app bundle\n"
+	@printf "  make package-dmg         Package the current .app as a DMG\n"
+	@printf "  make sign-release        Developer ID-sign the app and DMG\n"
+	@printf "  make notarize            Submit the DMG to Apple notarization\n"
+	@printf "  make staple              Staple and validate the notarization ticket\n"
+	@printf "  make release-local       Build, sign, package, notarize, and staple\n"
+	@printf "  make release-distribute  Upload verified DMGs to the configured GCS bucket\n"
+	@printf "  make test                Run all hardware-independent tests\n"
 
 doctor:
 	./tools/board doctor
@@ -27,4 +48,26 @@ mac-run:
 mac-menu:
 	./tools/host menu
 
+app:
+	./scripts/build_app.sh
+
+package-dmg: app
+	./scripts/package_dmg.sh
+
+sign-release:
+	./scripts/sign_release.sh
+
+notarize:
+	./scripts/notarize.sh
+
+staple:
+	./scripts/staple.sh
+
+release-local:
+	./scripts/release_local.sh
+
+release-distribute:
+	./scripts/release_distribute.sh
+
 test: mac-test
+	./scripts/test_release_tools.sh

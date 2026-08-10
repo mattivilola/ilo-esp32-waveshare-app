@@ -26,7 +26,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "ILOBoardMenu",
-            dependencies: ["BoardProtocol", "BoardHostCore"]
+            dependencies: ["BoardProtocol", "BoardHostCore"],
+            exclude: ["Resources"]
         ),
         .testTarget(name: "BoardProtocolTests", dependencies: ["BoardProtocol"]),
         .testTarget(name: "BoardHostCoreTests", dependencies: ["BoardHostCore", "BoardProtocol"]),

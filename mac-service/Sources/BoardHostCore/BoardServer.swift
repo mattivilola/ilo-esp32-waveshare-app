@@ -47,7 +47,7 @@ public final class BoardServer: @unchecked Sendable {
         let options = tls.securityProtocolOptions
         sec_protocol_options_set_min_tls_protocol_version(options, .TLSv12)
         sec_protocol_options_set_max_tls_protocol_version(options, .TLSv12)
-        let cipher = tls_ciphersuite_t(rawValue: TLS_PSK_WITH_AES_128_GCM_SHA256)!
+        let cipher = tls_ciphersuite_t(rawValue: UInt16(TLS_PSK_WITH_AES_128_GCM_SHA256))!
         sec_protocol_options_append_tls_ciphersuite(options, cipher)
         secret.withUnsafeBytes { (secretBytes: UnsafeRawBufferPointer) in
             boardID.data(using: .utf8)!.withUnsafeBytes { (identityBytes: UnsafeRawBufferPointer) in
