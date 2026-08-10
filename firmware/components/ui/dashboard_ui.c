@@ -24,6 +24,11 @@
 #define COLOR_CYAN    lv_color_hex(0x37B3D9)
 
 #define PAGE_COUNT 5
+#define PAGE_DASHBOARD 0
+#define PAGE_CODEX 1
+#define PAGE_X_NEWS 2
+#define PAGE_WEATHER 3
+#define PAGE_SETTINGS 4
 #define DASHBOARD_VISIBLE_TASKS 3
 #define CODEX_VISIBLE_TASKS 3
 #define X_NEWS_VISIBLE_STORIES DASHBOARD_MAX_NEWS
@@ -72,6 +77,7 @@ static lv_obj_t *settings_privacy_value;
 static lv_obj_t *settings_clock_value;
 static lv_obj_t *settings_temperature_value;
 static lv_obj_t *settings_focus_value;
+static lv_obj_t *settings_x_news_value;
 static lv_obj_t *weather_location_label;
 static lv_obj_t *weather_state_label;
 static lv_obj_t *weather_temperature_label;
@@ -82,6 +88,8 @@ static lv_display_t *ui_display;
 static device_settings_t current_settings;
 static dashboard_model_t latest_model;
 static bool latest_model_valid;
+static bool x_news_page_enabled;
+static bool navigation_configured;
 static bool display_asleep;
 static bool consuming_wake_touch;
 static uint32_t screensaver_tick;
@@ -94,6 +102,8 @@ static bool latest_weather_valid;
 
 static void render_weather(const weather_model_t *model);
 static void x_news_scroll_event(lv_event_t *event);
+static void configure_x_news_page(bool enabled);
+static void update_page_chrome(void);
 
 static const char *page_eyebrows[PAGE_COUNT] = {
     "ILO / WORK PULSE", "ILO / CODEX", "ILO / X NEWS", "ILO / WEATHER", "ILO / SETTINGS"
@@ -488,6 +498,22 @@ static void refresh_settings_labels(void)
         snprintf(value, sizeof(value), "%u MIN", (unsigned int)current_settings.focus_minutes);
         lv_label_set_text(settings_focus_value, value);
     }
+    if (settings_x_news_value != NULL) {
+        if (!latest_model_valid) {
+            lv_label_set_text(settings_x_news_value, "X NEWS  WAITING FOR MAC");
+            lv_obj_set_style_text_color(settings_x_news_value, COLOR_FOG, 0);
+        } else {
+            lv_label_set_text(
+                settings_x_news_value,
+                latest_model.x_news_enabled ? "X NEWS  MAC ENABLED" : "X NEWS  MAC DISABLED"
+            );
+            lv_obj_set_style_text_color(
+                settings_x_news_value,
+                latest_model.x_news_enabled ? COLOR_SIGNAL : COLOR_FOG,
+                0
+            );
+        }
+    }
 }
 
 static void refresh_task_summaries(void)
@@ -669,7 +695,9 @@ static void build_settings_page(lv_obj_t *page)
         &lv_font_montserrat_14,
         COLOR_MIST
     );
-    lv_obj_center(connection_values);
+    lv_obj_align(connection_values, LV_ALIGN_TOP_MID, 0, 8);
+    settings_x_news_value = create_label(connections, "X NEWS  WAITING FOR MAC", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(settings_x_news_value, LV_ALIGN_BOTTOM_MID, 0, -8);
     refresh_settings_labels();
 }
 
@@ -682,6 +710,57 @@ static int active_page_index(void)
         }
     }
     return 0;
+}
+
+static int visible_page_index(int page)
+{
+    if (!x_news_page_enabled && page > PAGE_X_NEWS) {
+        return page - 1;
+    }
+    return page;
+}
+
+static void configure_x_news_page(bool enabled)
+{
+    if (tileview == NULL || tiles[PAGE_X_NEWS] == NULL || nav_buttons[PAGE_X_NEWS] == NULL) {
+        return;
+    }
+    if (navigation_configured && x_news_page_enabled == enabled) {
+        return;
+    }
+    int active = active_page_index();
+    x_news_page_enabled = enabled;
+    navigation_configured = true;
+
+    if (enabled) {
+        lv_obj_remove_flag(tiles[PAGE_X_NEWS], LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(tiles[PAGE_X_NEWS], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    for (int page = 0; page < PAGE_COUNT; ++page) {
+        int column = page == PAGE_X_NEWS && !enabled ? PAGE_SETTINGS : visible_page_index(page);
+        lv_obj_set_x(tiles[page], lv_pct(column * 100));
+    }
+
+    int visible_count = enabled ? PAGE_COUNT : PAGE_COUNT - 1;
+    int nav_width = visible_count == PAGE_COUNT ? 188 : 237;
+    for (int page = 0; page < PAGE_COUNT; ++page) {
+        if (page == PAGE_X_NEWS && !enabled) {
+            lv_obj_add_flag(nav_buttons[page], LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        lv_obj_remove_flag(nav_buttons[page], LV_OBJ_FLAG_HIDDEN);
+        int visible_index = visible_page_index(page);
+        lv_obj_set_width(nav_buttons[page], nav_width);
+        lv_obj_set_x(nav_buttons[page], 22 + (visible_index * (nav_width + 10)));
+    }
+
+    if (!enabled && active == PAGE_X_NEWS) {
+        active = PAGE_WEATHER;
+    }
+    lv_tileview_set_tile(tileview, tiles[active], LV_ANIM_OFF);
+    update_page_chrome();
 }
 
 static void update_page_chrome(void)
@@ -709,8 +788,8 @@ static void nav_tapped(lv_event_t *event)
         return;
     }
     int index = (int)(intptr_t)lv_event_get_user_data(event);
-    if (index >= 0 && index < PAGE_COUNT) {
-        lv_tileview_set_tile_by_index(tileview, (uint32_t)index, 0, LV_ANIM_ON);
+    if (index >= 0 && index < PAGE_COUNT && (index != PAGE_X_NEWS || x_news_page_enabled)) {
+        lv_tileview_set_tile(tileview, tiles[index], LV_ANIM_ON);
     }
 }
 
@@ -945,6 +1024,8 @@ static void build_ui(void)
         lv_obj_center(nav_labels[i]);
     }
 
+    configure_x_news_page(false);
+
     build_screensaver(screen);
     update_page_chrome();
 }
@@ -1019,6 +1100,8 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
     lvgl_port_lock(0);
     latest_model = *model;
     latest_model_valid = true;
+    configure_x_news_page(model->x_news_enabled);
+    refresh_settings_labels();
     if (mac_power_percent_label != NULL && mac_power_state_label != NULL) {
         if (model->mac_power_available) {
             char percent[8];

@@ -18,14 +18,14 @@ LVGL's Montserrat assets provide a restrained three-role scale for Phase 1: 28 p
 
 ## Navigation
 
-The device uses four horizontally ordered pages:
+The device uses four horizontally ordered pages by default:
 
 1. Dashboard
 2. Codex
 3. Weather
 4. Settings
 
-A horizontal swipe moves one page at a time. The bottom navigation is always visible so the gesture is discoverable and every screen remains one tap away. Page changes must not wrap from Settings to Dashboard because accidental edge swipes should be predictable.
+When X News is explicitly enabled on a Mac with Grok available, it is inserted between Codex and Weather as a fifth page. Disabling it, or losing Grok availability, removes the complete page and expands the remaining navigation targets. A horizontal swipe moves one page at a time. The bottom navigation is always visible so the gesture is discoverable and every screen remains one tap away. Page changes must not wrap from Settings to Dashboard because accidental edge swipes should be predictable.
 
 Touch targets are at least 48×48 logical pixels. Empty, sleeping, reconnecting, and stale-data states explain what is happening and what the user can do. Phase 1 offers inspection only; it never draws a control that cannot safely complete its action.
 
@@ -71,6 +71,8 @@ The first device-manageable preferences are:
 - connection diagnostics and a manual reconnect;
 - firmware/version/update status.
 
+Settings reports whether X News is Mac-enabled, but cannot grant Grok consent or change its paid-tool schedule.
+
 Reboot, pairing reset, erase, and update installation require a separate confirmation surface. Wi-Fi SSID/password entry remains in the secure USB/macOS flow initially; a five-inch touch keyboard is poor credential UX and easier to shoulder-surf.
 
 ## Screensaver and power
@@ -104,7 +106,7 @@ The dashboard should aggregate only the top one or two of these. Dedicated pages
 
 The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages.
 
-The first LVGL port now mirrors the five-page structure with `lv_tileview`, fixed bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, verified cached X News, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. X News accepts vertical momentum scrolling for up to five stories and chains horizontal gestures back to the page tileview; a hint appears only when more than three stories are available. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side validation. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
+The first LVGL port now mirrors the adaptive four/five-page structure with `lv_tileview`, dynamically sized bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, optional verified cached X News, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. X News accepts vertical momentum scrolling for up to five stories and chains horizontal gestures back to the page tileview; a hint appears only when more than three stories are available. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side validation. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
 
 ## macOS menu-bar companion
 

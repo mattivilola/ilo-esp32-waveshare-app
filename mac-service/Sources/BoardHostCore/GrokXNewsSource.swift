@@ -2,6 +2,16 @@ import Darwin
 import BoardProtocol
 import Foundation
 
+private func writeXNewsData(_ data: Data, to url: URL) throws {
+    let target = url.standardizedFileURL.path
+    let temporaryRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
+    let isTemporary = target == temporaryRoot || target.hasPrefix(temporaryRoot + "/")
+    try data.write(
+        to: url,
+        options: isTemporary ? [.atomic] : [.atomic, .completeFileProtection]
+    )
+}
+
 public enum XNewsCategory: String, Codable, CaseIterable, Sendable {
     case ai = "AI"
     case robotics = "Robotics"
@@ -139,7 +149,7 @@ public struct XNewsRefreshSettingsStore: Sendable {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(settings).write(to: url, options: [.atomic, .completeFileProtection])
+        try writeXNewsData(encoder.encode(settings), to: url)
     }
 }
 
@@ -529,7 +539,7 @@ public struct XNewsFeedCache: Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(feed).write(to: url, options: [.atomic, .completeFileProtection])
+        try writeXNewsData(encoder.encode(feed), to: url)
     }
 }
 

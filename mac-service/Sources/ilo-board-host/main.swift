@@ -170,7 +170,9 @@ struct ILOBoardHostCommand {
                 print("Verified cache: unavailable")
             }
             let settings = XNewsRefreshSettingsStore().load()
+            let feature = XNewsFeatureController().status()
             print("Automatic refresh: \(settings.cadence.rawValue)")
+            print("Board screen: \(feature.isEnabled ? "visible" : "hidden")")
             print("Available schedules: daily at 08:00, or 08:00 + 14:00 local")
             print("Manual refresh cooldown: 15 minutes")
         case "refresh":

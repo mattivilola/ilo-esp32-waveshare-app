@@ -640,6 +640,9 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
         target->attention = attention(cJSON_IsString(attention_item) ? attention_item->valuestring : NULL);
     }
     cJSON *news_feed = cJSON_GetObjectItemCaseSensitive(snapshot, "newsFeed");
+    cJSON *x_news_enabled = cJSON_GetObjectItemCaseSensitive(snapshot, "xNewsEnabled");
+    model->x_news_enabled = cJSON_IsTrue(x_news_enabled)
+        || (!cJSON_IsBool(x_news_enabled) && cJSON_IsObject(news_feed));
     cJSON *stories = cJSON_GetObjectItemCaseSensitive(news_feed, "stories");
     if (cJSON_IsArray(stories)) {
         cJSON *story = NULL;

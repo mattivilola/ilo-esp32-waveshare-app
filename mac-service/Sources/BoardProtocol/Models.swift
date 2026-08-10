@@ -130,6 +130,18 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let newsFeed: NewsFeedSnapshot?
     public let macPower: MacPowerStatus?
 
+    private enum CodingKeys: String, CodingKey {
+        case protocolVersion
+        case revision
+        case generatedAt
+        case hostState
+        case capabilities
+        case tasks
+        case xNewsEnabled
+        case newsFeed
+        case macPower
+    }
+
     public init(
         revision: UInt64,
         generatedAt: Date = Date(),
@@ -150,6 +162,20 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         self.xNewsEnabled = xNewsEnabled ?? (newsFeed != nil)
         self.newsFeed = newsFeed
         self.macPower = macPower
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        protocolVersion = try container.decode(Int.self, forKey: .protocolVersion)
+        revision = try container.decode(UInt64.self, forKey: .revision)
+        generatedAt = try container.decode(Date.self, forKey: .generatedAt)
+        hostState = try container.decode(HostState.self, forKey: .hostState)
+        capabilities = try container.decode([String].self, forKey: .capabilities)
+        tasks = try container.decode([TaskCard].self, forKey: .tasks)
+        newsFeed = try container.decodeIfPresent(NewsFeedSnapshot.self, forKey: .newsFeed)
+        xNewsEnabled = try container.decodeIfPresent(Bool.self, forKey: .xNewsEnabled)
+            ?? (newsFeed != nil)
+        macPower = try container.decodeIfPresent(MacPowerStatus.self, forKey: .macPower)
     }
 }
 

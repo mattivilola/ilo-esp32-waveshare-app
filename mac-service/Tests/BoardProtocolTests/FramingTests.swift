@@ -36,6 +36,26 @@ import Testing
     #expect(encodedPower["state"] as? String == "charging")
 }
 
+@Test func legacySnapshotInfersXNewsVisibilityFromItsFeed() throws {
+    let feed = NewsFeedSnapshot(
+        generatedAt: Date(timeIntervalSince1970: 1_700_000_000),
+        stories: []
+    )
+
+    for (snapshot, expected) in [
+        (DashboardSnapshot(revision: 1, tasks: []), false),
+        (DashboardSnapshot(revision: 2, tasks: [], newsFeed: feed), true),
+    ] {
+        let encoded = try ProtocolJSON.encoder().encode(snapshot)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "xNewsEnabled")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try ProtocolJSON.decoder().decode(DashboardSnapshot.self, from: legacyData)
+        #expect(decoded.xNewsEnabled == expected)
+    }
+}
+
 @Test func xNewsRefreshMessagesStayBoundedAndExplicit() throws {
     let request = XNewsRefreshRequest(requestID: "board-1234")
     let requestData = try ProtocolJSON.encoder().encode(request)

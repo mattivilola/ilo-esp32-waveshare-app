@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 keeps Codex and Mac control read-only. The only board-originated action is a narrowly bounded, rate-limited X News refresh request that still requires prior Mac-side opt-in. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server and shares only a bounded MacBook battery percentage/charging state; deterministic mock task data remains available for demos and tests. Delivering those new sources to the board has not yet been rechecked on hardware. The five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, optional Mac-verified X News feed/pull-to-refresh, and Mac power card are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 keeps Codex and Mac control read-only. The only board-originated action is a narrowly bounded, rate-limited X News refresh request that still requires prior Mac-side opt-in. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server and shares only a bounded MacBook battery percentage/charging state; deterministic mock task data remains available for demos and tests. Delivering those new sources to the board has not yet been rechecked on hardware. The adaptive four/five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, optional Mac-verified X News feed/pull-to-refresh, and Mac power card are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -117,6 +117,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Inspect optional X News state | `./tools/host x-news status` | No |
 | Fetch a verified rolling 24h X feed | `./tools/host x-news refresh --allow-grok-tools` | No |
 | Enable daily X News | `./tools/host x-news enable --allow-grok-tools` | No |
+| Disable and hide X News | `./tools/host x-news disable` | No |
 | Capture the live board framebuffer | `./tools/host screenshot --output board.png` | Yes, Wi-Fi |
 | Build universal `.app` | `make app` | No |
 | Build local DMG | `make package-dmg` | No |
@@ -137,7 +138,7 @@ There is deliberately no OTA upload or install command yet. `make ota-status` is
 
 ### Screenshots
 
-Open the interactive desktop representation with `make ui-preview`. Swipe horizontally with the trackpad, drag with the pointer, or click Dashboard/Codex/X News/Weather/Settings. The X News page scrolls vertically; pull down while already at the top to preview its refresh states. Closing the preview window also stops the underlying Swift/Python command and returns the terminal prompt. Export deterministic 1024×600 PNGs with:
+Open the interactive desktop representation with `make ui-preview`. Swipe horizontally with the trackpad, drag with the pointer, or click Dashboard/Codex/X News/Weather/Settings. The X News page scrolls vertically; pull down while already at the top to preview its refresh states. Use `./tools/board ui-preview --without-x-news` to review the four-page Off/unavailable layout. Closing the preview window also stops the underlying Swift/Python command and returns the terminal prompt. Export deterministic 1024×600 PNGs with:
 
 ```bash
 make ui-screenshots
@@ -155,7 +156,7 @@ The updated firmware also supports an authenticated live framebuffer capture:
 
 The command waits up to 45 seconds for the paired board, requests exactly one 1024×600 RGB565-LE frame over the existing TLS-PSK connection, verifies 100 strictly ordered bounded chunks and the final SHA-256 digest, then writes a PNG atomically. It refuses to replace an existing file unless `--force` is explicit; `--timeout 1..120` changes the wait. There is no HTTP screenshot endpoint and an unpaired LAN client cannot request a capture. Firmware, protocol validation, worst-case frame sizing, RGB565 conversion, and PNG dimensions are hardware-independently verified. Actual panel color order, buffer freshness, tearing, capture latency, and peak PSRAM still require the physical board.
 
-### Five-screen information architecture
+### Four- or five-screen information architecture
 
 1. **Dashboard** — the glanceable work pulse: attention count, active work, connection state, and current focus.
 2. **Codex** — recent sanitized task status and a visible read-only safety boundary.
@@ -163,7 +164,7 @@ The command waits up to 45 seconds for the paired board, requests exactly one 10
 4. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
 5. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
 
-The page order is fixed and tested. Horizontal swipe is the primary page gesture, while the always-visible bottom navigation provides discovery and direct access. On X News, direction-aware gesture handling reserves vertical drags for the story feed and lets horizontal drags continue to Weather or Codex. A compact “more” cue appears only when the feed exceeds the first three visible stories. Pull down from the top to request a refresh; the board shows pull/release/fetching/result states rather than freezing the old content or claiming success early.
+The order is fixed and tested: Dashboard → Codex → Weather → Settings while X News is Off or Grok is unavailable, with X News inserted between Codex and Weather when Mac-enabled. Horizontal swipe is the primary page gesture, while the always-visible bottom navigation provides discovery and direct access. On X News, direction-aware gesture handling reserves vertical drags for the story feed and lets horizontal drags continue to Weather or Codex. A compact “more” cue appears only when the feed exceeds the first three visible stories. Pull down from the top to request a refresh; the board shows pull/release/fetching/result states rather than freezing the old content or claiming success early.
 
 These are deterministic desktop renders with sample data, not photographs of the physical panel:
 
@@ -179,7 +180,7 @@ These are deterministic desktop renders with sample data, not photographs of the
   <img src="docs/images/ui-preview/settings.png" alt="ILO Board Settings simulator screen" width="49%">
 </p>
 
-The Settings screen now cycles and persists the clock format (12/24 hour), temperature units, focus duration (25/45/60 minutes), Pulse screensaver timeout (`Never`, 2, or 5 minutes), display-off timeout (`Never`, 5, 10, or 30 minutes), and whether task summaries are visible. It also offers **Turn display off now**. Settings live in their own NVS namespace and survive normal reboot/firmware updates; full USB reprovisioning replaces the NVS partition and returns them to defaults. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
+The Settings screen now cycles and persists the clock format (12/24 hour), temperature units, focus duration (25/45/60 minutes), Pulse screensaver timeout (`Never`, 2, or 5 minutes), display-off timeout (`Never`, 5, 10, or 30 minutes), and whether task summaries are visible. It also offers **Turn display off now** and reports whether X News is Mac-enabled; the board cannot grant Grok consent itself. Settings live in their own NVS namespace and survive normal reboot/firmware updates; full USB reprovisioning replaces the NVS partition and returns them to defaults. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
 
 The matching LVGL structure is already compiled into firmware, including horizontal tile gestures, persistent setting controls, the embedded ILO roundel, a moving Pulse saver, binary backlight sleep, and a wake touch that is consumed rather than passed through to a hidden control. Do not treat it as hardware-verified yet: swipe behavior, text clipping, icon alpha/color order, CH422G backlight off/on, timeout/wake behavior, and real touch targets must be checked on the 5B before flashing this build is called stable.
 
@@ -216,7 +217,7 @@ Do not copy Codex credentials into firmware or NVS. Any future write/control cap
 
 ## Optional X News via Grok
 
-X News is Mac-mediated and disabled by default. It uses the authenticated top-level headless command `grok -p`; it does not use `grok agent`, and no Grok/X credential is copied to the board. Check availability and the last verified cache with:
+X News is Mac-mediated and disabled by default. When Off—or when the Grok executable is unavailable—the complete board page is hidden and Weather follows Codex. The menu-bar companion exposes availability, an explicit enable confirmation, daily/twice-daily scheduling, and Disable. It uses the authenticated top-level headless command `grok -p`; it does not use `grok agent`, and no Grok/X credential is copied to the board. Check availability and the last verified cache with:
 
 ```bash
 grok --version
@@ -229,7 +230,7 @@ A manual refresh is explicit because Grok may use paid model/tool capacity:
 ./tools/host x-news refresh --allow-grok-tools
 ```
 
-Enable one automatic run at 08:00 local each day, optionally adding a 14:00 run, or disable it without deleting the last verified cache:
+Enable one automatic run at 08:00 local each day, optionally adding a 14:00 run, or disable and hide the screen without deleting the last verified cache:
 
 ```bash
 ./tools/host x-news enable --allow-grok-tools
