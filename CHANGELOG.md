@@ -2,6 +2,12 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.3 - 2026-08-11
+
+### Fixed
+- Mutable release links now revalidate instead of serving an older cached download.
+- Launch at login now offers Enable on a fresh signed installation and can create its first macOS Background Item record.
+
 ## 0.1.2 - 2026-08-11
 
 ### Added
