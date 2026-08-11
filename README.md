@@ -42,7 +42,7 @@ Hardware-independent development can continue without a board: the Swift service
 - macOS 13 Ventura or newer. Development is currently verified on macOS 15.7.7.
 - Xcode Command Line Tools or Xcode with Swift 6.2-compatible tooling: `xcode-select --install`.
 - Git, CMake, Ninja, and Python 3. The pinned ESP-IDF installer reports anything missing.
-- macOS Keychain access. Pairing stores the per-board TLS secret in the login Keychain; the prompt expects your normal Mac login password.
+- macOS Keychain access. Pairing stores the per-board TLS secret in the login Keychain. The installed app explains its one-time migration before macOS asks for your normal Mac login password; ordinary later launches do not prompt.
 - Local Network permission for the packaged menu-bar app.
 - For Codex integration: a supported local `codex` CLI that is installed and authenticated. No Codex token is stored on the board.
 - Optional X News integration: `grok` CLI 1.0.0 or a compatible newer build, authenticated with an account that can search X. Set `ILO_BOARD_GROK_PATH` if it is not on `PATH` or under `~/.local/bin`. Grok authentication remains on the Mac.
@@ -84,7 +84,7 @@ make firmware-build
 
 `host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
 
-When macOS asks whether `ILOBoardMenu` may use the confidential `com.iloapps.iloboard.host.psk` item, enter your normal Mac login password. **Always Allow** is appropriate for the paired menu-bar app; **Allow** grants only the current access.
+The first signed-app launch after CLI provisioning does **not** open an unexplained Keychain dialog. Open the menu, review the **One-time secure pairing access** card, and choose **Continue & Authorize…**. macOS then asks whether ILO Board may access the provisioning credential: enter your normal Mac login password and choose **Allow**. The app copies the same 32-byte PSK into its own protected Keychain item, never displays or uploads it, and uses that app-owned item silently on later launches and signed updates. The original item remains available to the headless CLI and screenshot tools.
 
 ## Command reference
 

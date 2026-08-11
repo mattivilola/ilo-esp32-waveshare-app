@@ -14,10 +14,14 @@ struct MenuDashboardView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             statusCard
-            details
-            companionControls
-            xNewsControls
-            recentActivity
+            if store.state == .pairingAuthorizationRequired {
+                pairingAuthorizationCard
+            } else {
+                details
+                companionControls
+                xNewsControls
+                recentActivity
+            }
             Divider()
             diagnosticActions
             actions
@@ -109,6 +113,39 @@ struct MenuDashboardView: View {
             detailRow("Source", value: "Codex recent history")
             detailRow("Security", value: "TLS 1.2 · Read only")
             detailRow("App", value: appReleaseInfo.displayVersion)
+        }
+    }
+
+    @ViewBuilder
+    private var pairingAuthorizationCard: some View {
+        if store.state == .pairingAuthorizationRequired {
+            VStack(alignment: .leading, spacing: 9) {
+                Label("One-time secure pairing access", systemImage: "lock.shield.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.blue)
+                Text("USB setup saved this board’s encrypted pairing key in your Mac login Keychain. ILO Board needs your approval once to copy it into an app-owned Keychain item for future launches.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("After you continue, macOS will ask for your Mac login password. Click Allow. The pairing key is never displayed or uploaded.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Continue & Authorize…") { store.authorizeSecurePairing() }
+                    .buttonStyle(.borderedProminent)
+                if let notice = store.pairingAuthorizationNotice {
+                    Text(notice)
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(12)
+            .background(.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(.blue.opacity(0.25), lineWidth: 1)
+            }
         }
     }
 
@@ -294,7 +331,7 @@ struct MenuDashboardView: View {
                 if store.state == .stopped || store.state == .notProvisioned || isFailure {
                     Button("Start Service") { store.start() }
                         .buttonStyle(.borderedProminent)
-                } else {
+                } else if store.state != .pairingAuthorizationRequired {
                     Button("Stop Service") { store.stop() }
                 }
                 Button("Copy Board ID") { store.copyBoardID() }

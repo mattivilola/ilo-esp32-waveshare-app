@@ -1,4 +1,4 @@
-import BoardHostCore
+@testable import BoardHostCore
 import Foundation
 import Testing
 
@@ -26,4 +26,29 @@ import Testing
     #expect(throws: HostConfigurationError.self) {
         try HostConfiguration.load(from: url)
     }
+}
+
+@Test func companionUsesAnAppOwnedKeychainServiceDistinctFromTheCLI() {
+    #expect(KeychainPSKStore.legacyService == "com.iloapps.iloboard.host.psk")
+    #expect(KeychainPSKStore.companionService == "com.iloapps.iloboard.menu.psk.v1")
+    #expect(KeychainPSKStore.companionService != KeychainPSKStore.legacyService)
+}
+
+@Test func onlyTheStableSignedCompanionUsesItsAppOwnedCredential() {
+    #expect(KeychainPSKStore.shouldUseCompanionCredential(
+        bundleIdentifier: "com.iloapps.iloboard.menu",
+        teamIdentifier: "MM233FKU38"
+    ))
+    #expect(!KeychainPSKStore.shouldUseCompanionCredential(
+        bundleIdentifier: "com.iloapps.iloboard.menu",
+        teamIdentifier: nil
+    ))
+    #expect(!KeychainPSKStore.shouldUseCompanionCredential(
+        bundleIdentifier: nil,
+        teamIdentifier: "MM233FKU38"
+    ))
+    #expect(!KeychainPSKStore.shouldUseCompanionCredential(
+        bundleIdentifier: "com.example.copy",
+        teamIdentifier: "MM233FKU38"
+    ))
 }

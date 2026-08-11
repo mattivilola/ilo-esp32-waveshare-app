@@ -2,6 +2,7 @@ import SwiftUI
 
 enum HostServiceState: Equatable {
     case notProvisioned
+    case pairingAuthorizationRequired
     case starting
     case listening
     case connected
@@ -11,6 +12,7 @@ enum HostServiceState: Equatable {
     var title: String {
         switch self {
         case .notProvisioned: "Not provisioned"
+        case .pairingAuthorizationRequired: "Authorize secure pairing"
         case .starting: "Starting"
         case .listening: "Waiting for board"
         case .connected: "Board connected"
@@ -22,6 +24,7 @@ enum HostServiceState: Equatable {
     var detail: String {
         switch self {
         case .notProvisioned: "Run ./tools/board provision"
+        case .pairingAuthorizationRequired: "Review one-time Keychain access before connecting"
         case .starting: "Opening encrypted local service"
         case .listening: "The Mac is ready on your network"
         case .connected: "Encrypted status sync is active"
@@ -34,6 +37,7 @@ enum HostServiceState: Equatable {
         switch self {
         case .connected: "rectangle.connected.to.line.below"
         case .listening, .starting: "antenna.radiowaves.left.and.right"
+        case .pairingAuthorizationRequired: "lock.shield"
         case .failed: "exclamationmark.triangle"
         case .notProvisioned, .stopped: "rectangle.slash"
         }
@@ -45,6 +49,7 @@ enum HostServiceState: Equatable {
         case .listening: "READY"
         case .starting: "STARTING"
         case .failed: "ISSUE"
+        case .pairingAuthorizationRequired: "ACTION"
         case .notProvisioned: "SETUP"
         case .stopped: "OFFLINE"
         }
@@ -53,6 +58,7 @@ enum HostServiceState: Equatable {
     var diagnosticTitle: String {
         switch self {
         case .notProvisioned: "Setup required"
+        case .pairingAuthorizationRequired: "Secure pairing authorization required"
         case .starting: "Starting"
         case .listening: "Ready; waiting for board"
         case .connected: "Board connected"
@@ -64,6 +70,7 @@ enum HostServiceState: Equatable {
     var tint: Color {
         switch self {
         case .connected: .green
+        case .pairingAuthorizationRequired: .blue
         case .listening, .starting: .orange
         case .failed: .red
         case .notProvisioned, .stopped: .secondary

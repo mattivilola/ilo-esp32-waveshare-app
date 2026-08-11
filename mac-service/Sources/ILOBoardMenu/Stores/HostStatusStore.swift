@@ -14,28 +14,33 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var macPowerStatus: MacPowerStatus?
     @Published private(set) var xNewsStatus: XNewsFeatureStatus
     @Published private(set) var xNewsNotice: String?
+    @Published private(set) var pairingAuthorizationNotice: String?
 
     private var server: BoardServer?
     private var historyLog: ConnectionHistoryLog
     private let defaults: UserDefaults
     private let powerStatusSource: any MacPowerStatusProviding
     private let xNewsFeatureController: XNewsFeatureController
+    private let usesCompanionCredential: Bool
     private var powerMonitorTask: Task<Void, Never>?
     private static let historyDefaultsKey = "ilo-board.connection-history.v1"
 
     init(
         defaults: UserDefaults = .standard,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
-        xNewsFeatureController: XNewsFeatureController = XNewsFeatureController()
+        xNewsFeatureController: XNewsFeatureController = XNewsFeatureController(),
+        usesCompanionCredential: Bool = KeychainPSKStore.shouldUseCompanionCredential
     ) {
         self.defaults = defaults
         self.powerStatusSource = powerStatusSource
         self.xNewsFeatureController = xNewsFeatureController
+        self.usesCompanionCredential = usesCompanionCredential
         historyLog = ConnectionHistoryLog.decode(defaults.data(forKey: Self.historyDefaultsKey))
         connectionHistory = historyLog.entries
         macPowerStatus = nil
         xNewsStatus = xNewsFeatureController.status()
         xNewsNotice = nil
+        pairingAuthorizationNotice = nil
         start()
         powerMonitorTask = Task { [weak self, powerStatusSource] in
             while !Task.isCancelled {
@@ -50,28 +55,59 @@ final class HostStatusStore: ObservableObject {
 
     func start() {
         guard server == nil else { return }
-        transition(to: .starting, recording: .serviceStarting)
+        pairingAuthorizationNotice = nil
         do {
             let configuration = try HostConfiguration.load()
-            let secret = try KeychainPSKStore().load(boardID: configuration.boardID)
             boardID = configuration.boardID
             servicePort = configuration.port
-            let server = BoardServer(
-                boardID: configuration.boardID,
-                secret: secret,
-                source: CodexHistoryTaskSource(),
-                powerStatusSource: powerStatusSource,
-                eventHandler: { [weak self] event in
-                    Task { @MainActor in self?.handle(event) }
+            let secret: Data
+            if usesCompanionCredential {
+                do {
+                    secret = try KeychainPSKStore().loadForCompanion(boardID: configuration.boardID)
+                } catch PairingError.notFound {
+                    state = .pairingAuthorizationRequired
+                    return
                 }
-            )
-            self.server = server
-            try server.start(port: configuration.port)
+            } else {
+                secret = try KeychainPSKStore().load(boardID: configuration.boardID)
+            }
+            try startServer(configuration: configuration, secret: secret)
         } catch HostConfigurationError.notProvisioned {
             transition(to: .notProvisioned, recording: .setupRequired)
         } catch {
             transition(to: .failed(error.localizedDescription), recording: .serviceIssue)
             server = nil
+        }
+    }
+
+    func authorizeSecurePairing() {
+        guard server == nil, usesCompanionCredential else { return }
+        pairingAuthorizationNotice = nil
+        let configuration: HostConfiguration
+        let secret: Data
+        do {
+            configuration = try HostConfiguration.load()
+            boardID = configuration.boardID
+            servicePort = configuration.port
+            secret = try KeychainPSKStore().authorizeCompanion(boardID: configuration.boardID)
+        } catch HostConfigurationError.notProvisioned {
+            transition(to: .notProvisioned, recording: .setupRequired)
+            return
+        } catch PairingError.keychain(errSecAuthFailed),
+                PairingError.keychain(errSecUserCanceled) {
+            state = .pairingAuthorizationRequired
+            pairingAuthorizationNotice = "Keychain access wasn’t granted. Nothing changed; you can try again when ready."
+            return
+        } catch {
+            state = .pairingAuthorizationRequired
+            pairingAuthorizationNotice = "Secure pairing couldn’t be authorized: \(error.localizedDescription)"
+            return
+        }
+
+        do {
+            try startServer(configuration: configuration, secret: secret)
+        } catch {
+            transition(to: .failed(error.localizedDescription), recording: .serviceIssue)
         }
     }
 
@@ -149,6 +185,26 @@ final class HostStatusStore: ObservableObject {
         case let .snapshotSent(date):
             lastSync = date
             state = .connected
+        }
+    }
+
+    private func startServer(configuration: HostConfiguration, secret: Data) throws {
+        transition(to: .starting, recording: .serviceStarting)
+        let server = BoardServer(
+            boardID: configuration.boardID,
+            secret: secret,
+            source: CodexHistoryTaskSource(),
+            powerStatusSource: powerStatusSource,
+            eventHandler: { [weak self] event in
+                Task { @MainActor in self?.handle(event) }
+            }
+        )
+        self.server = server
+        do {
+            try server.start(port: configuration.port)
+        } catch {
+            self.server = nil
+            throw error
         }
     }
 
