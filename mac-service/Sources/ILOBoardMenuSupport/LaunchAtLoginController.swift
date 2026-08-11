@@ -18,6 +18,28 @@ public enum LaunchAtLoginState: String, Equatable, Sendable {
     }
 }
 
+enum LaunchAtLoginSystemStatus: Equatable, Sendable {
+    case notRegistered
+    case enabled
+    case requiresApproval
+    case notFound
+}
+
+extension LaunchAtLoginState {
+    static func resolve(isInstalledApplication: Bool, systemStatus: LaunchAtLoginSystemStatus) -> Self {
+        guard isInstalledApplication else { return .unavailable }
+        return switch systemStatus {
+        case .notRegistered: .disabled
+        case .enabled: .enabled
+        case .requiresApproval: .requiresApproval
+        // On a first run, backgroundtaskmanagementd can report no record for
+        // SMAppService.mainApp. The explicit register() call creates that record;
+        // treating it as an installation failure makes registration impossible.
+        case .notFound: .disabled
+        }
+    }
+}
+
 @MainActor
 protocol LaunchAtLoginServicing {
     var state: LaunchAtLoginState { get }
@@ -35,18 +57,16 @@ private struct SystemLaunchAtLoginService: LaunchAtLoginServicing {
         let userApplications = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Applications", isDirectory: true)
             .path + "/"
-        guard bundleURL.pathExtension == "app",
-              bundlePath.hasPrefix(systemApplications) || bundlePath.hasPrefix(userApplications) else {
-            return .unavailable
-        }
-
-        return switch SMAppService.mainApp.status {
-        case .notRegistered: .disabled
+        let isInstalledApplication = bundleURL.pathExtension == "app"
+            && (bundlePath.hasPrefix(systemApplications) || bundlePath.hasPrefix(userApplications))
+        let systemStatus: LaunchAtLoginSystemStatus = switch SMAppService.mainApp.status {
+        case .notRegistered: .notRegistered
         case .enabled: .enabled
         case .requiresApproval: .requiresApproval
-        case .notFound: .unavailable
-        @unknown default: .unavailable
+        case .notFound: .notFound
+        @unknown default: .notFound
         }
+        return .resolve(isInstalledApplication: isInstalledApplication, systemStatus: systemStatus)
     }
 
     func register() throws {
@@ -94,9 +114,14 @@ public final class LaunchAtLoginController: ObservableObject {
             refresh()
         } catch {
             refresh()
-            notice = state == .requiresApproval
-                ? "Approval is required in System Settings."
-                : "Couldn’t enable launch at login. Install the signed app in Applications and try again."
+            notice = switch state {
+            case .requiresApproval:
+                "ILO Board is registered, but approval is required in Login Items."
+            case .unavailable:
+                "Launch at login is available only from the signed app in Applications."
+            case .disabled, .enabled:
+                "macOS couldn’t register ILO Board. Review Login Items and try again."
+            }
         }
     }
 

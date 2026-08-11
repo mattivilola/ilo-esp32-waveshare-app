@@ -84,6 +84,8 @@ make firmware-build
 
 `host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
 
+In the signed app, **Launch at login → Enable** explicitly registers the main application with macOS Service Management. The first run may have no Background Items record yet; the app presents that as **Off**, not as an installation failure, and the Enable action creates the record. If macOS requires separate consent, choose **Review Login Items** and allow ILO Board under **System Settings → General → Login Items**. Development binaries outside Applications intentionally cannot register.
+
 The first signed-app launch after CLI provisioning does **not** open an unexplained Keychain dialog. Open the menu, review the **One-time secure pairing access** card, and choose **Continue & Authorize…**. macOS then asks whether ILO Board may access the provisioning credential: enter your normal Mac login password and choose **Allow**. The app copies the same 32-byte PSK into its own protected Keychain item, never displays or uploads it, and uses that app-owned item silently on later launches and signed updates. The original item remains available to the headless CLI and screenshot tools.
 
 ## Command reference

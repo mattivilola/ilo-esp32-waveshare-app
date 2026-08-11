@@ -147,4 +147,6 @@ make release-distribute
 
 Sparkle 2.9.2 is pinned through SwiftPM. Signed builds expose **Check for Updates…**, and Sparkle manages the user's automatic-check preference. Updates are accepted only when the appcast points to a Developer-ID-signed/notarized DMG with a valid EdDSA enclosure signature and a higher `CFBundleVersion`.
 
+The companion uses `SMAppService.mainApp` for opt-in launch at login. A signed app in `/Applications` can initially receive `.notFound` while Background Task Management has no record; the UI must still offer **Enable**, whose explicit `register()` call creates the record. Only a bundle outside the system or user Applications folder is reported as **Install first**. Verify both registration and a real logout/login or reboot before release.
+
 Before announcing a release, test one genuine installed-version transition (for example `0.1.1 (2)` to `0.1.2 (3)`) from `/Applications`. Ad-hoc builds and copies running from the DMG are useful for UI work but do not prove the production updater installation path.

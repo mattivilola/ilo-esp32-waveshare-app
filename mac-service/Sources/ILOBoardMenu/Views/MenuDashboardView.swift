@@ -164,6 +164,9 @@ struct MenuDashboardView: View {
                 switch launchAtLogin.state {
                 case .disabled:
                     Button("Enable") { launchAtLogin.enable() }
+                    if launchAtLogin.notice != nil {
+                        Button("Review Login Items") { launchAtLogin.openSystemSettings() }
+                    }
                 case .enabled:
                     Button("Disable") { launchAtLogin.disable() }
                 case .requiresApproval:

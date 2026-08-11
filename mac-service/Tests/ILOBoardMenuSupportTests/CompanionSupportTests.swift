@@ -85,8 +85,19 @@ import Testing
     controller.enable()
 
     #expect(controller.state == .disabled)
-    #expect(controller.notice == "Couldn’t enable launch at login. Install the signed app in Applications and try again.")
+    #expect(controller.notice == "macOS couldn’t register ILO Board. Review Login Items and try again.")
     #expect(controller.notice?.contains("private failure context") == false)
+}
+
+@Test func installedAppCanRegisterWhenTheSystemHasNoBackgroundItemRecordYet() {
+    #expect(LaunchAtLoginState.resolve(
+        isInstalledApplication: true,
+        systemStatus: .notFound
+    ) == .disabled)
+    #expect(LaunchAtLoginState.resolve(
+        isInstalledApplication: false,
+        systemStatus: .notFound
+    ) == .unavailable)
 }
 
 private enum TestError: Error {
