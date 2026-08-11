@@ -110,7 +110,7 @@ Publish only after those checks pass:
 make release-distribute
 ```
 
-The distribution command revalidates the stapled ticket, confirms that the stable alias is byte-identical to the versioned DMG, signs the archive with the Keychain-backed Sparkle EdDSA key, validates the generated XML, and embeds bounded history from the newest `CHANGELOG.md` entry. It uploads the immutable versioned DMG, stable alias, and finally `appcast.xml`. It never changes bucket IAM or public-access policy.
+The distribution command revalidates the stapled ticket, confirms that the stable alias is byte-identical to the versioned DMG, signs the archive with the Keychain-backed Sparkle EdDSA key, validates the generated XML, and embeds bounded history from the newest `CHANGELOG.md` entry. It uploads the immutable versioned DMG with a one-year immutable cache policy, then the stable alias and finally `appcast.xml` with mandatory revalidation. This prevents mutable public URLs from serving a replaced older release through shared cache. It never changes bucket IAM or public-access policy.
 
 Finally verify both anonymous public URLs before announcing the release:
 

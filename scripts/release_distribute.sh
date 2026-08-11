@@ -20,7 +20,9 @@ cmp -s "$release_dmg" "$latest_dmg" || fail "Latest DMG alias does not match the
 [[ -f "$appcast" ]] || fail "Sparkle appcast was not generated."
 
 versioned_uri="$(public_versioned_dmg_uri)"
-gcloud storage cp "$release_dmg" "$versioned_uri"
-gcloud storage cp "$latest_dmg" "$ILO_BOARD_PUBLIC_RELEASE_URI"
-gcloud storage cp "$appcast" "$ILO_BOARD_PUBLIC_APPCAST_URI"
+immutable_cache_control="public,max-age=31536000,immutable"
+mutable_cache_control="no-cache,max-age=0,must-revalidate"
+gcloud storage cp --cache-control="$immutable_cache_control" "$release_dmg" "$versioned_uri"
+gcloud storage cp --cache-control="$mutable_cache_control" "$latest_dmg" "$ILO_BOARD_PUBLIC_RELEASE_URI"
+gcloud storage cp --cache-control="$mutable_cache_control" "$appcast" "$ILO_BOARD_PUBLIC_APPCAST_URI"
 log "Published $versioned_uri, $ILO_BOARD_PUBLIC_RELEASE_URI, and $ILO_BOARD_PUBLIC_APPCAST_URI"
