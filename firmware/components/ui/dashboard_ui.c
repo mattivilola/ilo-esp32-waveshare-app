@@ -35,6 +35,8 @@
 #define CODEX_VISIBLE_TASKS 3
 #define X_NEWS_VISIBLE_STORIES DASHBOARD_MAX_NEWS
 #define X_NEWS_RESULT_HOLD_MS 8000U
+#define CODEX_CONTINUE_HOLD_MS 900U
+#define CODEX_RESULT_HOLD_MS 8000U
 #define MINUTE_MS 60000U
 
 static lv_obj_t *connection_label;
@@ -50,6 +52,21 @@ static lv_obj_t *codex_rows[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_titles[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_summaries[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_dots[CODEX_VISIBLE_TASKS];
+static lv_obj_t *codex_detail_eyebrow;
+static lv_obj_t *codex_detail_title;
+static lv_obj_t *codex_detail_summary;
+static lv_obj_t *codex_detail_status;
+static lv_obj_t *codex_hold_button;
+static lv_obj_t *codex_hold_label;
+static lv_obj_t *codex_confirm_button;
+static lv_obj_t *codex_confirm_label;
+static dashboard_codex_continue_callback_t codex_continue_callback;
+static char codex_selected_task_id[81];
+static uint32_t codex_hold_started_tick;
+static uint32_t codex_result_started_tick;
+static bool codex_continue_armed;
+static bool codex_continue_in_flight;
+static bool codex_result_visible;
 static lv_obj_t *x_news_status_label;
 static lv_obj_t *x_news_scroll;
 static lv_obj_t *x_news_scroll_hint;
@@ -126,6 +143,7 @@ static void configure_x_news_page(bool enabled);
 static void update_page_chrome(void);
 static void finish_boot_animation(void);
 static void refresh_clock_labels(void);
+static void render_codex_detail(void);
 
 static void set_clock_timezone_locked(int32_t utc_offset_seconds, const char *abbreviation)
 {
@@ -227,14 +245,136 @@ static lv_obj_t *create_card(lv_obj_t *parent, int x, int y, int width, int heig
     return card;
 }
 
+static const dashboard_task_t *selected_codex_task(void)
+{
+    if (!latest_model_valid || codex_selected_task_id[0] == 0) return NULL;
+    for (int index = 0; index < latest_model.task_count && index < DASHBOARD_MAX_TASKS; ++index) {
+        if (strcmp(latest_model.tasks[index].id, codex_selected_task_id) == 0) {
+            return &latest_model.tasks[index];
+        }
+    }
+    return NULL;
+}
+
+static bool codex_task_can_continue(const dashboard_task_t *task)
+{
+    return latest_model.codex_continue_enabled
+        && task != NULL
+        && task->state == DASHBOARD_TASK_IDLE
+        && task->attention == DASHBOARD_ATTENTION_NONE;
+}
+
+static void set_codex_button_visible(lv_obj_t *button, bool visible)
+{
+    if (button == NULL) return;
+    if (visible) {
+        lv_obj_remove_flag(button, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(button, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void render_codex_detail(void)
+{
+    if (codex_detail_title == NULL) return;
+    const dashboard_task_t *task = selected_codex_task();
+    if (task == NULL) {
+        lv_label_set_text(codex_detail_eyebrow, "BOUNDED CONTROL");
+        lv_label_set_text(codex_detail_title, "Select a task");
+        lv_label_set_text(codex_detail_summary, "Tap a recent task to inspect the only enabled action.");
+        lv_label_set_text(codex_detail_status, "No approvals or free-form commands");
+        lv_obj_set_style_text_color(codex_detail_status, COLOR_FOG, 0);
+        set_codex_button_visible(codex_hold_button, false);
+        set_codex_button_visible(codex_confirm_button, false);
+        return;
+    }
+
+    lv_label_set_text(codex_detail_eyebrow, "TASK DETAIL");
+    lv_label_set_text(codex_detail_title, task->title);
+    lv_label_set_text(
+        codex_detail_summary,
+        current_settings.hide_task_summaries ? "Summary hidden by privacy setting" : task->summary
+    );
+    if (!codex_task_can_continue(task)) {
+        const char *status = !latest_model.codex_continue_enabled
+            ? "Enable Fixed Continue on the Mac"
+            : (task->attention != DASHBOARD_ATTENTION_NONE
+            ? "Needs attention on the Mac"
+            : (task->state == DASHBOARD_TASK_ACTIVE ? "Already working" : "Continue is unavailable"));
+        lv_label_set_text(codex_detail_status, status);
+        lv_obj_set_style_text_color(codex_detail_status, COLOR_AMBER, 0);
+        set_codex_button_visible(codex_hold_button, false);
+        set_codex_button_visible(codex_confirm_button, false);
+        codex_continue_armed = false;
+        return;
+    }
+
+    if (!codex_result_visible && !codex_continue_in_flight) {
+        lv_label_set_text(codex_detail_status, "Sends exactly: Please continue.");
+        lv_obj_set_style_text_color(codex_detail_status, COLOR_FOG, 0);
+    }
+    set_codex_button_visible(codex_hold_button, !codex_continue_in_flight && !codex_continue_armed);
+    set_codex_button_visible(codex_confirm_button, !codex_continue_in_flight && codex_continue_armed);
+    if (codex_hold_label != NULL) lv_label_set_text(codex_hold_label, "HOLD TO ARM");
+}
+
+static void codex_row_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_continue_in_flight) return;
+    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    if (!latest_model_valid || index < 0 || index >= latest_model.task_count) return;
+    strlcpy(codex_selected_task_id, latest_model.tasks[index].id, sizeof(codex_selected_task_id));
+    codex_continue_armed = false;
+    codex_result_visible = false;
+    render_codex_detail();
+}
+
+static void codex_hold_event(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        codex_hold_started_tick = lv_tick_get();
+        lv_label_set_text(codex_hold_label, "KEEP HOLDING...");
+    } else if (code == LV_EVENT_PRESSING && !codex_continue_armed
+               && lv_tick_elaps(codex_hold_started_tick) >= CODEX_CONTINUE_HOLD_MS) {
+        codex_continue_armed = true;
+        lv_label_set_text(codex_detail_status, "Armed - tap the separate confirm button");
+        lv_obj_set_style_text_color(codex_detail_status, COLOR_SIGNAL, 0);
+        set_codex_button_visible(codex_hold_button, false);
+        set_codex_button_visible(codex_confirm_button, true);
+    } else if (code == LV_EVENT_RELEASED && !codex_continue_armed) {
+        lv_label_set_text(codex_hold_label, "HOLD TO ARM");
+    }
+}
+
+static void codex_confirm_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !codex_continue_armed
+        || codex_continue_in_flight || codex_continue_callback == NULL) return;
+    const dashboard_task_t *task = selected_codex_task();
+    if (!codex_task_can_continue(task)) {
+        codex_continue_armed = false;
+        render_codex_detail();
+        return;
+    }
+    codex_continue_armed = false;
+    codex_continue_in_flight = true;
+    codex_result_visible = false;
+    set_codex_button_visible(codex_hold_button, false);
+    set_codex_button_visible(codex_confirm_button, false);
+    lv_label_set_text(codex_detail_status, "Sending fixed action to paired Mac...");
+    lv_obj_set_style_text_color(codex_detail_status, COLOR_SIGNAL, 0);
+    if (!codex_continue_callback(task->id)) {
+        codex_continue_in_flight = false;
+        lv_label_set_text(codex_detail_status, "Mac is offline or another action is pending");
+        lv_obj_set_style_text_color(codex_detail_status, COLOR_AMBER, 0);
+        set_codex_button_visible(codex_hold_button, true);
+    }
+}
+
 static void set_boot_rail_width(void *object, int32_t value)
 {
     lv_obj_set_width((lv_obj_t *)object, value);
-}
-
-static void set_boot_icon_scale(void *object, int32_t value)
-{
-    lv_image_set_scale((lv_obj_t *)object, value);
 }
 
 static void set_boot_icon_opacity(void *object, int32_t value)
@@ -494,7 +634,8 @@ static void build_codex_page(lv_obj_t *page)
 
     for (int i = 0; i < CODEX_VISIBLE_TASKS; ++i) {
         codex_rows[i] = create_card(page, 22, 48 + (i * 114), 660, 104, 14);
-        lv_obj_add_flag(codex_rows[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(codex_rows[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_event_cb(codex_rows[i], codex_row_tapped, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
         codex_dots[i] = lv_obj_create(codex_rows[i]);
         set_clean_box(codex_dots[i], COLOR_STEEL, LV_RADIUS_CIRCLE);
@@ -512,27 +653,44 @@ static void build_codex_page(lv_obj_t *page)
         lv_obj_align(codex_summaries[i], LV_ALIGN_BOTTOM_LEFT, 42, -18);
     }
 
-    lv_obj_t *safety = create_card(page, 702, 48, 294, 332, 16);
-    lv_obj_t *safety_title = create_label(safety, "SAFETY BOUNDARY", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(safety_title, LV_ALIGN_TOP_LEFT, 18, 18);
-    lv_obj_t *readonly = create_label(safety, "READ ONLY", &lv_font_montserrat_28, COLOR_SIGNAL);
-    lv_obj_align(readonly, LV_ALIGN_TOP_LEFT, 18, 55);
-    lv_obj_t *explanation = create_label(
-        safety,
-        "Recent task history is safe to show.\nApprovals, answers and commands\nstay on the Mac.",
+    lv_obj_t *detail = create_card(page, 702, 48, 294, 332, 16);
+    codex_detail_eyebrow = create_label(detail, "BOUNDED CONTROL", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(codex_detail_eyebrow, 18, 16);
+    codex_detail_title = create_label(detail, "Select a task", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_width(codex_detail_title, 258);
+    lv_label_set_long_mode(codex_detail_title, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(codex_detail_title, 18, 48);
+    codex_detail_summary = create_label(
+        detail,
+        "Tap a recent task to inspect the only enabled action.",
         &lv_font_montserrat_14,
         COLOR_FOG
     );
-    lv_obj_set_style_text_line_space(explanation, 7, 0);
-    lv_obj_align(explanation, LV_ALIGN_TOP_LEFT, 18, 110);
-    lv_obj_t *capability = create_label(
-        safety,
-        "APP SERVER       LOCAL\nDESKTOP TASKS    HISTORY\nREMOTE ACTIONS   OFF",
-        &lv_font_montserrat_14,
-        COLOR_MIST
-    );
-    lv_obj_set_style_text_line_space(capability, 9, 0);
-    lv_obj_align(capability, LV_ALIGN_BOTTOM_LEFT, 18, -20);
+    lv_obj_set_width(codex_detail_summary, 258);
+    lv_label_set_long_mode(codex_detail_summary, LV_LABEL_LONG_WRAP);
+    lv_obj_set_pos(codex_detail_summary, 18, 86);
+    codex_detail_status = create_label(detail, "No approvals or free-form commands", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_width(codex_detail_status, 258);
+    lv_label_set_long_mode(codex_detail_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_pos(codex_detail_status, 18, 180);
+
+    codex_hold_button = lv_button_create(detail);
+    set_clean_box(codex_hold_button, COLOR_STEEL, 12);
+    lv_obj_set_size(codex_hold_button, 258, 54);
+    lv_obj_align(codex_hold_button, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_add_event_cb(codex_hold_button, codex_hold_event, LV_EVENT_ALL, NULL);
+    codex_hold_label = create_label(codex_hold_button, "HOLD TO ARM", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_center(codex_hold_label);
+    lv_obj_add_flag(codex_hold_button, LV_OBJ_FLAG_HIDDEN);
+
+    codex_confirm_button = lv_button_create(detail);
+    set_clean_box(codex_confirm_button, COLOR_SIGNAL, 12);
+    lv_obj_set_size(codex_confirm_button, 258, 54);
+    lv_obj_align(codex_confirm_button, LV_ALIGN_BOTTOM_MID, 0, -18);
+    lv_obj_add_event_cb(codex_confirm_button, codex_confirm_tapped, LV_EVENT_CLICKED, NULL);
+    codex_confirm_label = create_label(codex_confirm_button, "CONFIRM CONTINUE", &lv_font_montserrat_14, COLOR_CARBON);
+    lv_obj_center(codex_confirm_label);
+    lv_obj_add_flag(codex_confirm_button, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_weather_page(lv_obj_t *page)
@@ -1293,7 +1451,7 @@ static void build_ui(void)
     lv_obj_set_pos(mac_power_state_label, 20, 230);
 
     attention_hint_label = lv_label_create(attention);
-    lv_label_set_text(attention_hint_label, "Tap to test touch\nRemote actions off");
+    lv_label_set_text(attention_hint_label, "Tap to test touch\nFixed continue only");
     lv_obj_set_style_text_color(attention_hint_label, COLOR_FOG, 0);
     lv_obj_set_style_text_font(attention_hint_label, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_line_space(attention_hint_label, 8, 0);
@@ -1611,6 +1769,18 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         }
         lv_obj_set_style_bg_color(codex_dots[i], dot, 0);
     }
+    if (codex_selected_task_id[0] != 0 && selected_codex_task() == NULL) {
+        codex_selected_task_id[0] = 0;
+        codex_continue_armed = false;
+        codex_continue_in_flight = false;
+        codex_result_visible = false;
+    }
+    if (codex_result_visible && lv_tick_elaps(codex_result_started_tick) >= CODEX_RESULT_HOLD_MS) {
+        codex_result_visible = false;
+    }
+    if (!codex_result_visible) {
+        render_codex_detail();
+    }
     if (!x_news_refresh_in_flight && x_news_pull_distance == 0) {
         if (x_news_result_visible && lv_tick_elaps(x_news_result_started_tick) < X_NEWS_RESULT_HOLD_MS) {
             // Keep a terminal refresh result readable across the next snapshot.
@@ -1685,6 +1855,61 @@ void dashboard_ui_set_connection_state(dashboard_connection_state_t state)
 void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_t callback)
 {
     x_news_refresh_callback = callback;
+}
+
+void dashboard_ui_set_wifi_update_callback(dashboard_wifi_update_callback_t callback)
+{
+    wifi_update_callback = callback;
+}
+
+void dashboard_ui_set_wifi_scan_callback(dashboard_wifi_scan_callback_t callback)
+{
+    wifi_scan_callback = callback;
+}
+
+void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_t callback)
+{
+    codex_continue_callback = callback;
+}
+
+void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t state)
+{
+    if (codex_detail_status == NULL) return;
+    const char *text = "Codex did not accept the request";
+    lv_color_t color = COLOR_AMBER;
+    switch (state) {
+    case DASHBOARD_CODEX_CONTINUE_SENDING:
+        text = "Sending fixed action to paired Mac...";
+        color = COLOR_SIGNAL;
+        break;
+    case DASHBOARD_CODEX_CONTINUE_ACCEPTED:
+        text = "Sent - Codex is continuing";
+        color = COLOR_SIGNAL;
+        break;
+    case DASHBOARD_CODEX_CONTINUE_UNAVAILABLE:
+        text = "Task control is unavailable on this Mac";
+        break;
+    case DASHBOARD_CODEX_CONTINUE_BUSY:
+        text = "Codex is busy - try again shortly";
+        color = COLOR_CYAN;
+        break;
+    case DASHBOARD_CODEX_CONTINUE_REJECTED:
+        text = "Task changed and is no longer eligible";
+        break;
+    case DASHBOARD_CODEX_CONTINUE_FAILED:
+    default:
+        break;
+    }
+    lvgl_port_lock(0);
+    codex_continue_in_flight = state == DASHBOARD_CODEX_CONTINUE_SENDING;
+    codex_continue_armed = false;
+    codex_result_visible = state != DASHBOARD_CODEX_CONTINUE_SENDING;
+    if (codex_result_visible) codex_result_started_tick = lv_tick_get();
+    lv_label_set_text(codex_detail_status, text);
+    lv_obj_set_style_text_color(codex_detail_status, color, 0);
+    set_codex_button_visible(codex_hold_button, false);
+    set_codex_button_visible(codex_confirm_button, false);
+    lvgl_port_unlock();
 }
 
 void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t state)

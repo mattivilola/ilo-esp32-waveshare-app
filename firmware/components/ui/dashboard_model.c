@@ -25,10 +25,9 @@ dashboard_model_t dashboard_model_demo(void)
             .title = "Codex decisions",
             .state = DASHBOARD_TASK_WAITING,
             .attention = DASHBOARD_ATTENTION_APPROVAL,
-            .summary = "Review on Mac - remote actions disabled",
+            .summary = "Review stays on Mac - fixed continue only",
         },
     };
     memcpy(model.tasks, tasks, sizeof(tasks));
     return model;
 }
-
