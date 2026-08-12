@@ -68,16 +68,19 @@ firmware_release_sdkconfig() {
   print -- "$(firmware_release_dir)/sdkconfig"
 }
 
-require_firmware_signing_material() {
-  [[ -n "${ILO_BOARD_FIRMWARE_SIGNING_KEY:-}" ]] || fail "Set ILO_BOARD_FIRMWARE_SIGNING_KEY to the external RSA-3072 private key path."
+require_firmware_public_key() {
   [[ -n "${ILO_BOARD_FIRMWARE_PUBLIC_KEY:-}" ]] || fail "Set ILO_BOARD_FIRMWARE_PUBLIC_KEY to its PEM public key path."
-  [[ -f "$ILO_BOARD_FIRMWARE_SIGNING_KEY" ]] || fail "Firmware signing key does not exist."
   [[ -f "$ILO_BOARD_FIRMWARE_PUBLIC_KEY" ]] || fail "Firmware public key does not exist."
-  local private_path public_path
+}
+
+require_firmware_signing_material() {
+  require_firmware_public_key
+  [[ -n "${ILO_BOARD_FIRMWARE_SIGNING_KEY:-}" ]] || fail "Set ILO_BOARD_FIRMWARE_SIGNING_KEY to the external RSA-3072 private key path."
+  [[ -f "$ILO_BOARD_FIRMWARE_SIGNING_KEY" ]] || fail "Firmware signing key does not exist."
+  local private_path
   private_path="${ILO_BOARD_FIRMWARE_SIGNING_KEY:A}"
-  public_path="${ILO_BOARD_FIRMWARE_PUBLIC_KEY:A}"
   [[ "$private_path" != "$ILO_BOARD_ROOT"/* ]] || fail "The firmware private key must live outside this repository."
-  [[ "$public_path" != "$private_path" ]] || fail "Public and private key paths must be different."
+  [[ "${ILO_BOARD_FIRMWARE_PUBLIC_KEY:A}" != "$private_path" ]] || fail "Public and private key paths must be different."
 }
 
 release_basename() {

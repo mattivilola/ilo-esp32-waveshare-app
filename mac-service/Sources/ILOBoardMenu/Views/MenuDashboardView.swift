@@ -1,5 +1,6 @@
 import AppKit
 import BoardHostCore
+import BoardProtocol
 import ILOBoardMenuSupport
 import SwiftUI
 
@@ -14,25 +15,29 @@ struct MenuDashboardView: View {
     @State private var showingLocationConsent = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            statusCard
-            if store.state == .pairingAuthorizationRequired {
-                pairingAuthorizationCard
-            } else {
-                details
-                companionControls
-                codexContinueControls
-                weatherLocationControls
-                xNewsControls
-                recentActivity
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                statusCard
+                if store.state == .pairingAuthorizationRequired {
+                    pairingAuthorizationCard
+                } else {
+                    details
+                    firmwareUpdateControls
+                    companionControls
+                    codexContinueControls
+                    weatherLocationControls
+                    xNewsControls
+                    recentActivity
+                }
+                Divider()
+                diagnosticActions
+                actions
             }
-            Divider()
-            diagnosticActions
-            actions
+            .padding(18)
         }
-        .padding(18)
         .frame(width: 360)
+        .frame(maxHeight: 760)
         .onAppear {
             launchAtLogin.refresh()
             store.refreshXNewsStatus()
@@ -213,6 +218,64 @@ struct MenuDashboardView: View {
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private var firmwareUpdateControls: some View {
+        let status = store.firmwareUpdateStatus
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Board firmware", systemImage: "arrow.triangle.2.circlepath.circle")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(firmwareUpdateTitle(status))
+                    .font(.caption)
+                    .foregroundStyle(firmwareUpdateTint(status.state))
+            }
+            if status.state == .downloading {
+                ProgressView(value: Double(status.progressPercent), total: 100)
+            }
+            Text(status.message)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                if status.state == .available {
+                    Button("Install \(status.availableVersion ?? "update")") { store.installFirmwareUpdate() }
+                        .buttonStyle(.borderedProminent)
+                } else if [.idle, .upToDate, .failed].contains(status.state) {
+                    Button("Check for Firmware Update") { store.checkForFirmwareUpdate() }
+                }
+                if status.state == .disabled {
+                    Text("One USB bridge flash enables future wireless updates.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private func firmwareUpdateTitle(_ status: FirmwareUpdateStatusMessage) -> String {
+        switch status.state {
+        case .disabled: "USB bridge needed"
+        case .idle: "Ready"
+        case .checking: "Checking…"
+        case .upToDate: "Up to date"
+        case .available: status.availableVersion.map { "Version \($0)" } ?? "Available"
+        case .downloading: "\(status.progressPercent)%"
+        case .verifying: "Verifying…"
+        case .rebooting: "Rebooting…"
+        case .failed: "Try again"
+        }
+    }
+
+    private func firmwareUpdateTint(_ state: FirmwareUpdateState) -> Color {
+        switch state {
+        case .available, .upToDate: .green
+        case .failed: .orange
+        default: .secondary
+        }
     }
 
     private var xNewsControls: some View {

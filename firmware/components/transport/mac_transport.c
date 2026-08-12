@@ -69,6 +69,8 @@ static bool wifi_scan_in_progress;
 static size_t wifi_scan_count;
 static char wifi_scan_ssids[4][33];
 static TaskHandle_t wifi_scan_task_handle;
+static ota_updater_status_t ota_status_pending;
+static bool ota_status_dirty;
 
 static bool json_number_equals(cJSON *item, int expected);
 
@@ -387,6 +389,54 @@ static bool send_json(esp_tls_t *tls, cJSON *json)
         && tls_write_all(tls, (const uint8_t *)payload, size);
     free(payload);
     return ok;
+}
+
+static const char *ota_state_name(ota_updater_state_t state)
+{
+    switch (state) {
+    case OTA_UPDATER_DISABLED: return "disabled";
+    case OTA_UPDATER_IDLE: return "idle";
+    case OTA_UPDATER_CHECKING: return "checking";
+    case OTA_UPDATER_UP_TO_DATE: return "upToDate";
+    case OTA_UPDATER_AVAILABLE: return "available";
+    case OTA_UPDATER_DOWNLOADING: return "downloading";
+    case OTA_UPDATER_VERIFYING: return "verifying";
+    case OTA_UPDATER_REBOOTING: return "rebooting";
+    case OTA_UPDATER_FAILED: return "failed";
+    default: return "failed";
+    }
+}
+
+static bool send_pending_ota_status(esp_tls_t *tls)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool dirty = ota_status_dirty;
+    ota_updater_status_t status = ota_status_pending;
+    ota_status_dirty = false;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (!dirty) return true;
+    cJSON *message = cJSON_CreateObject();
+    if (message == NULL) return false;
+    cJSON_AddStringToObject(message, "type", "firmwareUpdateStatus");
+    cJSON_AddNumberToObject(message, "version", 1);
+    cJSON_AddStringToObject(message, "state", ota_state_name(status.state));
+    cJSON_AddStringToObject(message, "currentVersion", status.current_version);
+    if (status.available_version[0] != 0) cJSON_AddStringToObject(message, "availableVersion", status.available_version);
+    cJSON_AddNumberToObject(message, "progressPercent", status.progress_percent);
+    cJSON_AddStringToObject(message, "message", status.detail);
+    bool sent = send_json(tls, message);
+    cJSON_Delete(message);
+    return sent;
+}
+
+static bool handle_firmware_update_command(cJSON *message)
+{
+    cJSON *version = cJSON_GetObjectItemCaseSensitive(message, "version");
+    cJSON *action = cJSON_GetObjectItemCaseSensitive(message, "action");
+    if (!json_number_equals(version, 1) || !cJSON_IsString(action)) return false;
+    if (strcmp(action->valuestring, "check") == 0) return ota_updater_request_check();
+    if (strcmp(action->valuestring, "install") == 0) return ota_updater_request_install();
+    return false;
 }
 
 static bool take_x_news_refresh_request(void)
@@ -1030,6 +1080,9 @@ static void transport_task(void *argument)
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.continue.fixed"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("display.capture.rgb565"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("xNews.refresh.request"));
+#if CONFIG_ILO_OTA_DELIVERY
+                cJSON_AddItemToArray(capabilities, cJSON_CreateString("firmware.update.signed"));
+#endif
             }
             bool ok = send_json(tls, hello);
             cJSON_Delete(hello);
@@ -1047,8 +1100,10 @@ static void transport_task(void *argument)
                 dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_ONLINE);
                 portENTER_CRITICAL(&refresh_lock);
                 transport_online = true;
+                if (ota_status_pending.current_version[0] != 0) ota_status_dirty = true;
                 portEXIT_CRITICAL(&refresh_lock);
                 for (;;) {
+                    if (!send_pending_ota_status(tls)) break;
                     if (take_x_news_refresh_request() && !send_x_news_refresh_request(tls)) break;
                     char continue_task_id[CODEX_TASK_ID_MAX + 1];
                     char continue_request_id[sizeof(codex_continue_request_id)];
@@ -1086,6 +1141,12 @@ static void transport_task(void *argument)
                         cJSON_Delete(message);
                         continue;
                     }
+                    if (cJSON_IsString(message_type)
+                        && strcmp(message_type->valuestring, "firmwareUpdateCommand") == 0) {
+                        (void)handle_firmware_update_command(message);
+                        cJSON_Delete(message);
+                        continue;
+                    }
                     dashboard_model_t model;
                     if (parse_snapshot(message, &model) && model_callback != NULL) {
                         model_callback(&model);
@@ -1108,6 +1169,15 @@ static void transport_task(void *argument)
         esp_tls_conn_destroy(tls);
         vTaskDelay(pdMS_TO_TICKS(5000));
     }
+}
+
+void mac_transport_publish_ota_status(const ota_updater_status_t *status)
+{
+    if (status == NULL) return;
+    portENTER_CRITICAL(&refresh_lock);
+    ota_status_pending = *status;
+    ota_status_dirty = true;
+    portEXIT_CRITICAL(&refresh_lock);
 }
 
 bool mac_transport_request_x_news_refresh(void)

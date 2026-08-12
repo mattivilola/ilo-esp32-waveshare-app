@@ -130,8 +130,7 @@ esp_err_t ota_policy_confirm_after_stability(void)
         return ESP_OK;
     }
     if (!esp_ota_check_rollback_is_possible()) {
-        ESP_LOGE(TAG, "Pending image has no valid rollback target; USB recovery gate remains active");
-        return ESP_ERR_INVALID_STATE;
+        ESP_LOGW(TAG, "Pending bridge image has no rollback target; USB recovery remains required until confirmation");
     }
     if (xTaskCreate(validation_task, "ota_validate", 4096, NULL, 4, NULL) != pdPASS) {
         reject_pending_image("could not start the validation task");

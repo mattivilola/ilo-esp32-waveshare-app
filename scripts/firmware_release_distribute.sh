@@ -4,7 +4,7 @@ set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 
 load_release_config
-require_firmware_signing_material
+require_firmware_public_key
 ensure_command gcloud
 
 release_image="$(firmware_release_image)"

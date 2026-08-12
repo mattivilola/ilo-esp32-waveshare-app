@@ -18,6 +18,7 @@ public enum BoardServerEvent: Equatable, Sendable {
     case listenerFailed(message: String)
     case boardConnected
     case boardVersionReceived(String)
+    case firmwareUpdateStatus(FirmwareUpdateStatusMessage)
     case boardDisconnected
     case snapshotSent(at: Date)
 }
@@ -151,6 +152,12 @@ public final class BoardServer: @unchecked Sendable {
         }
     }
 
+    public func requestFirmwareUpdate(_ action: FirmwareUpdateAction) {
+        queue.async { [weak self] in
+            self?.connections.values.forEach { $0.sendFirmwareUpdateCommand(action) }
+        }
+    }
+
     private func accept(_ connection: NWConnection) {
         let connectionLimit = screenCaptureHandler == nil ? 4 : 1
         guard connections.count < connectionLimit else {
@@ -170,6 +177,7 @@ public final class BoardServer: @unchecked Sendable {
             onScreenCapture: screenCaptureHandler,
             onReady: { [eventHandler] in eventHandler(.boardConnected) },
             onBoardVersion: { [eventHandler] version in eventHandler(.boardVersionReceived(version)) },
+            onFirmwareUpdateStatus: { [eventHandler] status in eventHandler(.firmwareUpdateStatus(status)) },
             onSnapshot: { [eventHandler] date in eventHandler(.snapshotSent(at: date)) },
             onClose: { [weak self, eventHandler] id in
                 self?.connections.removeValue(forKey: id)
@@ -193,6 +201,7 @@ private final class BoardConnection: @unchecked Sendable {
     private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let onReady: @Sendable () -> Void
     private let onBoardVersion: @Sendable (String) -> Void
+    private let onFirmwareUpdateStatus: @Sendable (FirmwareUpdateStatusMessage) -> Void
     private let onSnapshot: @Sendable (Date) -> Void
     private let onClose: @Sendable (ObjectIdentifier) -> Void
     private var decoder = FrameDecoder()
@@ -214,6 +223,7 @@ private final class BoardConnection: @unchecked Sendable {
         onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
         onReady: @escaping @Sendable () -> Void,
         onBoardVersion: @escaping @Sendable (String) -> Void,
+        onFirmwareUpdateStatus: @escaping @Sendable (FirmwareUpdateStatusMessage) -> Void,
         onSnapshot: @escaping @Sendable (Date) -> Void,
         onClose: @escaping @Sendable (ObjectIdentifier) -> Void
     ) {
@@ -229,6 +239,7 @@ private final class BoardConnection: @unchecked Sendable {
         self.captureAssembler = captureRequest.map { ScreenCaptureAssembler(requestID: $0.requestID) }
         self.onReady = onReady
         self.onBoardVersion = onBoardVersion
+        self.onFirmwareUpdateStatus = onFirmwareUpdateStatus
         self.onSnapshot = onSnapshot
         self.onClose = onClose
     }
@@ -342,6 +353,15 @@ private final class BoardConnection: @unchecked Sendable {
             handleXNewsRefreshRequest(payload)
         case "codexContinueRequest":
             handleCodexContinueRequest(payload)
+        case "firmwareUpdateStatus":
+            guard helloAccepted, subscribed,
+                  let status = try? ProtocolJSON.decoder().decode(FirmwareUpdateStatusMessage.self, from: payload),
+                  Self.validFirmwareUpdateStatus(status)
+            else {
+                send(ErrorMessage(code: "invalidFirmwareUpdateStatus", message: "Firmware update status is invalid."))
+                return
+            }
+            onFirmwareUpdateStatus(status)
         default:
             send(ErrorMessage(code: "unsupportedCapability", message: "Protocol v1 does not support this capability."))
         }
@@ -351,6 +371,21 @@ private final class BoardConnection: @unchecked Sendable {
         if captureRequest != nil {
             print("[capture] \(message)")
         }
+    }
+
+    func sendFirmwareUpdateCommand(_ action: FirmwareUpdateAction) {
+        guard helloAccepted, subscribed else { return }
+        send(FirmwareUpdateCommand(action: action))
+    }
+
+    private static func validFirmwareUpdateStatus(_ status: FirmwareUpdateStatusMessage) -> Bool {
+        status.type == "firmwareUpdateStatus"
+            && status.version == 1
+            && validSoftwareVersion(status.currentVersion)
+            && (status.availableVersion.map(validSoftwareVersion) ?? true)
+            && (0...100).contains(status.progressPercent)
+            && (1...95).contains(status.message.count)
+            && status.message.allSatisfy { $0.isASCII && !$0.isNewline }
     }
 
     private func handleXNewsRefreshRequest(_ payload: Data) {

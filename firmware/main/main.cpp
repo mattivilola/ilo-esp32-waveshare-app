@@ -8,9 +8,21 @@
 #include "dashboard_ui.h"
 #include "mac_transport.h"
 #include "ota_policy.h"
+#include "ota_updater.h"
 #include "weather_client.h"
 
 static const char *TAG = "ilo_board";
+
+static void handle_ota_status(const ota_updater_status_t *status)
+{
+    if (status == nullptr) return;
+    dashboard_ui_set_ota_status(
+        static_cast<dashboard_ota_state_t>(status->state),
+        status->available_version,
+        status->progress_percent
+    );
+    mac_transport_publish_ota_status(status);
+}
 
 static void handle_mac_model(const dashboard_model_t *model)
 {
@@ -44,6 +56,7 @@ extern "C" void app_main()
     dashboard_ui_set_wifi_update_callback(mac_transport_update_wifi);
     dashboard_ui_set_wifi_scan_callback(mac_transport_scan_wifi);
     dashboard_ui_set_codex_continue_callback(mac_transport_request_codex_continue);
+    dashboard_ui_set_ota_callbacks(ota_updater_request_check, ota_updater_request_install);
 
     dashboard_model_t initial = dashboard_model_demo();
     dashboard_ui_set_model(&initial);
@@ -70,4 +83,5 @@ extern "C" void app_main()
             ESP_LOGW(TAG, "Direct weather is not configured yet");
         }
     }
+    (void)ota_updater_start(handle_ota_status);
 }

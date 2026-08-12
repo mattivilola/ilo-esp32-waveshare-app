@@ -77,6 +77,10 @@ class OTAPolicyTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 board.public_verification_key(key)
 
+    def test_release_profile_enables_https_delivery(self):
+        config = board.read_sdkconfig(ROOT / "firmware" / "sdkconfig.ota-release.defaults")
+        self.assertEqual(config.get("CONFIG_ILO_OTA_DELIVERY"), "y")
+
 
 class FirmwareVersionCommandTests(unittest.TestCase):
     def test_flash_defaults_to_patch_version_bump(self):

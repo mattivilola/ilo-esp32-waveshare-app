@@ -6,6 +6,8 @@ Protocol version `1` uses a four-byte big-endian payload length followed by UTF-
 
 The transport is TLS 1.2 with a unique 32-byte PSK per board. Bonjour advertises `_iloboard._tcp`; it never carries credentials or private task data.
 
+Firmware OTA control is defined separately in `firmware-update-v1.schema.json`. The paired Mac may send only `check` or `install`; all manifest, origin, artifact, signature, version, and rollback decisions remain on the board. Status exposes only bounded versions, state, percentage, and user-readable progress.
+
 Phase-1 client flow:
 
 1. Board establishes TLS using its opaque board ID as PSK identity.

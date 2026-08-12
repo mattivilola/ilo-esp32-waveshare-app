@@ -359,6 +359,61 @@ public struct XNewsRefreshStatusMessage: Codable, Equatable, Sendable {
     }
 }
 
+public enum FirmwareUpdateAction: String, Codable, Equatable, Sendable {
+    case check
+    case install
+}
+
+public struct FirmwareUpdateCommand: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let action: FirmwareUpdateAction
+
+    public init(action: FirmwareUpdateAction) {
+        type = "firmwareUpdateCommand"
+        version = 1
+        self.action = action
+    }
+}
+
+public enum FirmwareUpdateState: String, Codable, Equatable, Sendable {
+    case disabled
+    case idle
+    case checking
+    case upToDate
+    case available
+    case downloading
+    case verifying
+    case rebooting
+    case failed
+}
+
+public struct FirmwareUpdateStatusMessage: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let state: FirmwareUpdateState
+    public let currentVersion: String
+    public let availableVersion: String?
+    public let progressPercent: Int
+    public let message: String
+
+    public init(
+        state: FirmwareUpdateState,
+        currentVersion: String,
+        availableVersion: String? = nil,
+        progressPercent: Int = 0,
+        message: String
+    ) {
+        type = "firmwareUpdateStatus"
+        version = 1
+        self.state = state
+        self.currentVersion = currentVersion
+        self.availableVersion = availableVersion
+        self.progressPercent = progressPercent
+        self.message = message
+    }
+}
+
 public struct SnapshotMessage: Encodable, Equatable, Sendable {
     public let type = "snapshot"
     public let snapshot: DashboardSnapshot

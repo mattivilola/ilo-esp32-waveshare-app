@@ -106,6 +106,8 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Minor-bump and flash firmware | `make firmware-flash-minor` | Yes, USB |
 | Open serial monitor | `make firmware-monitor` | Yes, USB |
 | Inspect OTA safety gates | `make ota-status` | No |
+| Build/sign/verify a firmware release | `make firmware-release-local` | No |
+| Publish a verified firmware release | `make firmware-release-distribute` | GCS only |
 | Verify a signed OTA artifact | `./tools/board ota-verify --image IMAGE --public-key PUBLIC.pem --sdkconfig SDKCONFIG` | No |
 | Open interactive 1024×600 UI preview | `make ui-preview` | No |
 | Export all five simulator screenshots | `make ui-screenshots` | No |
@@ -145,7 +147,7 @@ The Mac companion keeps its existing release-safe workflow in `Config/version.en
 
 The partition table already reserves equal 4 MiB `ota_0` and `ota_1` slots. Rollback is enabled for clean builds, and a newly installed image stays `PENDING_VERIFY` until board/UI initialization succeeds and a 30-second runtime/heap health window passes. A crash, reset, failed health check, or failure to persist the valid state keeps the image unconfirmed and selects the previous valid slot when recovery is available.
 
-There is deliberately no OTA upload or install command yet. `make ota-status` is read-only and reports the current layout, rollback, and signing gates. Production artifacts must use the separate signed-update profile and pass `ota-verify`; that command accepts only a public RSA key, validates the ESP image and release sdkconfig, verifies the Secure Boot v2 signature, and prints its SHA-256 without uploading anything. Private signing keys must remain outside this repository. See [the OTA policy](docs/ota.md) for the release flow and remaining hardware gates.
+Normal developer firmware deliberately keeps OTA disabled. The release-only profile adds a board-owned HTTPS updater: it automatically checks the pinned signed GCS manifest after Wi-Fi connects, but installation remains an explicit tap in Settings or click in the paired Mac companion. The Mac sends only fixed `check`/`install` actions; the board independently refetches its pinned manifest and never accepts a URL, binary, hash, version, or key from the Mac. It verifies the manifest signature, exact 5B target, immutable URL, monotonic sequence, size and SHA-256, then lets ESP-IDF verify the signed app before selecting the inactive slot. The existing 30-second first-boot health gate confirms or rolls back the new image. Private signing keys must remain outside this repository. See [the OTA policy](docs/ota.md) for the release flow and physical gates.
 
 ### Screenshots
 

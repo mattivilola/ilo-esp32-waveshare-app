@@ -32,6 +32,20 @@ typedef enum {
 typedef bool (*dashboard_x_news_refresh_callback_t)(void);
 
 typedef enum {
+    DASHBOARD_OTA_DISABLED,
+    DASHBOARD_OTA_IDLE,
+    DASHBOARD_OTA_CHECKING,
+    DASHBOARD_OTA_UP_TO_DATE,
+    DASHBOARD_OTA_AVAILABLE,
+    DASHBOARD_OTA_DOWNLOADING,
+    DASHBOARD_OTA_VERIFYING,
+    DASHBOARD_OTA_REBOOTING,
+    DASHBOARD_OTA_FAILED,
+} dashboard_ota_state_t;
+
+typedef bool (*dashboard_ota_callback_t)(void);
+
+typedef enum {
     DASHBOARD_CODEX_CONTINUE_SENDING,
     DASHBOARD_CODEX_CONTINUE_ACCEPTED,
     DASHBOARD_CODEX_CONTINUE_UNAVAILABLE,
@@ -55,6 +69,8 @@ void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_
 void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t state);
 void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_t callback);
 void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t state);
+void dashboard_ui_set_ota_callbacks(dashboard_ota_callback_t check_callback, dashboard_ota_callback_t install_callback);
+void dashboard_ui_set_ota_status(dashboard_ota_state_t state, const char *version, uint8_t progress_percent);
 esp_err_t dashboard_ui_capture_rgb565(uint8_t **pixels, size_t *size);
 
 #ifdef __cplusplus

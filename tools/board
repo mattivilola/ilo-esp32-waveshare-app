@@ -214,7 +214,8 @@ def ota_status(args: argparse.Namespace) -> None:
     print(f"  slots: ota_0 + ota_1, {layout['slot_size']} bytes each")
     print(f"  rollback: {'enabled' if config.get('CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE') == 'y' else 'disabled in selected sdkconfig'}")
     print(f"  signed update policy: {'ready' if not errors else 'BLOCKED'}")
-    print("  update ingress: disabled (no upload/install command is implemented)")
+    delivery_enabled = config.get("CONFIG_ILO_OTA_DELIVERY") == "y"
+    print(f"  update ingress: {'signed HTTPS updater enabled' if delivery_enabled else 'disabled in selected sdkconfig'}")
     print("  production secure boot/eFuse provisioning: not performed")
     for error in errors:
         print(f"  gate: {error}")

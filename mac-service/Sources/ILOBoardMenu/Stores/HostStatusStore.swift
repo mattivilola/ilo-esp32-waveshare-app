@@ -11,6 +11,11 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var servicePort: UInt16?
     @Published private(set) var lastSync: Date?
     @Published private(set) var firmwareVersion = "Waiting for board"
+    @Published private(set) var firmwareUpdateStatus = FirmwareUpdateStatusMessage(
+        state: .disabled,
+        currentVersion: "0.0.0",
+        message: "Signed OTA requires the v0.2.0 USB bridge"
+    )
     @Published private(set) var connectionHistory: [ConnectionHistoryEntry]
     @Published private(set) var macPowerStatus: MacPowerStatus?
     @Published private(set) var codexContinueEnabled: Bool
@@ -158,6 +163,14 @@ final class HostStatusStore: ObservableObject {
         NSPasteboard.general.setString(boardID, forType: .string)
     }
 
+    func checkForFirmwareUpdate() {
+        server?.requestFirmwareUpdate(.check)
+    }
+
+    func installFirmwareUpdate() {
+        server?.requestFirmwareUpdate(.install)
+    }
+
     func enableCodexContinue() {
         codexContinueFeature.setEnabled(true)
         codexContinueEnabled = true
@@ -246,6 +259,8 @@ final class HostStatusStore: ObservableObject {
             transition(to: .connected, recording: .boardConnected)
         case let .boardVersionReceived(version):
             firmwareVersion = version
+        case let .firmwareUpdateStatus(status):
+            firmwareUpdateStatus = status
         case .boardDisconnected:
             if server != nil {
                 transition(to: .listening, recording: .boardDisconnected)

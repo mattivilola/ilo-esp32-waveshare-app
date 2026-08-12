@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iloapps.com/schemas/ilo-board-firmware-update-v1.json",
+  "title": "ILO Board firmware update control messages v1",
+  "oneOf": [
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "version", "action"],
+      "properties": {
+        "type": { "const": "firmwareUpdateCommand" },
+        "version": { "const": 1 },
+        "action": { "enum": ["check", "install"] }
+      }
+    },
+    {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "version", "state", "currentVersion", "progressPercent", "message"],
+      "properties": {
+        "type": { "const": "firmwareUpdateStatus" },
+        "version": { "const": 1 },
+        "state": { "enum": ["disabled", "idle", "checking", "upToDate", "available", "downloading", "verifying", "rebooting", "failed"] },
+        "currentVersion": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "availableVersion": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "progressPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "message": { "type": "string", "minLength": 1, "maxLength": 95 }
+      }
+    }
+  ]
+}

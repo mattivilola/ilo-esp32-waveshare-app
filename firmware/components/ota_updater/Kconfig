@@ -1,0 +1,23 @@
+menu "ILO Board signed OTA delivery"
+
+config ILO_OTA_DELIVERY
+    bool "Enable signed HTTPS firmware delivery"
+    default n
+    depends on BOOTLOADER_APP_ROLLBACK_ENABLE
+    depends on SECURE_SIGNED_APPS_NO_SECURE_BOOT
+    depends on SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT
+    help
+        Enables the board-owned updater. Release builds also require the
+        ILO_BOARD_FIRMWARE_PUBLIC_KEY environment variable at configure time.
+
+config ILO_OTA_MANIFEST_URL
+    string "Pinned firmware manifest URL"
+    default "https://storage.googleapis.com/ilo-public/ilo-board/firmware/manifest-v1.json"
+    depends on ILO_OTA_DELIVERY
+
+config ILO_OTA_RELEASE_URL_PREFIX
+    string "Allowed immutable firmware URL prefix"
+    default "https://storage.googleapis.com/ilo-public/ilo-board/firmware/releases/"
+    depends on ILO_OTA_DELIVERY
+
+endmenu

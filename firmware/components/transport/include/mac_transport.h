@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "dashboard_model.h"
+#include "ota_updater.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +20,7 @@ bool mac_transport_request_x_news_refresh(void);
 bool mac_transport_request_codex_continue(const char *task_id);
 bool mac_transport_update_wifi(const char *ssid, const char *password);
 size_t mac_transport_scan_wifi(char (*ssids)[33], size_t maximum_count);
+void mac_transport_publish_ota_status(const ota_updater_status_t *status);
 
 #ifdef __cplusplus
 }

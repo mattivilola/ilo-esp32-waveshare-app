@@ -183,3 +183,27 @@ import Testing
     )
     #expect(decoded == status)
 }
+
+@Test func firmwareUpdateMessagesUseOnlyFixedActionsAndBoundedStatus() throws {
+    let command = FirmwareUpdateCommand(action: .install)
+    let commandData = try ProtocolJSON.encoder().encode(command)
+    let commandObject = try #require(JSONSerialization.jsonObject(with: commandData) as? [String: Any])
+    #expect(commandObject["type"] as? String == "firmwareUpdateCommand")
+    #expect(commandObject["action"] as? String == "install")
+    #expect(commandObject["url"] == nil)
+    #expect(try ProtocolJSON.decoder().decode(FirmwareUpdateCommand.self, from: commandData) == command)
+
+    let status = FirmwareUpdateStatusMessage(
+        state: .downloading,
+        currentVersion: "0.2.0",
+        availableVersion: "0.2.1",
+        progressPercent: 62,
+        message: "Downloading signed firmware"
+    )
+    #expect(
+        try ProtocolJSON.decoder().decode(
+            FirmwareUpdateStatusMessage.self,
+            from: ProtocolJSON.encoder().encode(status)
+        ) == status
+    )
+}

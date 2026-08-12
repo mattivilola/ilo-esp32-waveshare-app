@@ -12,6 +12,9 @@ ensure_command openssl
 [[ -n "${ILO_BOARD_FIRMWARE_RELEASE_NOTE_1:-}" ]] || fail "Set at least ILO_BOARD_FIRMWARE_RELEASE_NOTE_1."
 
 version="$(firmware_version)"
+version_parts=(${(s:.:)version})
+(( version_parts[1] > 0 || version_parts[2] >= 2 )) \
+  || fail "The first signed OTA bridge must be firmware 0.2.0 or newer."
 release_dir="$(firmware_release_dir)"
 release_image="$(firmware_release_image)"
 release_manifest="$(firmware_release_manifest)"
@@ -44,7 +47,7 @@ export SDKCONFIG_DEFAULTS="$ILO_BOARD_ROOT/firmware/sdkconfig.defaults;$ILO_BOAR
   --public-key "$ILO_BOARD_FIRMWARE_PUBLIC_KEY" \
   --sdkconfig "$release_sdkconfig"
 
-local -a manifest_args
+typeset -a manifest_args
 manifest_args=(
   create
   --image "$release_image"
@@ -56,7 +59,7 @@ manifest_args=(
   --minimum-updater-version "0.2.0"
   --published-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 )
-local index note_name note
+typeset index note_name note
 for index in {1..8}; do
   note_name="ILO_BOARD_FIRMWARE_RELEASE_NOTE_$index"
   note="${(P)note_name:-}"

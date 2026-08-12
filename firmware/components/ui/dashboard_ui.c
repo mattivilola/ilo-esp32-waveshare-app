@@ -119,6 +119,12 @@ static lv_obj_t *settings_temperature_value;
 static lv_obj_t *settings_focus_value;
 static lv_obj_t *settings_x_news_value;
 static lv_obj_t *settings_versions_value;
+static lv_obj_t *settings_ota_value;
+static dashboard_ota_callback_t ota_check_callback;
+static dashboard_ota_callback_t ota_install_callback;
+static dashboard_ota_state_t settings_ota_state = DASHBOARD_OTA_DISABLED;
+static char settings_ota_version[32];
+static uint8_t settings_ota_progress;
 static lv_obj_t *wifi_setup_overlay;
 static lv_obj_t *wifi_ssid_input;
 static lv_obj_t *wifi_password_input;
@@ -994,6 +1000,41 @@ static void refresh_settings_labels(void)
         );
         lv_label_set_text(settings_versions_value, versions);
     }
+    if (settings_ota_value != NULL) {
+        char ota_text[36];
+        lv_color_t color = COLOR_SIGNAL;
+        switch (settings_ota_state) {
+        case DASHBOARD_OTA_IDLE: snprintf(ota_text, sizeof(ota_text), "CHECK"); break;
+        case DASHBOARD_OTA_CHECKING: snprintf(ota_text, sizeof(ota_text), "CHECKING..."); break;
+        case DASHBOARD_OTA_UP_TO_DATE: snprintf(ota_text, sizeof(ota_text), "UP TO DATE"); break;
+        case DASHBOARD_OTA_AVAILABLE: snprintf(ota_text, sizeof(ota_text), "INSTALL %.12s", settings_ota_version); break;
+        case DASHBOARD_OTA_DOWNLOADING: snprintf(ota_text, sizeof(ota_text), "%u%%", (unsigned)settings_ota_progress); break;
+        case DASHBOARD_OTA_VERIFYING: snprintf(ota_text, sizeof(ota_text), "VERIFYING"); break;
+        case DASHBOARD_OTA_REBOOTING: snprintf(ota_text, sizeof(ota_text), "REBOOTING"); break;
+        case DASHBOARD_OTA_FAILED: snprintf(ota_text, sizeof(ota_text), "TRY AGAIN"); color = COLOR_AMBER; break;
+        case DASHBOARD_OTA_DISABLED:
+        default: snprintf(ota_text, sizeof(ota_text), "USB BRIDGE NEEDED"); color = COLOR_FOG; break;
+        }
+        lv_label_set_text(settings_ota_value, ota_text);
+        lv_obj_set_style_text_color(settings_ota_value, color, 0);
+    }
+}
+
+static void ota_setting_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    screensaver_tick = lv_tick_get();
+    if (settings_ota_state == DASHBOARD_OTA_AVAILABLE) {
+        if (ota_install_callback != NULL && ota_install_callback()) {
+            settings_ota_state = DASHBOARD_OTA_DOWNLOADING;
+            settings_ota_progress = 0;
+        }
+    } else if (settings_ota_state == DASHBOARD_OTA_IDLE
+        || settings_ota_state == DASHBOARD_OTA_UP_TO_DATE
+        || settings_ota_state == DASHBOARD_OTA_FAILED) {
+        if (ota_check_callback != NULL && ota_check_callback()) settings_ota_state = DASHBOARD_OTA_CHECKING;
+    }
+    refresh_settings_labels();
 }
 
 static void refresh_task_summaries(void)
@@ -1307,14 +1348,9 @@ static void build_settings_page(lv_obj_t *page)
     lv_obj_t *sleep_value = NULL;
     create_setting_row(display, 190, "Turn display off now", sleep_now_tapped, &sleep_value);
     lv_label_set_text(sleep_value, "SLEEP");
-    lv_obj_t *power_note = create_label(
-        display,
-        "This 5B exposes binary backlight on/off, not PWM.\nWake touch is consumed to prevent accidental actions.",
-        &lv_font_montserrat_14,
-        COLOR_FOG
-    );
-    lv_obj_set_style_text_line_space(power_note, 7, 0);
-    lv_obj_align(power_note, LV_ALIGN_BOTTOM_LEFT, 18, -20);
+    create_setting_row(display, 260, "Firmware update", ota_setting_tapped, &settings_ota_value);
+    lv_obj_t *power_note = create_label(display, "Signed OTA / current slot remains safe until verification", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(power_note, LV_ALIGN_BOTTOM_LEFT, 18, -12);
 
     lv_obj_t *pulse = create_card(page, 518, 8, 478, 194, 16);
     lv_obj_t *pulse_title = create_label(pulse, "PULSE & UNITS", &lv_font_montserrat_14, COLOR_FOG);
@@ -2040,6 +2076,22 @@ void dashboard_ui_set_connection_state(dashboard_connection_state_t state)
 void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_t callback)
 {
     x_news_refresh_callback = callback;
+}
+
+void dashboard_ui_set_ota_callbacks(dashboard_ota_callback_t check_callback, dashboard_ota_callback_t install_callback)
+{
+    ota_check_callback = check_callback;
+    ota_install_callback = install_callback;
+}
+
+void dashboard_ui_set_ota_status(dashboard_ota_state_t state, const char *version, uint8_t progress_percent)
+{
+    lvgl_port_lock(0);
+    settings_ota_state = state;
+    strlcpy(settings_ota_version, version != NULL ? version : "", sizeof(settings_ota_version));
+    settings_ota_progress = progress_percent > 100 ? 100 : progress_percent;
+    refresh_settings_labels();
+    lvgl_port_unlock();
 }
 
 void dashboard_ui_set_wifi_update_callback(dashboard_wifi_update_callback_t callback)

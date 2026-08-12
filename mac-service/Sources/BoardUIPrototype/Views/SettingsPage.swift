@@ -10,10 +10,11 @@ struct SettingsPage: View {
     @State private var uses24HourClock = true
     @State private var usesFahrenheit = false
     @State private var focusMinutes = 25
+    @State private var firmwareUpdateState = 0
 
     init(
         xNewsEnabled: Bool,
-        firmwareVersion: String = "0.1.0",
+        firmwareVersion: String = "0.2.0",
         companionVersion: String = "0.1.3"
     ) {
         self.xNewsEnabled = xNewsEnabled
@@ -33,8 +34,11 @@ struct SettingsPage: View {
                         displayOffMinutes = next(displayOffMinutes, in: [0, 5, 10, 30])
                     }
                     settingButton("Turn display off now", value: "SLEEP") {}
+                    settingButton("Firmware update", value: firmwareUpdateLabel) {
+                        firmwareUpdateState = (firmwareUpdateState + 1) % 4
+                    }
                     Spacer()
-                    Text("This exact 5B board exposes binary backlight on/off, not PWM brightness. The first wake touch is consumed so it cannot activate a hidden control.")
+                    Text("Signed OTA keeps the current slot bootable until download, hash, image signature, and first-boot health checks pass.")
                         .font(.board(11))
                         .foregroundStyle(BoardPalette.fog)
                         .lineSpacing(3)
@@ -161,5 +165,14 @@ struct SettingsPage: View {
     private func next(_ value: Int, in choices: [Int]) -> Int {
         guard let index = choices.firstIndex(of: value) else { return choices[0] }
         return choices[(index + 1) % choices.count]
+    }
+
+    private var firmwareUpdateLabel: String {
+        switch firmwareUpdateState {
+        case 1: "CHECKING…"
+        case 2: "INSTALL 0.2.1"
+        case 3: "62%"
+        default: "CHECK"
+        }
     }
 }

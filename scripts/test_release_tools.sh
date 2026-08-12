@@ -18,6 +18,7 @@ for script in \
   version.sh \
   firmware_version.sh \
   firmware_release_local.sh \
+  firmware_release_flash.sh \
   firmware_release_distribute.sh \
   release_commit.sh \
   release_tag.sh \
@@ -53,6 +54,11 @@ grep -Fq 'appcast' "$ILO_BOARD_ROOT/scripts/release_distribute.sh" || fail "Dist
 grep -Fq -- '--if-generation-match=0' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must forbid immutable artifact replacement."
 grep -Fq 'cmp -s' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must verify the uploaded image before publishing the manifest."
 grep -Fq 'firmware_manifest.py" verify' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must verify the signed manifest."
+grep -Fq 'require_firmware_public_key' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must require only public verification material."
+! grep -Fq 'require_firmware_signing_material' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must not require the private signing key."
+grep -Fq '0x9000 was preserved' "$ILO_BOARD_ROOT/scripts/firmware_release_flash.sh" || fail "Signed bridge flashing must document preserved NVS."
+grep -Fq 'require_firmware_public_key' "$ILO_BOARD_ROOT/scripts/firmware_release_flash.sh" || fail "Signed bridge flashing must require only public verification material."
+! grep -Fq 'require_firmware_signing_material' "$ILO_BOARD_ROOT/scripts/firmware_release_flash.sh" || fail "Signed bridge flashing must not require the private signing key."
 
 "$ILO_BOARD_ROOT/scripts/test_sparkle_release.sh"
 
