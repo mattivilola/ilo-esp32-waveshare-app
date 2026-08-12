@@ -106,6 +106,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Open interactive 1024×600 UI preview | `make ui-preview` | No |
 | Export all five simulator screenshots | `make ui-screenshots` | No |
 | Export one simulator screenshot | `./tools/board ui-screenshot --screen codex` | No |
+| Save the current physical board screen | `make board-screenshot` | Yes, Wi-Fi |
 | Identify chip | `./tools/board chip-id` | Yes, USB |
 | Back up the complete 16 MB flash | `./tools/board backup` | Yes, USB |
 | Securely provision Wi-Fi/pairing | `./tools/board provision` | Yes, USB |
@@ -152,11 +153,13 @@ Generated files go to `artifacts/ui-previews/` by default. They use sample data 
 The updated firmware also supports an authenticated live framebuffer capture:
 
 ```bash
-# Stop the menu companion first so the capture host can use its service port.
-./tools/host screenshot --output /tmp/ilo-board-live.png
+make board-screenshot
+
+# Optional custom destination or shorter wait.
+make board-screenshot BOARD_SCREENSHOT_OUTPUT=/tmp/ilo-board-live.png BOARD_SCREENSHOT_TIMEOUT=45
 ```
 
-The command waits up to 45 seconds for the paired board, requests exactly one 1024×600 RGB565-LE frame over the existing TLS-PSK connection, verifies 100 strictly ordered bounded chunks and the final SHA-256 digest, then writes a PNG atomically. It refuses to replace an existing file unless `--force` is explicit; `--timeout 1..120` changes the wait. There is no HTTP screenshot endpoint and an unpaired LAN client cannot request a capture. Firmware, protocol validation, worst-case frame sizing, RGB565 conversion, and PNG dimensions are hardware-independently verified. Actual panel color order, buffer freshness, tearing, capture latency, and peak PSRAM still require the physical board.
+The Make target stores timestamped files under `artifacts/board-screenshots/` by default and waits up to 120 seconds so the board has time to reconnect. When the installed menu companion owns the service port, the target pauses it cleanly, captures the unchanged framebuffer, and reopens it afterward—including when capture fails. It requests exactly one 1024×600 RGB565-LE frame over the existing TLS-PSK connection, verifies 100 strictly ordered bounded chunks and the final SHA-256 digest, then writes a PNG atomically. It refuses to replace an existing file; use a new `BOARD_SCREENSHOT_OUTPUT` path when needed. The lower-level `./tools/host screenshot --output FILE.png [--timeout 1..120] [--force]` command remains available. There is no HTTP screenshot endpoint and an unpaired LAN client cannot request a capture. Firmware, protocol validation, worst-case frame sizing, RGB565 conversion, and PNG dimensions are hardware-independently verified. Actual panel color order, buffer freshness, tearing, capture latency, and peak PSRAM still require the physical board.
 
 ### Four- or five-screen information architecture
 
@@ -219,7 +222,7 @@ Do not copy Codex credentials into firmware or NVS. Any future write/control cap
 
 ## Optional X News via Grok
 
-X News is Mac-mediated and disabled by default. When Off—or when the Grok executable is unavailable—the complete board page is hidden and Weather follows Codex. The menu-bar companion exposes availability, an explicit enable confirmation, daily/twice-daily scheduling, and Disable. It uses the authenticated top-level headless command `grok -p`; it does not use `grok agent`, and no Grok/X credential is copied to the board. Check availability and the last verified cache with:
+X News is Mac-mediated and disabled by default. When Off—or when the Grok executable is unavailable—the complete board page is hidden and Weather follows Codex. The menu-bar companion exposes availability, verified cache count/age, live fetching/result/cooldown state, a **Refresh now** action, an explicit enable confirmation, daily/twice-daily scheduling, and Disable. The Mac button and board pull gesture share one coordinator and 15-minute cooldown; an accepted cache automatically reaches the board on its next five-second snapshot. It uses the authenticated top-level headless command `grok -p`; it does not use `grok agent`, and no Grok/X credential is copied to the board. Check availability and the last verified cache with:
 
 ```bash
 grok --version

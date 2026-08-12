@@ -1,6 +1,9 @@
 SHELL := /bin/zsh
 
-.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ota-status ui-preview ui-screenshots mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
+BOARD_SCREENSHOT_OUTPUT ?= artifacts/board-screenshots/ilo-board-$(shell date +%Y%m%d-%H%M%S).png
+BOARD_SCREENSHOT_TIMEOUT ?= 120
+
+.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ota-status ui-preview ui-screenshots board-screenshot mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
 
 help:
 	@printf "ILO Board commands\n\n"
@@ -13,6 +16,7 @@ help:
 	@printf "  make ota-status          Inspect OTA safety gates without hardware\n"
 	@printf "  make ui-preview          Open the desktop 1024x600 device UI preview\n"
 	@printf "  make ui-screenshots      Export PNG previews for all five device screens\n"
+	@printf "  make board-screenshot    Save the current physical board screen as a PNG\n"
 	@printf "  make mac-build           Build the Swift package\n"
 	@printf "  make mac-test            Run all macOS host tests\n"
 	@printf "  make mac-menu            Run the menu-bar app from SwiftPM\n"
@@ -61,6 +65,9 @@ ui-preview:
 
 ui-screenshots:
 	./tools/board ui-screenshot --all
+
+board-screenshot:
+	./scripts/capture_board_screenshot.sh "$(BOARD_SCREENSHOT_OUTPUT)" "$(BOARD_SCREENSHOT_TIMEOUT)"
 
 mac-build:
 	./tools/host build

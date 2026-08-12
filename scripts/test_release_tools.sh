@@ -21,6 +21,7 @@ for script in \
   release_push.sh \
   release_local.sh \
   release_distribute.sh \
+  capture_board_screenshot.sh \
   test_sparkle_release.sh; do
   zsh -n "$ILO_BOARD_ROOT/scripts/$script"
 done
