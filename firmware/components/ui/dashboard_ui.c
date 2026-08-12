@@ -1511,25 +1511,25 @@ static void build_screensaver(lv_obj_t *screen)
     screensaver_content = lv_obj_create(screensaver);
     lv_obj_set_style_bg_opa(screensaver_content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(screensaver_content, 0, 0);
-    lv_obj_set_size(screensaver_content, 460, 190);
+    lv_obj_set_size(screensaver_content, 420, 172);
     lv_obj_clear_flag(screensaver_content, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(screensaver_content);
 
     lv_obj_t *icon = lv_image_create(screensaver_content);
     lv_image_set_src(icon, &ilo_icon_48);
-    lv_obj_align(icon, LV_ALIGN_CENTER, -180, -42);
+    lv_obj_align(icon, LV_ALIGN_LEFT_MID, 16, 0);
     lv_obj_t *pulse = create_label(screensaver_content, "ILO / PULSE", &lv_font_montserrat_20, COLOR_SIGNAL);
-    lv_obj_align(pulse, LV_ALIGN_CENTER, -70, -54);
+    lv_obj_align(pulse, LV_ALIGN_TOP_LEFT, 92, 7);
     screensaver_clock_label = create_label(screensaver_content, "--:--", &lv_font_montserrat_28, COLOR_MIST);
-    lv_obj_align(screensaver_clock_label, LV_ALIGN_CENTER, 62, -4);
+    lv_obj_align(screensaver_clock_label, LV_ALIGN_TOP_LEFT, 92, 38);
     screensaver_date_label = create_label(screensaver_content, "TIME SYNC NEEDED", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(screensaver_date_label, LV_ALIGN_CENTER, 62, 36);
+    lv_obj_align(screensaver_date_label, LV_ALIGN_TOP_LEFT, 92, 82);
     lv_obj_t *wake = create_label(screensaver_content, "Touch to wake", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(wake, LV_ALIGN_CENTER, 62, 72);
+    lv_obj_align(wake, LV_ALIGN_LEFT_MID, 112, 48);
     screensaver_status_dot = lv_obj_create(screensaver_content);
     set_clean_box(screensaver_status_dot, COLOR_FOG, LV_RADIUS_CIRCLE);
     lv_obj_set_size(screensaver_status_dot, 10, 10);
-    lv_obj_align(screensaver_status_dot, LV_ALIGN_CENTER, -84, 72);
+    lv_obj_align(screensaver_status_dot, LV_ALIGN_LEFT_MID, 92, 48);
 
     lv_timer_create(screensaver_timer, 1000, NULL);
     refresh_clock_labels();

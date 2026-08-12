@@ -317,28 +317,33 @@ struct BoardScreensaverValidationView: View {
     var body: some View {
         ZStack {
             BoardPalette.carbon
-            HStack(spacing: 22) {
+            HStack(spacing: 20) {
                 Image(nsImage: BrandAsset.image())
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 72, height: 72)
+                    .frame(width: 64, height: 64)
                     .clipShape(Circle())
-                VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 7) {
                     Text("ILO / PULSE")
                         .font(.board(18, weight: .bold))
                         .tracking(1.2)
                         .foregroundStyle(BoardPalette.signal)
                     Text("09:41")
-                        .font(.system(size: 58, weight: .bold, design: .rounded))
+                        .font(.system(size: 56, weight: .bold, design: .rounded))
                         .foregroundStyle(BoardPalette.mist)
                     Text("SUN 10 AUG · EEST")
                         .font(.board(14, weight: .semibold))
                         .tracking(0.8)
                         .foregroundStyle(BoardPalette.fog)
-                    Text("Touch to wake")
-                        .font(.board(13))
-                        .foregroundStyle(BoardPalette.fog)
-                        .padding(.top, 8)
+                    HStack(spacing: 9) {
+                        Circle()
+                            .fill(BoardPalette.signal)
+                            .frame(width: 8, height: 8)
+                        Text("Touch to wake")
+                            .font(.board(13))
+                            .foregroundStyle(BoardPalette.fog)
+                    }
+                    .padding(.top, 5)
                 }
             }
             .offset(x: 126, y: -82)
