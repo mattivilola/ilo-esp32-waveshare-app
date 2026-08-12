@@ -1551,9 +1551,17 @@ static void build_screensaver(lv_obj_t *screen)
     lv_obj_clear_flag(screensaver_content, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(screensaver_content);
 
-    lv_obj_t *icon = lv_image_create(screensaver_content);
-    lv_image_set_src(icon, &ilo_icon_48);
-    lv_obj_align(icon, LV_ALIGN_LEFT_MID, 16, 0);
+    // Keep the saver cheap to redraw: moving an ARGB image across the RGB565
+    // framebuffer can hold the software renderer long enough to starve IDLE1
+    // on the ESP32-S3. A native LVGL roundel keeps the same visual anchor
+    // without invoking the image transform path on every position change.
+    lv_obj_t *roundel = lv_obj_create(screensaver_content);
+    set_clean_box(roundel, COLOR_MIST, LV_RADIUS_CIRCLE);
+    lv_obj_set_size(roundel, 56, 56);
+    lv_obj_align(roundel, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_clear_flag(roundel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *roundel_label = create_label(roundel, "ILO", &lv_font_montserrat_14, COLOR_CARBON);
+    lv_obj_center(roundel_label);
     lv_obj_t *pulse = create_label(screensaver_content, "ILO / PULSE", &lv_font_montserrat_20, COLOR_SIGNAL);
     lv_obj_align(pulse, LV_ALIGN_TOP_LEFT, 92, 7);
     screensaver_clock_label = create_label(screensaver_content, "--:--", &lv_font_montserrat_28, COLOR_MIST);

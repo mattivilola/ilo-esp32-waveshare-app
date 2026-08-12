@@ -13,7 +13,9 @@ app_path="$(release_app_path)"
 require_sparkle_public_key
 validate_sparkle_configuration "$app_path"
 sign_sparkle_framework "$app_path" "$ILO_BOARD_SIGNING_IDENTITY"
-codesign --force --options runtime --timestamp --sign "$ILO_BOARD_SIGNING_IDENTITY" "$app_path"
+codesign --force --options runtime --timestamp \
+  --entitlements "$ILO_BOARD_ROOT/Packaging/Release.entitlements" \
+  --sign "$ILO_BOARD_SIGNING_IDENTITY" "$app_path"
 codesign --verify --deep --strict "$app_path"
 
 dmg_path="$(release_dmg_path)"

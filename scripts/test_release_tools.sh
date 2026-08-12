@@ -64,6 +64,12 @@ grep -Fq 'ILOSupportsPromptFreeScreenCapture' "$ILO_BOARD_ROOT/Packaging/Info.pl
 grep -Fq 'NSLocationUsageDescription' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must explain optional weather location use."
 grep -Fq '_iloboard._tcp' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must declare its Bonjour service."
 grep -Fq 'disable-library-validation' "$ILO_BOARD_ROOT/Packaging/Debug.entitlements" || fail "Ad-hoc Sparkle builds need the documented debug library-validation exception."
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.personal-information.location' "$ILO_BOARD_ROOT/Packaging/Debug.entitlements")" == true ]] || fail "Ad-hoc app signing must allow consent-gated weather location access."
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.personal-information.location' "$ILO_BOARD_ROOT/Packaging/Release.entitlements")" == true ]] || fail "Developer ID signing must allow consent-gated weather location access."
+if grep -Fq 'disable-library-validation' "$ILO_BOARD_ROOT/Packaging/Release.entitlements"; then
+  fail "Developer ID release entitlements must not disable library validation."
+fi
+grep -Fq 'Release.entitlements' "$ILO_BOARD_ROOT/scripts/sign_release.sh" || fail "Developer ID signing must apply the release entitlements."
 if grep -Fq 'Debug.entitlements' "$ILO_BOARD_ROOT/scripts/sign_release.sh"; then
   fail "Developer ID release signing must not use debug entitlements."
 fi

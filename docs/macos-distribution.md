@@ -89,7 +89,7 @@ This command performs no Google Cloud writes.
 It performs these gates in order:
 
 1. Builds both CPU architectures and creates the `.app` bundle.
-2. Applies the Developer ID signature and hardened runtime.
+2. Applies the Developer ID signature, hardened runtime, and the location entitlement required for explicit weather-location consent.
 3. Creates and signs the DMG.
 4. Waits for Apple notarization.
 5. Staples and validates the notarization ticket.
@@ -100,6 +100,7 @@ Inspect the result before any external write:
 
 ```bash
 codesign --verify --deep --strict "artifacts/ILO Board.app"
+codesign -d --entitlements :- "artifacts/ILO Board.app"
 spctl --assess --type execute --verbose "artifacts/ILO Board.app"
 xcrun stapler validate artifacts/ILOBoard-0.1.1.dmg
 ```
