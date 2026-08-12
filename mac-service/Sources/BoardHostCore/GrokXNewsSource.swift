@@ -565,19 +565,7 @@ public enum XNewsWireMapper {
     /// LVGL's compact built-in Montserrat fonts cover a deliberately small glyph set.
     /// Keep the verified cache unchanged while making the board wire text predictable.
     static func boardSafeText(_ value: String) -> String {
-        let punctuation = value
-            .replacingOccurrences(of: "\u{2018}", with: "'")
-            .replacingOccurrences(of: "\u{2019}", with: "'")
-            .replacingOccurrences(of: "\u{201C}", with: "\"")
-            .replacingOccurrences(of: "\u{201D}", with: "\"")
-            .replacingOccurrences(of: "\u{2013}", with: "-")
-            .replacingOccurrences(of: "\u{2014}", with: "-")
-            .replacingOccurrences(of: "\u{2026}", with: "...")
-            .replacingOccurrences(of: "\u{00A0}", with: " ")
-        return punctuation.folding(
-            options: [.diacriticInsensitive, .widthInsensitive],
-            locale: Locale(identifier: "en_US_POSIX")
-        )
+        BoardDisplayText.sanitized(value, maximum: 220)
     }
 
     public static func cachedSnapshot(now: Date = Date(), cache: XNewsFeedCache = XNewsFeedCache()) -> NewsFeedSnapshot? {

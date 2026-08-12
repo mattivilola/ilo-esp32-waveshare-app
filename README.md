@@ -158,6 +158,8 @@ make ui-screenshots
 
 Generated files go to `artifacts/ui-previews/` by default. They use sample data and represent the intended layout. They do not prove RGB output, physical legibility, touch mapping, backlight behavior, or frame timing.
 
+The Dashboard keeps Codex attention and active work primary, with a compact ambient weather pulse beneath MacBook power. Once a location is configured it shows the bounded city/region label, current temperature, condition icon, and honest `LIVE`, `STALE`, or `UPDATING` state. Codex titles, summaries, news copy, and location labels are normalized to the bundled LVGL font's supported character set before display, preventing smart punctuation, accents, or emoji from becoming missing-glyph boxes.
+
 The updated firmware also supports an authenticated live framebuffer capture:
 
 ```bash
@@ -264,7 +266,7 @@ The local Grok 1.0.0 tests proved why this gate is necessary: the schema-based a
 
 ## Internet access without the Mac
 
-Yes. Once Wi-Fi and a weather location are stored, the board reconnects after reboot and fetches weather without the Mac. Location can come from USB provisioning or from the companion's explicit **Use This Mac's Location** flow. The latter asks permission only after an in-app explanation, rounds coordinates to two decimals (roughly neighbourhood precision), sends them only over the authenticated TLS-PSK connection, and persists them on the board. The board independently synchronizes time through SNTP even when weather is not configured, validates Open-Meteo through ESP-IDF's certificate bundle, refreshes every 30 minutes, retries after one minute, and labels retained data `STALE` rather than silently presenting it as current.
+Yes. Once Wi-Fi and a weather location are stored, the board reconnects after reboot and fetches weather without the Mac. Location can come from USB provisioning or from the companion's explicit **Use This Mac's Location** flow. The latter asks permission only after an in-app explanation, rounds coordinates to two decimals (roughly neighbourhood precision), lets macOS reverse-geocode that coarse point to the city/region shown on the Dashboard, sends only the rounded point and bounded label over authenticated TLS-PSK, and persists them on the board. The board independently synchronizes time through SNTP even when weather is not configured, validates Open-Meteo through ESP-IDF's certificate bundle, refreshes every 30 minutes, retries after one minute, and labels retained data `STALE` rather than silently presenting it as current.
 
 ### Is the board connected by USB or Wi-Fi?
 

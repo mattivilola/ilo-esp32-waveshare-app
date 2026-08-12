@@ -58,7 +58,7 @@ The fixed continue action is deliberately distinct from approval: tapping a task
 
 Weather operates independently of the Mac after USB provisioning supplies a name and coordinates. The board synchronizes time before a certificate-verified HTTPS request, refreshes every 30 minutes, and distinguishes LIVE, STALE, OFFLINE, and SETUP NEEDED. Desktop preview data is labeled PREVIEW DATA; live firmware never silently presents an old result as current. The provider attribution remains visible on the Weather page.
 
-The board optimizes for the next few hours and today rather than dense meteorological detail. Current temperature, condition, precipitation transition, wind, and three compact daily summaries fit the glance use case.
+The board optimizes for the next few hours and today rather than dense meteorological detail. The Dashboard now carries a compact city, current temperature, condition icon, and honest `LIVE`/`STALE`/`UPDATING` state; the full Weather page keeps precipitation transition, wind, and three compact daily summaries.
 
 ## Settings
 

@@ -33,14 +33,28 @@ struct DashboardPage: View {
                             .foregroundStyle(BoardPalette.signal)
                     }
                     .padding(.bottom, 15)
-                    Text("READ ONLY")
-                        .font(.board(11, weight: .bold))
-                        .tracking(1)
-                        .foregroundStyle(BoardPalette.signal)
-                    Text("Review actions remain on Mac")
-                        .font(.board(12))
-                        .foregroundStyle(BoardPalette.fog)
-                        .padding(.top, 4)
+                    Divider()
+                        .overlay(BoardPalette.steel)
+                        .padding(.bottom, 13)
+                    HStack(spacing: 12) {
+                        Image(systemName: "cloud.sun.fill")
+                            .font(.system(size: 21, weight: .semibold))
+                            .foregroundStyle(BoardPalette.carbon)
+                            .frame(width: 46, height: 46)
+                            .background(BoardPalette.cyan, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("HELSINKI")
+                                .font(.board(10, weight: .bold))
+                                .tracking(0.8)
+                                .foregroundStyle(BoardPalette.fog)
+                            Text("14 C")
+                                .font(.board(24, weight: .bold))
+                                .foregroundStyle(BoardPalette.mist)
+                            Text("Light rain / LIVE")
+                                .font(.board(11, weight: .semibold))
+                                .foregroundStyle(BoardPalette.signal)
+                        }
+                    }
                 }
             }
             .frame(width: 250)
@@ -54,7 +68,7 @@ struct DashboardPage: View {
                     MetricChip(value: "3", label: "active", tint: BoardPalette.signal)
                     MetricChip(value: "1", label: "waiting", tint: BoardPalette.amber)
                 }
-                taskRow("ESP32 work pulse", "Four-page navigation and device UX", BoardPalette.signal)
+                taskRow("ESP32 work pulse", "Five-page navigation and device UX", BoardPalette.signal)
                 taskRow("Mac companion", "Universal release pipeline verified", BoardPalette.signal)
                 taskRow("Codex decisions", "Plan review needed on Mac", BoardPalette.amber)
                 Button {

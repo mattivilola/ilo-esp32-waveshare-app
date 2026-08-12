@@ -10,6 +10,37 @@ public let screenCaptureRGB565Bytes = screenCaptureWidth * screenCaptureHeight *
 public let screenCaptureChunkCount =
     (screenCaptureRGB565Bytes + screenCaptureMaximumChunkBytes - 1) / screenCaptureMaximumChunkBytes
 
+public enum BoardDisplayText {
+    /// LVGL's bundled Montserrat fonts intentionally cover a compact glyph set.
+    /// Normalize host-provided copy before it crosses the wire so the board never
+    /// renders replacement boxes for smart punctuation, diacritics, or emoji.
+    public static func sanitized(_ value: String, maximum: Int) -> String {
+        let punctuation = value
+            .replacingOccurrences(of: "\u{2018}", with: "'")
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .replacingOccurrences(of: "\u{201C}", with: "\"")
+            .replacingOccurrences(of: "\u{201D}", with: "\"")
+            .replacingOccurrences(of: "\u{2013}", with: "-")
+            .replacingOccurrences(of: "\u{2014}", with: "-")
+            .replacingOccurrences(of: "\u{2026}", with: "...")
+            .replacingOccurrences(of: "\u{2022}", with: "/")
+            .replacingOccurrences(of: "\u{00B7}", with: "/")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+        let folded = punctuation.folding(
+            options: [.diacriticInsensitive, .widthInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
+        )
+        let scalars = folded.unicodeScalars.compactMap { scalar -> UnicodeScalar? in
+            if scalar.value >= 0x20, scalar.value <= 0x7E { return scalar }
+            return CharacterSet.whitespacesAndNewlines.contains(scalar) ? " " : nil
+        }
+        let compact = String(String.UnicodeScalarView(scalars))
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
+        return String(compact.prefix(maximum))
+    }
+}
+
 public enum TaskState: String, Codable, Sendable, CaseIterable {
     case active
     case waiting
@@ -68,7 +99,8 @@ public struct WeatherLocation: Codable, Equatable, Sendable {
     public let longitude: Double
 
     public init(name: String, latitude: Double, longitude: Double) {
-        self.name = String(name.prefix(40))
+        let safeName = BoardDisplayText.sanitized(name, maximum: 40)
+        self.name = safeName.isEmpty ? "Current location" : safeName
         self.latitude = min(max((latitude * 100).rounded() / 100, -90), 90)
         self.longitude = min(max((longitude * 100).rounded() / 100, -180), 180)
     }

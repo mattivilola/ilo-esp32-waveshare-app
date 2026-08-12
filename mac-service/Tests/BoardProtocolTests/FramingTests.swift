@@ -105,13 +105,19 @@ import Testing
 
 @Test func weatherLocationIsRoundedAndBoundedBeforeTransport() {
     let location = WeatherLocation(
-        name: String(repeating: "L", count: 60),
+        name: String(repeating: "L", count: 60) + " 📍",
         latitude: 60.1699,
         longitude: 24.9384
     )
     #expect(location.name.count == 40)
     #expect(location.latitude == 60.17)
     #expect(location.longitude == 24.94)
+}
+
+@Test func weatherLocationUsesAReadableBoardSafeCityName() {
+    let location = WeatherLocation(name: "Järvenpää 📍", latitude: 60.47, longitude: 25.09)
+    #expect(location.name == "Jarvenpaa")
+    #expect(location.name.unicodeScalars.allSatisfy { $0.isASCII })
 }
 
 @Test func softwareVersionsAreOptionalProtocolV1Metadata() throws {

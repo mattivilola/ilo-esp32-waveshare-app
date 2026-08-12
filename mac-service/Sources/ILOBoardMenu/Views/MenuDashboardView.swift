@@ -65,7 +65,7 @@ struct MenuDashboardView: View {
             Button("Enable Coarse Location") { weatherLocation.enable() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("ILO Board rounds your location to about 1 km, sends it only over the encrypted paired connection, and stores it on the board so weather works without this Mac.")
+            Text("ILO Board first rounds your location to about 1 km. macOS resolves that coarse point to a city or region, then the companion sends only the rounded coordinates and label over the encrypted paired connection. The board stores them so weather works without this Mac.")
         }
     }
 
