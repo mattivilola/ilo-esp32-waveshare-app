@@ -12,6 +12,7 @@ Notable ILO Board macOS companion changes are documented here.
 - Polish physical X News refresh experience
 - Make board screenshot reconnect automatic
 - Track firmware and companion versions
+- Use the paired Mac's configured timezone for the board clock, including automatic DST updates and weather fallback
 
 ### Fixed
 - Fix authenticated board screenshot transfer
