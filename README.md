@@ -106,6 +106,7 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Minor-bump and flash firmware | `make firmware-flash-minor` | Yes, USB |
 | Open serial monitor | `make firmware-monitor` | Yes, USB |
 | Inspect OTA safety gates | `make ota-status` | No |
+| Create the external encrypted OTA signing key | `make firmware-key-create` | No |
 | Build/sign/verify a firmware release | `make firmware-release-local` | No |
 | Publish a verified firmware release | `make firmware-release-distribute` | GCS only |
 | Verify a signed OTA artifact | `./tools/board ota-verify --image IMAGE --public-key PUBLIC.pem --sdkconfig SDKCONFIG` | No |

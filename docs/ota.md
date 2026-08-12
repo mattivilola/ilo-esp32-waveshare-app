@@ -34,9 +34,9 @@ Software-only signed updates protect a future network delivery path but do not s
 
 ## Release commands
 
-1. Put only paths and release metadata in ignored `Config/release.env`; the RSA-3072 private key itself must stay outside the repository and GCS.
+1. Run `make firmware-key-create` once. It uses hidden macOS dialogs to create a password-encrypted PKCS#8 RSA-3072 private PEM outside the repository plus its public PEM and checksums. Back up the encrypted PEM and checksum to a separate encrypted/offline device before the first bridge flash. Put only their paths and release metadata in ignored `Config/release.env`; the private key must stay outside the repository and GCS.
 2. Set a strictly increasing `ILO_BOARD_FIRMWARE_RELEASE_SEQUENCE` and bounded release notes.
-3. Run `make firmware-release-local`. It builds with both sdkconfig defaults files, externally signs the ESP image, verifies the image signature, creates the manifest, verifies the manifest, and changes neither GCS nor a board.
+3. Run `make firmware-release-local`. It asks for the key passphrase, decrypts only into a mode-`600` session directory, builds with both sdkconfig defaults files, externally signs the ESP image, verifies the image signature, creates the manifest, verifies the manifest, and removes the temporary plaintext key on exit. It changes neither GCS nor a board.
 4. Inspect the versioned files under `artifacts/firmware/VERSION/`.
 5. For the one-time bridge, run `make firmware-release-flash PORT=/dev/cu...`. It needs only the public verification key, re-verifies the signed release, and writes bootloader, partition table, OTA metadata, and the signed app while deliberately preserving NVS at `0x9000` (Wi-Fi, pairing, weather, and device settings). It never builds or signs during flash.
 6. Run `make firmware-release-distribute` explicitly. It also needs only the public verification key, repeats all local checks, refuses an existing immutable object, enforces a sequence newer than the published signed manifest, verifies the uploaded binary, and publishes the manifest last.

@@ -17,6 +17,7 @@ for script in \
   render_appcast.sh \
   version.sh \
   firmware_version.sh \
+  firmware_key_create.sh \
   firmware_release_local.sh \
   firmware_release_flash.sh \
   firmware_release_distribute.sh \
@@ -30,8 +31,27 @@ for script in \
   zsh -n "$ILO_BOARD_ROOT/scripts/$script"
 done
 
+zsh -n "$ILO_BOARD_ROOT/scripts/lib/firmware_key.sh"
+
 firmware_version_test_dir="$(mktemp -d)"
 trap 'rm -rf "$firmware_version_test_dir"' EXIT
+key_test_dir="$firmware_version_test_dir/key"
+mkdir -p "$key_test_dir"
+umask 077
+openssl rand -base64 24 > "$key_test_dir/passphrase"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 \
+  -aes-256-cbc -pass "file:$key_test_dir/passphrase" \
+  -out "$key_test_dir/encrypted.pem" >/dev/null 2>&1
+KEY_TEST_DIR="$key_test_dir" zsh -c '
+  source scripts/lib/common.sh
+  source scripts/lib/firmware_key.sh
+  firmware_key_passphrase_dialog() { < "$KEY_TEST_DIR/passphrase"; }
+  unlock_firmware_signing_key "$KEY_TEST_DIR/encrypted.pem" "$KEY_TEST_DIR/plain.pem"
+  [[ "$(stat -f %Lp "$KEY_TEST_DIR/plain.pem")" == 600 ]]
+  openssl pkey -in "$KEY_TEST_DIR/plain.pem" -check -noout >/dev/null 2>&1
+  grep -Fq -- "-----BEGIN ENCRYPTED PRIVATE KEY-----" "$KEY_TEST_DIR/encrypted.pem"
+'
+
 firmware_version_test_file="$firmware_version_test_dir/version.txt"
 print -- "1.2.3" > "$firmware_version_test_file"
 ILO_BOARD_FIRMWARE_VERSION_FILE="$firmware_version_test_file" "$ILO_BOARD_ROOT/scripts/firmware_version.sh" bump patch >/dev/null
@@ -59,6 +79,8 @@ grep -Fq 'require_firmware_public_key' "$ILO_BOARD_ROOT/scripts/firmware_release
 grep -Fq '0x9000 was preserved' "$ILO_BOARD_ROOT/scripts/firmware_release_flash.sh" || fail "Signed bridge flashing must document preserved NVS."
 grep -Fq 'require_firmware_public_key' "$ILO_BOARD_ROOT/scripts/firmware_release_flash.sh" || fail "Signed bridge flashing must require only public verification material."
 ! grep -Fq 'require_firmware_signing_material' "$ILO_BOARD_ROOT/scripts/firmware_release_flash.sh" || fail "Signed bridge flashing must not require the private signing key."
+grep -Fq 'unlock_firmware_signing_key' "$ILO_BOARD_ROOT/scripts/firmware_release_local.sh" || fail "Local firmware releases must unlock encrypted keys only for signing."
+! grep -Eq -- '-pass(in)?[= ]+pass:' "$ILO_BOARD_ROOT/scripts/firmware_key_create.sh" "$ILO_BOARD_ROOT/scripts/lib/firmware_key.sh" || fail "Firmware key passphrases must not appear in process arguments."
 
 "$ILO_BOARD_ROOT/scripts/test_sparkle_release.sh"
 

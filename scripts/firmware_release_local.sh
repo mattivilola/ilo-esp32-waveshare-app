@@ -2,6 +2,7 @@
 set -euo pipefail
 
 source "$(dirname "$0")/lib/common.sh"
+source "$(dirname "$0")/lib/firmware_key.sh"
 
 load_release_config
 require_firmware_signing_material
@@ -21,6 +22,23 @@ release_manifest="$(firmware_release_manifest)"
 release_sdkconfig="$(firmware_release_sdkconfig)"
 build_dir="$release_dir/build"
 unsigned_image="$build_dir/ilo_board.bin"
+signing_key="$ILO_BOARD_FIRMWARE_SIGNING_KEY"
+signing_key_dir=""
+
+if firmware_key_is_encrypted "$signing_key"; then
+  signing_key_dir="$(mktemp -d)"
+  chmod 700 "$signing_key_dir"
+  signing_key="$signing_key_dir/signing-key.pem"
+  unlock_firmware_signing_key "$ILO_BOARD_FIRMWARE_SIGNING_KEY" "$signing_key"
+fi
+
+cleanup_signing_key() {
+  if [[ -n "$signing_key_dir" ]]; then
+    rm -f "$signing_key"
+    rmdir "$signing_key_dir" 2>/dev/null || true
+  fi
+}
+trap cleanup_signing_key EXIT
 
 mkdir -p "$release_dir"
 
@@ -38,7 +56,7 @@ export SDKCONFIG_DEFAULTS="$ILO_BOARD_ROOT/firmware/sdkconfig.defaults;$ILO_BOAR
 "$ILO_BOARD_ROOT/tools/idf" python \
   "$ILO_BOARD_ROOT/.tools/esp-idf/components/esptool_py/esptool/espsecure.py" \
   sign_data --version 2 \
-  --keyfile "$ILO_BOARD_FIRMWARE_SIGNING_KEY" \
+  --keyfile "$signing_key" \
   --output "$release_image" \
   "$unsigned_image"
 
@@ -51,7 +69,7 @@ typeset -a manifest_args
 manifest_args=(
   create
   --image "$release_image"
-  --private-key "$ILO_BOARD_FIRMWARE_SIGNING_KEY"
+  --private-key "$signing_key"
   --public-key "$ILO_BOARD_FIRMWARE_PUBLIC_KEY"
   --output "$release_manifest"
   --version "$version"
