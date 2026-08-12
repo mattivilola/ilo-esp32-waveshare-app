@@ -78,5 +78,17 @@ class OTAPolicyTests(unittest.TestCase):
                 board.public_verification_key(key)
 
 
+class FirmwareVersionCommandTests(unittest.TestCase):
+    def test_flash_defaults_to_patch_version_bump(self):
+        arguments = board.parser().parse_args(["flash", "--port", "/dev/cu.test"])
+        self.assertEqual(arguments.version_bump, "patch")
+
+    def test_flash_accepts_minor_version_bump(self):
+        arguments = board.parser().parse_args(
+            ["flash", "--port", "/dev/cu.test", "--version-bump", "minor"]
+        )
+        self.assertEqual(arguments.version_bump, "minor")
+
+
 if __name__ == "__main__":
     unittest.main()

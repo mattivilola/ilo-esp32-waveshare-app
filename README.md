@@ -82,7 +82,7 @@ make firmware-build
 
 `board provision` prompts for Wi-Fi details, a recovery Mac address, and weather location/coordinates; it hides the Wi-Fi password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. At runtime the board first discovers the paired host's compatible Bonjour service and uses its current address and advertised port. If multicast DNS is unavailable, incompatible, or does not return that host, it safely falls back to the provisioned address and port.
 
-`host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, service port, security mode, and safe start/stop diagnostics. Use `./tools/host serve` for the headless development service.
+`host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, firmware and companion versions, service port, security mode, and safe start/stop diagnostics. The board Settings page shows the same two versions after an authenticated sync. Use `./tools/host serve` for the headless development service.
 
 In the signed app, **Launch at login → Enable** explicitly registers the main application with macOS Service Management. The first run may have no Background Items record yet; the app presents that as **Off**, not as an installation failure, and the Enable action creates the record. If macOS requires separate consent, choose **Review Login Items** and allow ILO Board under **System Settings → General → Login Items**. Development binaries outside Applications intentionally cannot register.
 
@@ -95,11 +95,15 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Goal | Command | Board required |
 | --- | --- | --- |
 | Show all common commands | `make help` | No |
+| Show both software versions | `make versions` | No |
 | Regenerate shared macOS/firmware icon assets | `make assets` | No |
 | Check local prerequisites and USB detection | `make doctor` | Only for USB status |
 | Install pinned ESP-IDF 5.5.2 | `make firmware-setup` | No |
 | Compile firmware | `make firmware-build` | No |
-| Flash firmware | `make firmware-flash` | Yes, USB |
+| Show firmware version | `make firmware-version` | No |
+| Bump firmware patch/minor only | `make firmware-version-patch` / `make firmware-version-minor` | No |
+| Patch-bump and flash firmware | `make firmware-flash` | Yes, USB |
+| Minor-bump and flash firmware | `make firmware-flash-minor` | Yes, USB |
 | Open serial monitor | `make firmware-monitor` | Yes, USB |
 | Inspect OTA safety gates | `make ota-status` | No |
 | Verify a signed OTA artifact | `./tools/board ota-verify --image IMAGE --public-key PUBLIC.pem --sdkconfig SDKCONFIG` | No |
@@ -124,14 +128,18 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Capture the live board framebuffer | `./tools/host screenshot --output board.png` | Yes, Wi-Fi |
 | Build universal `.app` | `make app` | No |
 | Build local DMG | `make package-dmg` | No |
-| Show release version/build | `make release-version` | No |
-| Prepare next patch release | `make version-patch` | No |
+| Show Mac companion version/build | `make mac-version` | No |
+| Prepare next Mac patch/minor release | `make mac-version-patch` / `make mac-version-minor` | No |
 | Build and notarize release | `make release-local` | No |
 | Upload DMGs and signed Sparkle feed | `make release-distribute` | No |
 | Run every hardware-independent test | `make test` | No |
 | Test host/release tooling and compile firmware | `make verify` | No |
 
 `./tools/board --help` and `./tools/host --help` are the authoritative detailed command lists.
+
+Firmware has its own semantic version in `firmware/version.txt`; ESP-IDF embeds that value in the application image. `make firmware-flash` (and direct `./tools/board flash`) first resolves a connected USB board, then patch-bumps the version before compiling and flashing. Use `make firmware-flash-minor` or `./tools/board flash --version-bump minor` when the change deserves a minor increment. A failed USB detection does not consume a version. The standalone firmware bump targets are useful when preparing an image without flashing it.
+
+The Mac companion keeps its existing release-safe workflow in `Config/version.env`. `make mac-version-patch` and `make mac-version-minor` are descriptive aliases for the existing release commands; they require a clean worktree, increment the app build number, and prepare the changelog before signing or publishing.
 
 ### OTA foundation
 
@@ -261,7 +269,7 @@ Direct Codex control is a different security class. Codex App Server runs locall
 
 ## macOS packaging and public releases
 
-The source icon is used in the menu dashboard and converted into the packaged app's `.icns`. `make app` creates an ad-hoc-signed universal Apple Silicon + Intel bundle at `artifacts/ILO Board.app`; `make package-dmg` creates a local DMG. These are developer artifacts, not public releases. The menu dashboard shows the installed version/build and offers **Check for Updates…** in signed builds.
+The source icon is used in the menu dashboard and converted into the packaged app's `.icns`. `make app` creates an ad-hoc-signed universal Apple Silicon + Intel bundle at `artifacts/ILO Board.app`; `make package-dmg` creates a local DMG. These are developer artifacts, not public releases. The menu dashboard shows both its installed version/build and the authenticated board firmware version, and offers **Check for Updates…** in signed builds.
 
 For Developer ID signing, Apple notarization, Sparkle EdDSA signing, and Google Cloud Storage delivery, follow [macOS distribution](docs/macos-distribution.md). The release pipeline refuses to upload unless the versioned DMG has a valid stapled notarization ticket, the stable alias is byte-for-byte identical, and a signed appcast with bounded `CHANGELOG.md` history can be generated. No credentials are committed, `make release-local` never uploads, and GCS writes happen only when `make release-distribute` is run explicitly. The versioned DMG and stable alias are uploaded before `appcast.xml`, so clients never discover an unavailable archive. Immutable versioned DMGs use a one-year cache policy; the mutable latest alias and appcast require revalidation to prevent an older shared-cache response after replacement.
 

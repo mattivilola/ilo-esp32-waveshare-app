@@ -10,6 +10,7 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var boardID = "—"
     @Published private(set) var servicePort: UInt16?
     @Published private(set) var lastSync: Date?
+    @Published private(set) var firmwareVersion = "Waiting for board"
     @Published private(set) var connectionHistory: [ConnectionHistoryEntry]
     @Published private(set) var macPowerStatus: MacPowerStatus?
     @Published private(set) var xNewsStatus: XNewsFeatureStatus
@@ -223,6 +224,8 @@ final class HostStatusStore: ObservableObject {
             server = nil
         case .boardConnected:
             transition(to: .connected, recording: .boardConnected)
+        case let .boardVersionReceived(version):
+            firmwareVersion = version
         case .boardDisconnected:
             if server != nil {
                 transition(to: .listening, recording: .boardDisconnected)
@@ -241,6 +244,7 @@ final class HostStatusStore: ObservableObject {
             source: CodexHistoryTaskSource(),
             powerStatusSource: powerStatusSource,
             xNewsRefreshCoordinator: xNewsRefreshCoordinator,
+            companionVersion: AppReleaseInfo(infoDictionary: Bundle.main.infoDictionary).marketingVersion,
             eventHandler: { [weak self] event in
                 Task { @MainActor in self?.handle(event) }
             }

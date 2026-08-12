@@ -112,7 +112,8 @@ struct MenuDashboardView: View {
             detailRow("MacBook", value: macPowerDescription)
             detailRow("Source", value: "Codex recent history")
             detailRow("Security", value: "TLS 1.2 · Read only")
-            detailRow("App", value: appReleaseInfo.displayVersion)
+            detailRow("Mac companion", value: appReleaseInfo.displayVersion)
+            detailRow("Firmware", value: store.firmwareVersion)
         }
     }
 

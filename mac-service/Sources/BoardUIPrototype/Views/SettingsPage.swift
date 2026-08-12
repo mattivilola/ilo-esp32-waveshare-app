@@ -2,12 +2,24 @@ import SwiftUI
 
 struct SettingsPage: View {
     let xNewsEnabled: Bool
+    let firmwareVersion: String
+    let companionVersion: String
     @State private var screensaverMinutes = 2
     @State private var displayOffMinutes = 10
     @State private var privacyMode = false
     @State private var uses24HourClock = true
     @State private var usesFahrenheit = false
     @State private var focusMinutes = 25
+
+    init(
+        xNewsEnabled: Bool,
+        firmwareVersion: String = "0.1.0",
+        companionVersion: String = "0.1.3"
+    ) {
+        self.xNewsEnabled = xNewsEnabled
+        self.firmwareVersion = firmwareVersion
+        self.companionVersion = companionVersion
+    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -46,7 +58,7 @@ struct SettingsPage: View {
                 }
                 .frame(height: 160)
                 PulseCard {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 5) {
                         SectionLabel(title: "Connections")
                         connectionRow("Wi-Fi", "KNOWN NETWORK", BoardPalette.signal)
                         connectionRow("Mac companion", "PAIRED", BoardPalette.signal)
@@ -56,6 +68,14 @@ struct SettingsPage: View {
                             xNewsEnabled ? "MAC ENABLED" : "MAC DISABLED",
                             xNewsEnabled ? BoardPalette.signal : BoardPalette.fog
                         )
+                        HStack {
+                            Text("FW \(firmwareVersion)")
+                            Spacer()
+                            Text("MAC \(companionVersion)")
+                        }
+                        .font(.board(10, weight: .bold))
+                        .tracking(0.6)
+                        .foregroundStyle(BoardPalette.cyan)
                     }
                 }
                 .frame(height: 160)

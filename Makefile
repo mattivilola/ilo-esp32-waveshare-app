@@ -3,21 +3,29 @@ SHELL := /bin/zsh
 BOARD_SCREENSHOT_OUTPUT ?= artifacts/board-screenshots/ilo-board-$(shell date +%Y%m%d-%H%M%S).png
 BOARD_SCREENSHOT_TIMEOUT ?= 120
 
-.PHONY: help doctor assets firmware-setup firmware-build firmware-flash firmware-monitor ota-status ui-preview ui-screenshots board-screenshot mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
+.PHONY: help doctor assets versions firmware-version firmware-version-patch firmware-version-minor firmware-setup firmware-build firmware-flash firmware-flash-minor firmware-monitor ota-status ui-preview ui-screenshots board-screenshot mac-version mac-version-patch mac-version-minor mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
 
 help:
 	@printf "ILO Board commands\n\n"
 	@printf "  make doctor              Check board and Mac development prerequisites\n"
 	@printf "  make assets              Regenerate macOS and firmware icon assets\n"
+	@printf "  make versions            Show Mac companion and firmware versions\n"
+	@printf "  make firmware-version    Show the current firmware version\n"
+	@printf "  make firmware-version-patch  Bump only the firmware patch version\n"
+	@printf "  make firmware-version-minor  Bump only the firmware minor version\n"
 	@printf "  make firmware-setup      Install the pinned ESP-IDF toolchain\n"
 	@printf "  make firmware-build      Compile firmware without hardware\n"
-	@printf "  make firmware-flash      Flash a connected Waveshare 5B\n"
+	@printf "  make firmware-flash      Patch-bump and flash a connected Waveshare 5B\n"
+	@printf "  make firmware-flash-minor  Minor-bump and flash a connected Waveshare 5B\n"
 	@printf "  make firmware-monitor    Open the board serial monitor\n"
 	@printf "  make ota-status          Inspect OTA safety gates without hardware\n"
 	@printf "  make ui-preview          Open the desktop 1024x600 device UI preview\n"
 	@printf "  make ui-screenshots      Export PNG previews for all five device screens\n"
 	@printf "  make board-screenshot    Save the current physical board screen as a PNG\n"
 	@printf "  make mac-build           Build the Swift package\n"
+	@printf "  make mac-version         Show the Mac companion version and build\n"
+	@printf "  make mac-version-patch   Prepare the next Mac companion patch version\n"
+	@printf "  make mac-version-minor   Prepare the next Mac companion minor version\n"
 	@printf "  make mac-test            Run all macOS host tests\n"
 	@printf "  make mac-menu            Run the menu-bar app from SwiftPM\n"
 	@printf "  make app                 Build a universal macOS .app bundle\n"
@@ -45,6 +53,17 @@ assets:
 	./scripts/build_icon.sh
 	./scripts/generate_firmware_icon.sh
 
+versions: mac-version firmware-version
+
+firmware-version:
+	./scripts/firmware_version.sh current
+
+firmware-version-patch:
+	./scripts/firmware_version.sh bump patch
+
+firmware-version-minor:
+	./scripts/firmware_version.sh bump minor
+
 firmware-setup:
 	./tools/setup-idf
 
@@ -53,6 +72,9 @@ firmware-build:
 
 firmware-flash:
 	./tools/board flash
+
+firmware-flash-minor:
+	./tools/board flash --version-bump minor
 
 firmware-monitor:
 	./tools/board monitor
@@ -80,6 +102,12 @@ mac-run:
 
 mac-menu:
 	./tools/host menu
+
+mac-version: release-version
+
+mac-version-patch: version-patch
+
+mac-version-minor: version-minor
 
 app:
 	./scripts/build_app.sh

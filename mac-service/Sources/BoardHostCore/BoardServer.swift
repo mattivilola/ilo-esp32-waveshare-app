@@ -17,6 +17,7 @@ public enum BoardServerEvent: Equatable, Sendable {
     case listenerReady(port: UInt16)
     case listenerFailed(message: String)
     case boardConnected
+    case boardVersionReceived(String)
     case boardDisconnected
     case snapshotSent(at: Date)
 }
@@ -27,6 +28,7 @@ public final class BoardServer: @unchecked Sendable {
     private let source: any TaskSource
     private let powerStatusSource: any MacPowerStatusProviding
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
+    private let companionVersion: String?
     private let eventHandler: @Sendable (BoardServerEvent) -> Void
     private let screenCaptureHandler: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let queue = DispatchQueue(label: "com.iloapps.iloboard.host.network")
@@ -39,6 +41,7 @@ public final class BoardServer: @unchecked Sendable {
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
+        companionVersion: String? = nil,
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
     ) {
         self.boardID = boardID
@@ -46,6 +49,7 @@ public final class BoardServer: @unchecked Sendable {
         self.source = source
         self.powerStatusSource = powerStatusSource
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
+        self.companionVersion = companionVersion
         self.screenCaptureHandler = nil
         self.eventHandler = eventHandler
     }
@@ -56,6 +60,7 @@ public final class BoardServer: @unchecked Sendable {
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
+        companionVersion: String? = nil,
         screenCaptureHandler: @escaping @Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void,
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
     ) {
@@ -64,6 +69,7 @@ public final class BoardServer: @unchecked Sendable {
         self.source = source
         self.powerStatusSource = powerStatusSource
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
+        self.companionVersion = companionVersion
         self.screenCaptureHandler = screenCaptureHandler
         self.eventHandler = eventHandler
     }
@@ -153,9 +159,11 @@ public final class BoardServer: @unchecked Sendable {
             source: source,
             powerStatusSource: powerStatusSource,
             xNewsRefreshCoordinator: xNewsRefreshCoordinator,
+            companionVersion: companionVersion,
             captureRequest: captureRequest,
             onScreenCapture: screenCaptureHandler,
             onReady: { [eventHandler] in eventHandler(.boardConnected) },
+            onBoardVersion: { [eventHandler] version in eventHandler(.boardVersionReceived(version)) },
             onSnapshot: { [eventHandler] date in eventHandler(.snapshotSent(at: date)) },
             onClose: { [weak self, eventHandler] id in
                 self?.connections.removeValue(forKey: id)
@@ -173,9 +181,11 @@ private final class BoardConnection: @unchecked Sendable {
     private let source: any TaskSource
     private let powerStatusSource: any MacPowerStatusProviding
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
+    private let companionVersion: String?
     private let captureRequest: ScreenCaptureRequest?
     private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let onReady: @Sendable () -> Void
+    private let onBoardVersion: @Sendable (String) -> Void
     private let onSnapshot: @Sendable (Date) -> Void
     private let onClose: @Sendable (ObjectIdentifier) -> Void
     private var decoder = FrameDecoder()
@@ -191,9 +201,11 @@ private final class BoardConnection: @unchecked Sendable {
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding,
         xNewsRefreshCoordinator: XNewsRefreshCoordinator,
+        companionVersion: String?,
         captureRequest: ScreenCaptureRequest?,
         onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
         onReady: @escaping @Sendable () -> Void,
+        onBoardVersion: @escaping @Sendable (String) -> Void,
         onSnapshot: @escaping @Sendable (Date) -> Void,
         onClose: @escaping @Sendable (ObjectIdentifier) -> Void
     ) {
@@ -202,10 +214,12 @@ private final class BoardConnection: @unchecked Sendable {
         self.source = source
         self.powerStatusSource = powerStatusSource
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
+        self.companionVersion = companionVersion
         self.captureRequest = captureRequest
         self.onScreenCapture = onScreenCapture
         self.captureAssembler = captureRequest.map { ScreenCaptureAssembler(requestID: $0.requestID) }
         self.onReady = onReady
+        self.onBoardVersion = onBoardVersion
         self.onSnapshot = onSnapshot
         self.onClose = onClose
     }
@@ -282,6 +296,10 @@ private final class BoardConnection: @unchecked Sendable {
                 return
             }
             helloAccepted = true
+            if let firmwareVersion = message.firmwareVersion,
+               Self.validSoftwareVersion(firmwareVersion) {
+                onBoardVersion(firmwareVersion)
+            }
             captureLog("Board hello accepted")
             send(HelloAcknowledgement())
         case "subscribe":
@@ -362,6 +380,12 @@ private final class BoardConnection: @unchecked Sendable {
         }
     }
 
+    private static func validSoftwareVersion(_ value: String) -> Bool {
+        (1...32).contains(value.count) && value.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || ".()+-".contains($0))
+        }
+    }
+
     private func beginSubscription() {
         guard !subscribed else { return }
         subscribed = true
@@ -424,7 +448,8 @@ private final class BoardConnection: @unchecked Sendable {
                 tasks: tasks,
                 xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,
-                macPower: macPower
+                macPower: macPower,
+                companionVersion: companionVersion
             )
             send(SnapshotMessage(snapshot: snapshot))
             onSnapshot(Date())

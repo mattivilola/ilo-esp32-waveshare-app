@@ -129,6 +129,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let xNewsEnabled: Bool
     public let newsFeed: NewsFeedSnapshot?
     public let macPower: MacPowerStatus?
+    public let companionVersion: String?
 
     private enum CodingKeys: String, CodingKey {
         case protocolVersion
@@ -140,6 +141,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         case xNewsEnabled
         case newsFeed
         case macPower
+        case companionVersion
     }
 
     public init(
@@ -149,7 +151,8 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         tasks: [TaskCard],
         xNewsEnabled: Bool? = nil,
         newsFeed: NewsFeedSnapshot? = nil,
-        macPower: MacPowerStatus? = nil
+        macPower: MacPowerStatus? = nil,
+        companionVersion: String? = nil
     ) {
         self.protocolVersion = boardProtocolVersion
         self.revision = revision
@@ -162,6 +165,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         self.xNewsEnabled = xNewsEnabled ?? (newsFeed != nil)
         self.newsFeed = newsFeed
         self.macPower = macPower
+        self.companionVersion = companionVersion
     }
 
     public init(from decoder: Decoder) throws {
@@ -176,6 +180,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         xNewsEnabled = try container.decodeIfPresent(Bool.self, forKey: .xNewsEnabled)
             ?? (newsFeed != nil)
         macPower = try container.decodeIfPresent(MacPowerStatus.self, forKey: .macPower)
+        companionVersion = try container.decodeIfPresent(String.self, forKey: .companionVersion)
     }
 }
 
@@ -183,11 +188,18 @@ public struct ClientMessage: Codable, Equatable, Sendable {
     public let type: String
     public let protocolVersion: Int?
     public let boardID: String?
+    public let firmwareVersion: String?
 
-    public init(type: String, protocolVersion: Int? = nil, boardID: String? = nil) {
+    public init(
+        type: String,
+        protocolVersion: Int? = nil,
+        boardID: String? = nil,
+        firmwareVersion: String? = nil
+    ) {
         self.type = type
         self.protocolVersion = protocolVersion
         self.boardID = boardID
+        self.firmwareVersion = firmwareVersion
     }
 }
 

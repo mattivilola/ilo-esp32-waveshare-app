@@ -16,6 +16,7 @@ for script in \
   sparkle_keys.sh \
   render_appcast.sh \
   version.sh \
+  firmware_version.sh \
   release_commit.sh \
   release_tag.sh \
   release_push.sh \
@@ -25,6 +26,15 @@ for script in \
   test_sparkle_release.sh; do
   zsh -n "$ILO_BOARD_ROOT/scripts/$script"
 done
+
+firmware_version_test_dir="$(mktemp -d)"
+trap 'rm -rf "$firmware_version_test_dir"' EXIT
+firmware_version_test_file="$firmware_version_test_dir/version.txt"
+print -- "1.2.3" > "$firmware_version_test_file"
+ILO_BOARD_FIRMWARE_VERSION_FILE="$firmware_version_test_file" "$ILO_BOARD_ROOT/scripts/firmware_version.sh" bump patch >/dev/null
+grep -Fxq "1.2.4" "$firmware_version_test_file" || fail "Firmware patch bump produced the wrong version."
+ILO_BOARD_FIRMWARE_VERSION_FILE="$firmware_version_test_file" "$ILO_BOARD_ROOT/scripts/firmware_version.sh" bump minor >/dev/null
+grep -Fxq "1.3.0" "$firmware_version_test_file" || fail "Firmware minor bump produced the wrong version."
 
 grep -Fq 'LSUIElement' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must remain menu-bar only."
 grep -Fq '_iloboard._tcp' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must declare its Bonjour service."

@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "esp_check.h"
+#include "esp_app_desc.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "board_waveshare_5.h"
@@ -95,6 +96,7 @@ static lv_obj_t *settings_clock_value;
 static lv_obj_t *settings_temperature_value;
 static lv_obj_t *settings_focus_value;
 static lv_obj_t *settings_x_news_value;
+static lv_obj_t *settings_versions_value;
 static lv_obj_t *weather_location_label;
 static lv_obj_t *weather_state_label;
 static lv_obj_t *weather_temperature_label;
@@ -811,6 +813,20 @@ static void refresh_settings_labels(void)
             );
         }
     }
+    if (settings_versions_value != NULL) {
+        const char *companion_version = latest_model_valid && latest_model.companion_version[0] != 0
+            ? latest_model.companion_version
+            : "--";
+        char versions[36];
+        snprintf(
+            versions,
+            sizeof(versions),
+            "FW %.12s  MAC %.12s",
+            esp_app_get_description()->version,
+            companion_version
+        );
+        lv_label_set_text(settings_versions_value, versions);
+    }
 }
 
 static void refresh_task_summaries(void)
@@ -994,7 +1010,9 @@ static void build_settings_page(lv_obj_t *page)
     );
     lv_obj_align(connection_values, LV_ALIGN_TOP_MID, 0, 8);
     settings_x_news_value = create_label(connections, "X NEWS  WAITING FOR MAC", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(settings_x_news_value, LV_ALIGN_BOTTOM_MID, 0, -8);
+    lv_obj_align(settings_x_news_value, LV_ALIGN_BOTTOM_LEFT, 16, -8);
+    settings_versions_value = create_label(connections, "", &lv_font_montserrat_14, COLOR_CYAN);
+    lv_obj_align(settings_versions_value, LV_ALIGN_BOTTOM_RIGHT, -16, -8);
     refresh_settings_labels();
 }
 

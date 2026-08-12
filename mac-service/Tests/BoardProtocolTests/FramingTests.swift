@@ -36,6 +36,32 @@ import Testing
     #expect(encodedPower["state"] as? String == "charging")
 }
 
+@Test func softwareVersionsAreOptionalProtocolV1Metadata() throws {
+    let snapshot = DashboardSnapshot(
+        revision: 10,
+        tasks: [],
+        companionVersion: "0.1.3"
+    )
+    let snapshotData = try ProtocolJSON.encoder().encode(snapshot)
+    let snapshotObject = try #require(JSONSerialization.jsonObject(with: snapshotData) as? [String: Any])
+    #expect(snapshotObject["companionVersion"] as? String == "0.1.3")
+
+    let hello = ClientMessage(
+        type: "hello",
+        protocolVersion: 1,
+        boardID: "ilo-board-test",
+        firmwareVersion: "0.2.0"
+    )
+    let decoded = try ProtocolJSON.decoder().decode(
+        ClientMessage.self,
+        from: ProtocolJSON.encoder().encode(hello)
+    )
+    #expect(decoded.firmwareVersion == "0.2.0")
+
+    let legacyHello = Data(#"{"type":"hello","protocolVersion":1,"boardID":"legacy"}"#.utf8)
+    #expect(try ProtocolJSON.decoder().decode(ClientMessage.self, from: legacyHello).firmwareVersion == nil)
+}
+
 @Test func legacySnapshotInfersXNewsVisibilityFromItsFeed() throws {
     let feed = NewsFeedSnapshot(
         generatedAt: Date(timeIntervalSince1970: 1_700_000_000),

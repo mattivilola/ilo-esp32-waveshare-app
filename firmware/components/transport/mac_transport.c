@@ -7,6 +7,7 @@
 
 #include "cJSON.h"
 #include "esp_check.h"
+#include "esp_app_desc.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -656,6 +657,29 @@ static void copy_json_string(cJSON *object, const char *name, char *destination,
     strlcpy(destination, cJSON_IsString(item) ? item->valuestring : "", size);
 }
 
+static void copy_json_software_version(cJSON *object, const char *name, char *destination, size_t size)
+{
+    cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
+    const char *value = cJSON_IsString(item) ? item->valuestring : NULL;
+    size_t length = value != NULL ? strlen(value) : 0;
+    if (length == 0 || length > DASHBOARD_VERSION_MAX) {
+        destination[0] = 0;
+        return;
+    }
+    for (size_t index = 0; index < length; ++index) {
+        char character = value[index];
+        if (!((character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z')
+            || (character >= '0' && character <= '9')
+            || character == '.' || character == '(' || character == ')'
+            || character == '+' || character == '-' || character == ' ')) {
+            destination[0] = 0;
+            return;
+        }
+    }
+    strlcpy(destination, value, size);
+}
+
 static void make_board_text_font_safe(char *text)
 {
     const unsigned char *source = (const unsigned char *)text;
@@ -702,6 +726,12 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
     memset(model, 0, sizeof(*model));
     cJSON *revision = cJSON_GetObjectItemCaseSensitive(snapshot, "revision");
     model->revision = cJSON_IsNumber(revision) ? (uint64_t)revision->valuedouble : 0;
+    copy_json_software_version(
+        snapshot,
+        "companionVersion",
+        model->companion_version,
+        sizeof(model->companion_version)
+    );
     cJSON *mac_power = cJSON_GetObjectItemCaseSensitive(snapshot, "macPower");
     if (cJSON_IsObject(mac_power)) {
         cJSON *level = cJSON_GetObjectItemCaseSensitive(mac_power, "levelPercent");
@@ -785,6 +815,7 @@ static void transport_task(void *argument)
             cJSON_AddStringToObject(hello, "type", "hello");
             cJSON_AddNumberToObject(hello, "protocolVersion", 1);
             cJSON_AddStringToObject(hello, "boardID", config->board_id);
+            cJSON_AddStringToObject(hello, "firmwareVersion", esp_app_get_description()->version);
             cJSON *capabilities = cJSON_AddArrayToObject(hello, "capabilities");
             if (capabilities != NULL) {
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.read"));

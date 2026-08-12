@@ -9,6 +9,7 @@ extern "C" {
 
 #define DASHBOARD_MAX_TASKS 6
 #define DASHBOARD_MAX_NEWS 5
+#define DASHBOARD_VERSION_MAX 32
 
 typedef enum {
     DASHBOARD_TASK_ACTIVE,
@@ -49,6 +50,7 @@ typedef struct {
 
 typedef struct {
     uint64_t revision;
+    char companion_version[DASHBOARD_VERSION_MAX + 1];
     bool mac_power_available;
     uint8_t mac_power_percent;
     dashboard_mac_power_state_t mac_power_state;

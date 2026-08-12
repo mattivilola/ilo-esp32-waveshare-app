@@ -24,6 +24,7 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
 FIRMWARE = ROOT / "firmware"
+FIRMWARE_VERSION_SCRIPT = ROOT / "scripts" / "firmware_version.sh"
 VENV = ROOT / ".tools" / "board-python"
 ESPTOOL = VENV / "bin" / "esptool"
 IDF = ROOT / "tools" / "idf"
@@ -297,6 +298,11 @@ def ui_screenshot(args: argparse.Namespace) -> None:
 
 def flash(args: argparse.Namespace) -> None:
     port = resolve_port(args.port)
+    subprocess.run(
+        [str(FIRMWARE_VERSION_SCRIPT), "bump", args.version_bump],
+        cwd=ROOT,
+        check=True,
+    )
     run([str(IDF), "idf.py", "-p", port, "flash"], cwd=FIRMWARE)
 
 
@@ -487,6 +493,13 @@ def parser() -> argparse.ArgumentParser:
     ):
         command = sub.add_parser(name, help=help_text)
         command.add_argument("--port")
+        if name == "flash":
+            command.add_argument(
+                "--version-bump",
+                choices=("patch", "minor"),
+                default="patch",
+                help="version increment applied after USB detection and before flashing (default: patch)",
+            )
         command.set_defaults(handler=handler)
     provision_parser = sub.add_parser("provision", help="securely pair Wi-Fi and the Mac host through USB")
     provision_parser.add_argument("--port", help="serial port; auto-detected when omitted")
