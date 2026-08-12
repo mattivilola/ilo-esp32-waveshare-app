@@ -237,12 +237,19 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     let coordinator = XNewsRefreshCoordinator(settingsStore: settingsStore, cache: cache)
 
     #expect(await coordinator.requestManualRefresh(now: referenceNow) == .disabled)
+    #expect(await coordinator.activity(now: referenceNow) == .disabled)
 
     try settingsStore.save(XNewsRefreshSettings(
         cadence: .daily,
         lastAttemptAt: referenceNow.addingTimeInterval(-60)
     ))
     #expect(await coordinator.requestManualRefresh(now: referenceNow) == .cooldown)
+    #expect(await coordinator.activity(now: referenceNow) == .cooldown(until: referenceNow.addingTimeInterval(14 * 60)))
+    #expect(await coordinator.activity(now: referenceNow.addingTimeInterval(15 * 60)) == .idle)
+}
+
+@Test func xNewsWireTextUsesBoardSafeTypographyWithoutChangingTheCacheModel() {
+    #expect(XNewsWireMapper.boardSafeText("xAI’s été — next…") == "xAI's ete - next...")
 }
 
 private func topic(

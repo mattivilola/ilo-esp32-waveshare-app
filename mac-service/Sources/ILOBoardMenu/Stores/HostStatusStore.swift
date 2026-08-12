@@ -13,6 +13,9 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var connectionHistory: [ConnectionHistoryEntry]
     @Published private(set) var macPowerStatus: MacPowerStatus?
     @Published private(set) var xNewsStatus: XNewsFeatureStatus
+    @Published private(set) var xNewsRefreshActivity: XNewsRefreshActivity = .idle
+    @Published private(set) var xNewsCachedStoryCount = 0
+    @Published private(set) var xNewsCacheGeneratedAt: Date?
     @Published private(set) var xNewsNotice: String?
     @Published private(set) var pairingAuthorizationNotice: String?
 
@@ -21,19 +24,26 @@ final class HostStatusStore: ObservableObject {
     private let defaults: UserDefaults
     private let powerStatusSource: any MacPowerStatusProviding
     private let xNewsFeatureController: XNewsFeatureController
+    private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
+    private let xNewsFeedCache: XNewsFeedCache
     private let usesCompanionCredential: Bool
     private var powerMonitorTask: Task<Void, Never>?
+    private var xNewsMonitorTask: Task<Void, Never>?
     private static let historyDefaultsKey = "ilo-board.connection-history.v1"
 
     init(
         defaults: UserDefaults = .standard,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
         xNewsFeatureController: XNewsFeatureController = XNewsFeatureController(),
+        xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
+        xNewsFeedCache: XNewsFeedCache = XNewsFeedCache(),
         usesCompanionCredential: Bool = KeychainPSKStore.shouldUseCompanionCredential
     ) {
         self.defaults = defaults
         self.powerStatusSource = powerStatusSource
         self.xNewsFeatureController = xNewsFeatureController
+        self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
+        self.xNewsFeedCache = xNewsFeedCache
         self.usesCompanionCredential = usesCompanionCredential
         historyLog = ConnectionHistoryLog.decode(defaults.data(forKey: Self.historyDefaultsKey))
         connectionHistory = historyLog.entries
@@ -49,6 +59,15 @@ final class HostStatusStore: ObservableObject {
                 self.macPowerStatus = status
                 self.refreshXNewsStatus()
                 try? await Task.sleep(for: .seconds(30))
+            }
+        }
+        xNewsMonitorTask = Task { [weak self, xNewsRefreshCoordinator] in
+            while !Task.isCancelled {
+                let activity = await xNewsRefreshCoordinator.activity()
+                guard let self else { return }
+                self.xNewsRefreshActivity = activity
+                self.refreshXNewsStatus()
+                try? await Task.sleep(for: .seconds(1))
             }
         }
     }
@@ -113,6 +132,7 @@ final class HostStatusStore: ObservableObject {
 
     deinit {
         powerMonitorTask?.cancel()
+        xNewsMonitorTask?.cancel()
     }
 
     func stop() {
@@ -129,6 +149,31 @@ final class HostStatusStore: ObservableObject {
 
     func refreshXNewsStatus() {
         xNewsStatus = xNewsFeatureController.status()
+        if let feed = try? xNewsFeedCache.load() {
+            xNewsCachedStoryCount = feed.stories.count
+            xNewsCacheGeneratedAt = feed.generatedAt
+        } else {
+            xNewsCachedStoryCount = 0
+            xNewsCacheGeneratedAt = nil
+        }
+    }
+
+    func refreshXNewsNow() {
+        guard xNewsStatus.isEnabled else { return }
+        xNewsNotice = nil
+        Task { [weak self, xNewsRefreshCoordinator] in
+            let outcome = await xNewsRefreshCoordinator.requestManualRefresh()
+            guard let self else { return }
+            self.xNewsRefreshActivity = await xNewsRefreshCoordinator.activity()
+            self.refreshXNewsStatus()
+            self.xNewsNotice = switch outcome {
+            case .updated: "Latest verified stories are ready and will sync to the board."
+            case .disabled: "Enable X News before refreshing."
+            case .cooldown: "Refresh is rate-limited to once every 15 minutes."
+            case .busy: "An X News refresh is already running."
+            case .failed: "No verified update was accepted; the previous cache was preserved."
+            }
+        }
     }
 
     func enableXNews(cadence: XNewsRefreshCadence = .daily) {
@@ -195,6 +240,7 @@ final class HostStatusStore: ObservableObject {
             secret: secret,
             source: CodexHistoryTaskSource(),
             powerStatusSource: powerStatusSource,
+            xNewsRefreshCoordinator: xNewsRefreshCoordinator,
             eventHandler: { [weak self] event in
                 Task { @MainActor in self?.handle(event) }
             }

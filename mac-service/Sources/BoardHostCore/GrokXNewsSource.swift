@@ -551,14 +551,32 @@ public enum XNewsWireMapper {
                 NewsStory(
                     id: story.sources.first?.xURL.absoluteString ?? "story-\(index)",
                     category: story.category.rawValue,
-                    headline: story.title,
-                    summary: story.summary,
+                    headline: boardSafeText(story.title),
+                    summary: boardSafeText(story.summary),
                     confidence: story.confidence.rawValue,
                     sources: story.sources.map {
                         NewsCitation(handle: $0.handle, postedAt: $0.postedAt, postURL: $0.xURL.absoluteString)
                     }
                 )
             }
+        )
+    }
+
+    /// LVGL's compact built-in Montserrat fonts cover a deliberately small glyph set.
+    /// Keep the verified cache unchanged while making the board wire text predictable.
+    static func boardSafeText(_ value: String) -> String {
+        let punctuation = value
+            .replacingOccurrences(of: "\u{2018}", with: "'")
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .replacingOccurrences(of: "\u{201C}", with: "\"")
+            .replacingOccurrences(of: "\u{201D}", with: "\"")
+            .replacingOccurrences(of: "\u{2013}", with: "-")
+            .replacingOccurrences(of: "\u{2014}", with: "-")
+            .replacingOccurrences(of: "\u{2026}", with: "...")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+        return punctuation.folding(
+            options: [.diacriticInsensitive, .widthInsensitive],
+            locale: Locale(identifier: "en_US_POSIX")
         )
     }
 
@@ -671,6 +689,7 @@ public actor XNewsRefreshCoordinator {
     private let settingsStore: XNewsRefreshSettingsStore
     private let cache: XNewsFeedCache
     private var refreshInFlight = false
+    private var lastActivity: XNewsRefreshActivity = .idle
 
     public init(
         settingsStore: XNewsRefreshSettingsStore = XNewsRefreshSettingsStore(),
@@ -690,9 +709,15 @@ public actor XNewsRefreshCoordinator {
     public func requestManualRefresh(now: Date = Date()) async -> XNewsManualRefreshOutcome {
         guard !refreshInFlight else { return .busy }
         let settings = settingsStore.load()
-        guard settings.consentVersion == 1, settings.cadence != .off else { return .disabled }
+        guard settings.consentVersion == 1, settings.cadence != .off else {
+            lastActivity = .disabled
+            return .disabled
+        }
         let policy = XNewsRefreshPolicy(cadence: settings.cadence)
-        guard policy.allowsManualRefresh(lastAttempt: settings.lastAttemptAt, now: now) else { return .cooldown }
+        guard policy.allowsManualRefresh(lastAttempt: settings.lastAttemptAt, now: now) else {
+            lastActivity = .cooldown(until: (settings.lastAttemptAt ?? now).addingTimeInterval(XNewsRefreshPolicy.manualCooldown))
+            return .cooldown
+        }
         do {
             try settingsStore.save(XNewsRefreshSettings(
                 cadence: settings.cadence,
@@ -700,20 +725,35 @@ public actor XNewsRefreshCoordinator {
                 lastAttemptAt: now
             ))
         } catch {
+            lastActivity = .failed(at: now)
             return .failed
         }
 
         refreshInFlight = true
+        lastActivity = .fetching(startedAt: now)
         defer { refreshInFlight = false }
         let source = GrokXNewsSource(cache: cache)
         do {
             _ = try await Task.detached(priority: .utility) {
                 try source.refresh(explicitlyAllowsGrokTools: true, now: now)
             }.value
+            lastActivity = .updated(at: Date())
             return .updated
         } catch {
+            lastActivity = .failed(at: Date())
             return .failed
         }
+    }
+
+    public func activity(now: Date = Date()) -> XNewsRefreshActivity {
+        if refreshInFlight {
+            if case .fetching = lastActivity { return lastActivity }
+            return .fetching(startedAt: now)
+        }
+        if case let .cooldown(until) = lastActivity, until <= now {
+            lastActivity = .idle
+        }
+        return lastActivity
     }
 
     public func considerRefresh(now: Date = Date(), calendar: Calendar = .current) {
@@ -736,16 +776,31 @@ public actor XNewsRefreshCoordinator {
             lastAttemptAt: now
         ))
         refreshInFlight = true
+        lastActivity = .fetching(startedAt: now)
         let source = GrokXNewsSource(cache: cache)
         Task.detached(priority: .utility) { [weak self] in
-            _ = try? source.refresh(explicitlyAllowsGrokTools: true)
-            await self?.refreshFinished()
+            do {
+                _ = try source.refresh(explicitlyAllowsGrokTools: true)
+                await self?.refreshFinished(.updated(at: Date()))
+            } catch {
+                await self?.refreshFinished(.failed(at: Date()))
+            }
         }
     }
 
-    private func refreshFinished() {
+    private func refreshFinished(_ activity: XNewsRefreshActivity) {
         refreshInFlight = false
+        lastActivity = activity
     }
+}
+
+public enum XNewsRefreshActivity: Equatable, Sendable {
+    case idle
+    case fetching(startedAt: Date)
+    case updated(at: Date)
+    case disabled
+    case cooldown(until: Date)
+    case failed(at: Date)
 }
 
 public enum XNewsManualRefreshOutcome: String, Equatable, Sendable {

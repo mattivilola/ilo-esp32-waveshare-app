@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 
 #include "cJSON.h"
 #include "esp_check.h"
@@ -322,6 +323,11 @@ static bool send_x_news_refresh_request(esp_tls_t *tls)
     cJSON_AddStringToObject(request, "requestID", request_id);
     bool ok = send_json(tls, request);
     cJSON_Delete(request);
+    if (ok) {
+        ESP_LOGI(TAG, "X News refresh request sent to paired Mac");
+    } else {
+        ESP_LOGW(TAG, "X News refresh request could not be sent");
+    }
     return ok;
 }
 
@@ -341,6 +347,7 @@ static void handle_x_news_refresh_status(cJSON *message)
     } else if (strcmp(status->valuestring, "busy") == 0) {
         state = DASHBOARD_X_NEWS_REFRESH_BUSY;
     }
+    ESP_LOGI(TAG, "X News refresh status: %s", status->valuestring);
     dashboard_ui_set_x_news_refresh_state(state);
 }
 
@@ -561,6 +568,21 @@ static cJSON *read_json(esp_tls_t *tls)
     return json;
 }
 
+static int wait_for_tls_data(esp_tls_t *tls, uint32_t timeout_ms)
+{
+    if (esp_tls_get_bytes_avail(tls) > 0) return 1;
+    int socket_fd = -1;
+    if (esp_tls_get_conn_sockfd(tls, &socket_fd) != ESP_OK || socket_fd < 0) return -1;
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(socket_fd, &read_fds);
+    struct timeval timeout = {
+        .tv_sec = timeout_ms / 1000,
+        .tv_usec = (timeout_ms % 1000) * 1000,
+    };
+    return select(socket_fd + 1, &read_fds, NULL, NULL, &timeout);
+}
+
 static dashboard_task_state_t task_state(const char *value)
 {
     if (value != NULL && strcmp(value, "active") == 0) return DASHBOARD_TASK_ACTIVE;
@@ -598,6 +620,41 @@ static void copy_json_string(cJSON *object, const char *name, char *destination,
 {
     cJSON *item = cJSON_GetObjectItemCaseSensitive(object, name);
     strlcpy(destination, cJSON_IsString(item) ? item->valuestring : "", size);
+}
+
+static void make_board_text_font_safe(char *text)
+{
+    const unsigned char *source = (const unsigned char *)text;
+    unsigned char *destination = (unsigned char *)text;
+    while (*source != '\0') {
+        if (source[0] == 0xE2 && source[1] == 0x80 && (source[2] == 0x98 || source[2] == 0x99)) {
+            *destination++ = '\'';
+            source += 3;
+        } else if (source[0] == 0xE2 && source[1] == 0x80 && (source[2] == 0x9C || source[2] == 0x9D)) {
+            *destination++ = '"';
+            source += 3;
+        } else if (source[0] == 0xE2 && source[1] == 0x80 && (source[2] == 0x93 || source[2] == 0x94)) {
+            *destination++ = '-';
+            source += 3;
+        } else if (source[0] == 0xE2 && source[1] == 0x80 && source[2] == 0xA6) {
+            *destination++ = '.';
+            *destination++ = '.';
+            *destination++ = '.';
+            source += 3;
+        } else if (source[0] == 0xC2 && source[1] == 0xA0) {
+            *destination++ = ' ';
+            source += 2;
+        } else {
+            *destination++ = *source++;
+        }
+    }
+    *destination = '\0';
+}
+
+static void copy_json_board_text(cJSON *object, const char *name, char *destination, size_t size)
+{
+    copy_json_string(object, name, destination, size);
+    make_board_text_font_safe(destination);
 }
 
 static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
@@ -650,8 +707,8 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
             if (model->news_count >= DASHBOARD_MAX_NEWS) break;
             dashboard_news_story_t *target = &model->news[model->news_count++];
             copy_json_string(story, "category", target->category, sizeof(target->category));
-            copy_json_string(story, "headline", target->headline, sizeof(target->headline));
-            copy_json_string(story, "summary", target->summary, sizeof(target->summary));
+            copy_json_board_text(story, "headline", target->headline, sizeof(target->headline));
+            copy_json_board_text(story, "summary", target->summary, sizeof(target->summary));
             copy_json_string(story, "confidence", target->confidence, sizeof(target->confidence));
             cJSON *sources = cJSON_GetObjectItemCaseSensitive(story, "sources");
             cJSON *source = cJSON_IsArray(sources) ? cJSON_GetArrayItem(sources, 0) : NULL;
@@ -718,6 +775,10 @@ static void transport_task(void *argument)
                 transport_online = true;
                 portEXIT_CRITICAL(&refresh_lock);
                 for (;;) {
+                    if (take_x_news_refresh_request() && !send_x_news_refresh_request(tls)) break;
+                    int data_ready = wait_for_tls_data(tls, 250);
+                    if (data_ready < 0) break;
+                    if (data_ready == 0) continue;
                     cJSON *message = read_json(tls);
                     if (message == NULL) break;
                     cJSON *message_type = cJSON_GetObjectItemCaseSensitive(message, "type");
@@ -739,7 +800,6 @@ static void transport_task(void *argument)
                         model_callback(&model);
                     }
                     cJSON_Delete(message);
-                    if (take_x_news_refresh_request() && !send_x_news_refresh_request(tls)) break;
                 }
             }
         }
@@ -759,6 +819,7 @@ bool mac_transport_request_x_news_refresh(void)
     bool accepted = transport_online && !x_news_refresh_requested;
     if (accepted) x_news_refresh_requested = true;
     portEXIT_CRITICAL(&refresh_lock);
+    ESP_LOGI(TAG, "X News refresh gesture %s", accepted ? "queued" : "not queued");
     return accepted;
 }
 

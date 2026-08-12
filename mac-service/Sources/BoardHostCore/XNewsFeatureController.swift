@@ -3,10 +3,12 @@ import Foundation
 public struct XNewsFeatureStatus: Equatable, Sendable {
     public let cadence: XNewsRefreshCadence
     public let grokAvailable: Bool
+    public let lastAttemptAt: Date?
 
-    public init(cadence: XNewsRefreshCadence, grokAvailable: Bool) {
+    public init(cadence: XNewsRefreshCadence, grokAvailable: Bool, lastAttemptAt: Date? = nil) {
         self.cadence = cadence
         self.grokAvailable = grokAvailable
+        self.lastAttemptAt = lastAttemptAt
     }
 
     public var isConfigured: Bool {
@@ -39,9 +41,11 @@ public struct XNewsFeatureController: Sendable {
     }
 
     public func status() -> XNewsFeatureStatus {
-        XNewsFeatureStatus(
-            cadence: settingsStore.load().cadence,
-            grokAvailable: availabilityOverride ?? (GrokExecutableResolver.resolve(environment: environment) != nil)
+        let settings = settingsStore.load()
+        return XNewsFeatureStatus(
+            cadence: settings.cadence,
+            grokAvailable: availabilityOverride ?? (GrokExecutableResolver.resolve(environment: environment) != nil),
+            lastAttemptAt: settings.lastAttemptAt
         )
     }
 

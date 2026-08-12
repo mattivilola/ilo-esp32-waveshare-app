@@ -195,9 +195,9 @@ struct MenuDashboardView: View {
                 Label("X News screen", systemImage: "newspaper")
                     .font(.caption.weight(.semibold))
                 Spacer()
-                Text(xNewsStatusTitle)
+                Text(xNewsFetchStatusTitle)
                     .font(.caption)
-                    .foregroundStyle(store.xNewsStatus.isEnabled ? .green : .secondary)
+                    .foregroundStyle(xNewsFetchStatusTint)
             }
 
             Text(xNewsStatusDetail)
@@ -210,6 +210,27 @@ struct MenuDashboardView: View {
                     .font(.caption2)
                     .foregroundStyle(.orange)
             } else if store.xNewsStatus.isEnabled {
+                HStack(spacing: 8) {
+                    Button {
+                        store.refreshXNewsNow()
+                    } label: {
+                        if xNewsIsFetching {
+                            HStack(spacing: 5) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Fetching…")
+                            }
+                        } else {
+                            Label(xNewsRefreshButtonTitle, systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .disabled(xNewsRefreshIsDisabled)
+                    Spacer()
+                    Text(xNewsCacheDescription)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 HStack(spacing: 8) {
                     Picker("Schedule", selection: xNewsCadenceBinding) {
                         Text("Daily").tag(XNewsRefreshCadence.daily)
@@ -241,13 +262,65 @@ struct MenuDashboardView: View {
         )
     }
 
-    private var xNewsStatusTitle: String {
+    private var xNewsFetchStatusTitle: String {
         guard store.xNewsStatus.grokAvailable else { return "Unavailable" }
-        return switch store.xNewsStatus.cadence {
-        case .off: "Off"
-        case .daily: "Daily"
-        case .morningAndAfternoon: "Twice daily"
+        guard store.xNewsStatus.isEnabled else { return "Off" }
+        if xNewsCooldownUntil != nil, case .idle = store.xNewsRefreshActivity { return "Cooldown" }
+        return switch store.xNewsRefreshActivity {
+        case .idle: "Ready"
+        case .fetching: "Fetching"
+        case .updated: "Updated"
+        case .disabled: "Off"
+        case .cooldown: "Cooldown"
+        case .failed: "Needs attention"
         }
+    }
+
+    private var xNewsFetchStatusTint: Color {
+        switch store.xNewsRefreshActivity {
+        case .failed: .orange
+        case .fetching, .updated: .green
+        case .idle, .disabled, .cooldown: store.xNewsStatus.isEnabled ? .green : .secondary
+        }
+    }
+
+    private var xNewsIsFetching: Bool {
+        if case .fetching = store.xNewsRefreshActivity { return true }
+        return false
+    }
+
+    private var xNewsRefreshIsDisabled: Bool {
+        if xNewsIsFetching { return true }
+        if xNewsCooldownUntil != nil { return true }
+        return !store.xNewsStatus.isEnabled
+    }
+
+    private var xNewsRefreshButtonTitle: String {
+        if let until = xNewsCooldownUntil {
+            let minutes = max(1, Int(ceil(until.timeIntervalSinceNow / 60)))
+            return "Refresh in \(minutes)m"
+        }
+        return "Refresh now"
+    }
+
+    private var xNewsCooldownUntil: Date? {
+        let until: Date?
+        if case let .cooldown(activityUntil) = store.xNewsRefreshActivity {
+            until = activityUntil
+        } else if let lastAttempt = store.xNewsStatus.lastAttemptAt {
+            until = lastAttempt.addingTimeInterval(XNewsRefreshPolicy.manualCooldown)
+        } else {
+            until = nil
+        }
+        guard let until, until > Date() else { return nil }
+        return until
+    }
+
+    private var xNewsCacheDescription: String {
+        guard let generatedAt = store.xNewsCacheGeneratedAt, store.xNewsCachedStoryCount > 0 else {
+            return "No verified cache"
+        }
+        return "\(store.xNewsCachedStoryCount) stories · \(generatedAt.formatted(.relative(presentation: .named)))"
     }
 
     private var xNewsStatusDetail: String {

@@ -1,5 +1,6 @@
 #include "dashboard_ui.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
@@ -32,6 +33,7 @@
 #define DASHBOARD_VISIBLE_TASKS 3
 #define CODEX_VISIBLE_TASKS 3
 #define X_NEWS_VISIBLE_STORIES DASHBOARD_MAX_NEWS
+#define X_NEWS_RESULT_HOLD_MS 8000U
 #define MINUTE_MS 60000U
 
 static lv_obj_t *connection_label;
@@ -51,18 +53,30 @@ static lv_obj_t *x_news_status_label;
 static lv_obj_t *x_news_scroll;
 static lv_obj_t *x_news_scroll_hint;
 static lv_obj_t *x_news_empty_card;
+static lv_obj_t *x_news_empty_spinner;
+static lv_obj_t *x_news_empty_title;
+static lv_obj_t *x_news_empty_help;
 static lv_obj_t *x_news_rows[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_titles[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_summaries[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_meta[X_NEWS_VISIBLE_STORIES];
 static dashboard_x_news_refresh_callback_t x_news_refresh_callback;
 static int32_t x_news_pull_distance;
+static int32_t x_news_pull_start_x;
+static int32_t x_news_pull_start_y;
+static bool x_news_pull_tracking;
 static bool x_news_refresh_in_flight;
+static bool x_news_result_visible;
+static uint32_t x_news_result_started_tick;
 static lv_obj_t *page_eyebrow_label;
 static lv_obj_t *page_title_label;
 static lv_obj_t *brand_icon;
 static lv_obj_t *work_pulse_rail;
-static lv_obj_t *boot_pulse;
+static lv_obj_t *boot_beacon_icon;
+static lv_obj_t *boot_ring_inner;
+static lv_obj_t *boot_ring_outer;
+static lv_obj_t *boot_scan_line;
+static lv_obj_t *boot_particles[3];
 static lv_obj_t *tileview;
 static lv_obj_t *tiles[PAGE_COUNT];
 static lv_obj_t *nav_buttons[PAGE_COUNT];
@@ -191,9 +205,9 @@ static lv_obj_t *create_card(lv_obj_t *parent, int x, int y, int width, int heig
     return card;
 }
 
-static void set_boot_rail_height(void *object, int32_t value)
+static void set_boot_rail_width(void *object, int32_t value)
 {
-    lv_obj_set_height((lv_obj_t *)object, value);
+    lv_obj_set_width((lv_obj_t *)object, value);
 }
 
 static void set_boot_icon_scale(void *object, int32_t value)
@@ -206,9 +220,35 @@ static void set_boot_icon_opacity(void *object, int32_t value)
     lv_obj_set_style_opa((lv_obj_t *)object, (lv_opa_t)value, 0);
 }
 
-static void set_boot_pulse_y(void *object, int32_t value)
+static void set_boot_ring_size(void *object, int32_t value)
 {
-    lv_obj_set_y((lv_obj_t *)object, value);
+    lv_obj_set_size((lv_obj_t *)object, value, value);
+    lv_obj_center((lv_obj_t *)object);
+}
+
+static void set_boot_scan_width(void *object, int32_t value)
+{
+    lv_obj_set_width((lv_obj_t *)object, value);
+    lv_obj_center((lv_obj_t *)object);
+}
+
+static void delete_boot_object(lv_obj_t **object)
+{
+    if (*object != NULL) {
+        lv_obj_delete(*object);
+        *object = NULL;
+    }
+}
+
+static void remove_boot_effects(void)
+{
+    delete_boot_object(&boot_beacon_icon);
+    delete_boot_object(&boot_ring_inner);
+    delete_boot_object(&boot_ring_outer);
+    delete_boot_object(&boot_scan_line);
+    for (int i = 0; i < 3; ++i) {
+        delete_boot_object(&boot_particles[i]);
+    }
 }
 
 static void finish_boot_animation(void)
@@ -218,19 +258,31 @@ static void finish_boot_animation(void)
     }
     boot_animation_active = false;
 
-    lv_anim_delete(work_pulse_rail, set_boot_rail_height);
-    lv_anim_delete(brand_icon, set_boot_icon_scale);
-    lv_anim_delete(brand_icon, set_boot_icon_opacity);
-    if (boot_pulse != NULL) {
-        lv_anim_delete(boot_pulse, set_boot_pulse_y);
-        lv_obj_delete(boot_pulse);
-        boot_pulse = NULL;
+    lv_anim_delete(work_pulse_rail, set_boot_rail_width);
+    if (boot_beacon_icon != NULL) {
+        lv_anim_delete(boot_beacon_icon, set_boot_icon_scale);
+        lv_anim_delete(boot_beacon_icon, set_boot_icon_opacity);
+    }
+    if (boot_ring_inner != NULL) {
+        lv_anim_delete(boot_ring_inner, set_boot_ring_size);
+        lv_anim_delete(boot_ring_inner, set_boot_icon_opacity);
+    }
+    if (boot_ring_outer != NULL) {
+        lv_anim_delete(boot_ring_outer, set_boot_ring_size);
+        lv_anim_delete(boot_ring_outer, set_boot_icon_opacity);
+    }
+    if (boot_scan_line != NULL) {
+        lv_anim_delete(boot_scan_line, set_boot_scan_width);
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (boot_particles[i] != NULL) {
+            lv_anim_delete(boot_particles[i], set_boot_icon_opacity);
+        }
     }
 
-    lv_obj_set_height(work_pulse_rail, ILO_BOARD_HEIGHT);
+    remove_boot_effects();
+    lv_obj_set_width(work_pulse_rail, 6);
     lv_obj_set_style_opa(work_pulse_rail, LV_OPA_COVER, 0);
-    lv_image_set_scale(brand_icon, 192);
-    lv_obj_set_style_opa(brand_icon, LV_OPA_COVER, 0);
 }
 
 static void boot_animation_completed(lv_anim_t *animation)
@@ -246,36 +298,94 @@ static void start_boot_animation(void)
     lv_anim_t animation;
     lv_anim_init(&animation);
     lv_anim_set_var(&animation, work_pulse_rail);
-    lv_anim_set_exec_cb(&animation, set_boot_rail_height);
-    lv_anim_set_values(&animation, 0, ILO_BOARD_HEIGHT);
-    lv_anim_set_duration(&animation, 420);
+    lv_anim_set_exec_cb(&animation, set_boot_rail_width);
+    lv_anim_set_values(&animation, 6, 14);
+    lv_anim_set_duration(&animation, 120);
+    lv_anim_set_reverse_delay(&animation, 80);
+    lv_anim_set_reverse_duration(&animation, 160);
     lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
     lv_anim_start(&animation);
 
     lv_anim_init(&animation);
-    lv_anim_set_var(&animation, brand_icon);
+    lv_anim_set_var(&animation, boot_beacon_icon);
     lv_anim_set_exec_cb(&animation, set_boot_icon_scale);
-    lv_anim_set_values(&animation, 136, 192);
-    lv_anim_set_duration(&animation, 320);
-    lv_anim_set_delay(&animation, 35);
+    lv_anim_set_values(&animation, 320, 512);
+    lv_anim_set_duration(&animation, 220);
+    lv_anim_set_delay(&animation, 15);
     lv_anim_set_path_cb(&animation, lv_anim_path_overshoot);
     lv_anim_start(&animation);
 
     lv_anim_init(&animation);
-    lv_anim_set_var(&animation, brand_icon);
+    lv_anim_set_var(&animation, boot_beacon_icon);
     lv_anim_set_exec_cb(&animation, set_boot_icon_opacity);
-    lv_anim_set_values(&animation, LV_OPA_30, LV_OPA_COVER);
-    lv_anim_set_duration(&animation, 180);
+    lv_anim_set_values(&animation, LV_OPA_TRANSP, LV_OPA_COVER);
+    lv_anim_set_duration(&animation, 100);
+    lv_anim_set_delay(&animation, 15);
+    lv_anim_set_reverse_delay(&animation, 225);
+    lv_anim_set_reverse_duration(&animation, 140);
+    lv_anim_set_completed_cb(&animation, boot_animation_completed);
     lv_anim_start(&animation);
 
     lv_anim_init(&animation);
-    lv_anim_set_var(&animation, boot_pulse);
-    lv_anim_set_exec_cb(&animation, set_boot_pulse_y);
-    lv_anim_set_values(&animation, -72, ILO_BOARD_HEIGHT);
-    lv_anim_set_duration(&animation, 460);
-    lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
-    lv_anim_set_completed_cb(&animation, boot_animation_completed);
+    lv_anim_set_var(&animation, boot_ring_inner);
+    lv_anim_set_exec_cb(&animation, set_boot_ring_size);
+    lv_anim_set_values(&animation, 90, 140);
+    lv_anim_set_duration(&animation, 330);
+    lv_anim_set_delay(&animation, 30);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
     lv_anim_start(&animation);
+
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, boot_ring_inner);
+    lv_anim_set_exec_cb(&animation, set_boot_icon_opacity);
+    lv_anim_set_values(&animation, LV_OPA_TRANSP, LV_OPA_70);
+    lv_anim_set_duration(&animation, 110);
+    lv_anim_set_delay(&animation, 30);
+    lv_anim_set_reverse_delay(&animation, 160);
+    lv_anim_set_reverse_duration(&animation, 120);
+    lv_anim_start(&animation);
+
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, boot_ring_outer);
+    lv_anim_set_exec_cb(&animation, set_boot_ring_size);
+    lv_anim_set_values(&animation, 112, 196);
+    lv_anim_set_duration(&animation, 390);
+    lv_anim_set_delay(&animation, 45);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
+    lv_anim_start(&animation);
+
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, boot_ring_outer);
+    lv_anim_set_exec_cb(&animation, set_boot_icon_opacity);
+    lv_anim_set_values(&animation, LV_OPA_TRANSP, LV_OPA_60);
+    lv_anim_set_duration(&animation, 100);
+    lv_anim_set_delay(&animation, 50);
+    lv_anim_set_reverse_delay(&animation, 140);
+    lv_anim_set_reverse_duration(&animation, 120);
+    lv_anim_start(&animation);
+
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, boot_scan_line);
+    lv_anim_set_exec_cb(&animation, set_boot_scan_width);
+    lv_anim_set_values(&animation, 0, ILO_BOARD_WIDTH);
+    lv_anim_set_duration(&animation, 180);
+    lv_anim_set_delay(&animation, 70);
+    lv_anim_set_reverse_delay(&animation, 35);
+    lv_anim_set_reverse_duration(&animation, 160);
+    lv_anim_start(&animation);
+
+    static const uint32_t particle_delays[3] = { 95, 130, 160 };
+    for (int i = 0; i < 3; ++i) {
+        lv_anim_init(&animation);
+        lv_anim_set_var(&animation, boot_particles[i]);
+        lv_anim_set_exec_cb(&animation, set_boot_icon_opacity);
+        lv_anim_set_values(&animation, LV_OPA_TRANSP, LV_OPA_80);
+        lv_anim_set_duration(&animation, 80);
+        lv_anim_set_delay(&animation, particle_delays[i]);
+        lv_anim_set_reverse_delay(&animation, 130);
+        lv_anim_set_reverse_duration(&animation, 90);
+        lv_anim_start(&animation);
+    }
 }
 
 static bool local_clock(struct tm *clock)
@@ -464,30 +574,51 @@ static void show_model_x_news_status(void)
     } else {
         lv_label_set_text(x_news_status_label, "WAITING FOR VERIFIED MAC FEED");
         lv_obj_set_style_text_color(x_news_status_label, COLOR_AMBER, 0);
-        if (x_news_empty_card != NULL) lv_obj_remove_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+        if (x_news_empty_card != NULL) {
+            lv_obj_remove_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(x_news_empty_spinner, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(x_news_empty_title, "Ready for your first brief");
+            lv_obj_set_style_text_color(x_news_empty_title, COLOR_MIST, 0);
+            lv_label_set_text(
+                x_news_empty_help,
+                "Pull down to fetch the latest AI + robotics news\nthrough your paired Mac companion"
+            );
+        }
     }
 }
 
-static void x_news_scroll_event(lv_event_t *event)
+static void show_x_news_empty_activity(
+    const char *title,
+    const char *help,
+    lv_color_t color,
+    bool spinning
+)
 {
-    lv_event_code_t code = lv_event_get_code(event);
-    lv_obj_t *scroll = lv_event_get_current_target(event);
-    if (code == LV_EVENT_SCROLL && !x_news_refresh_in_flight) {
-        int32_t y = lv_obj_get_scroll_y(scroll);
-        if (y < 0) {
-            int32_t distance = -y;
-            if (distance > x_news_pull_distance) x_news_pull_distance = distance;
-            lv_label_set_text(
-                x_news_status_label,
-                x_news_pull_distance >= 72 ? "RELEASE TO FETCH LATEST NEWS" : "PULL DOWN TO REFRESH"
-            );
-            lv_obj_set_style_text_color(x_news_status_label, COLOR_CYAN, 0);
-        }
-        return;
+    if (x_news_empty_card == NULL || latest_model.news_count > 0) return;
+    lv_obj_remove_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
+    if (spinning) {
+        lv_obj_remove_flag(x_news_empty_spinner, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(x_news_empty_spinner, LV_OBJ_FLAG_HIDDEN);
     }
-    if (code != LV_EVENT_SCROLL_END || x_news_refresh_in_flight) return;
+    lv_label_set_text(x_news_empty_title, title);
+    lv_obj_set_style_text_color(x_news_empty_title, color, 0);
+    lv_label_set_text(x_news_empty_help, help);
+}
 
+static void show_x_news_pull_status(void)
+{
+    lv_label_set_text(
+        x_news_status_label,
+        x_news_pull_distance >= 72 ? "RELEASE TO FETCH LATEST NEWS" : "PULL DOWN TO REFRESH"
+    );
+    lv_obj_set_style_text_color(x_news_status_label, COLOR_CYAN, 0);
+}
+
+static void finish_x_news_pull(void)
+{
     bool should_refresh = x_news_pull_distance >= 72;
+    x_news_pull_tracking = false;
     x_news_pull_distance = 0;
     if (!should_refresh) {
         show_model_x_news_status();
@@ -497,10 +628,63 @@ static void x_news_scroll_event(lv_event_t *event)
         x_news_refresh_in_flight = true;
         lv_label_set_text(x_news_status_label, "FETCHING LATEST AI NEWS...");
         lv_obj_set_style_text_color(x_news_status_label, COLOR_SIGNAL, 0);
+        show_x_news_empty_activity(
+            "Fetching latest AI + robotics news",
+            "Grok via Mac  ·  validating citations and timestamps\nThis can take a minute",
+            COLOR_MIST,
+            true
+        );
     } else {
         lv_label_set_text(x_news_status_label, "MAC OFFLINE - REFRESH NOT SENT");
         lv_obj_set_style_text_color(x_news_status_label, COLOR_AMBER, 0);
     }
+}
+
+static void x_news_scroll_event(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    lv_obj_t *scroll = x_news_scroll;
+    if (code == LV_EVENT_PRESSED && !x_news_refresh_in_flight && lv_obj_get_scroll_y(scroll) <= 0) {
+        lv_indev_t *input = lv_event_get_indev(event);
+        lv_point_t point;
+        if (input != NULL) {
+            lv_indev_get_point(input, &point);
+            x_news_pull_start_x = point.x;
+            x_news_pull_start_y = point.y;
+            x_news_pull_tracking = true;
+            x_news_pull_distance = 0;
+        }
+        return;
+    }
+    if (code == LV_EVENT_PRESSING && x_news_pull_tracking && !x_news_refresh_in_flight) {
+        lv_indev_t *input = lv_event_get_indev(event);
+        lv_point_t point;
+        if (input != NULL) {
+            lv_indev_get_point(input, &point);
+            int32_t dx = point.x - x_news_pull_start_x;
+            int32_t dy = point.y - x_news_pull_start_y;
+            if (dy > 0 && dy > abs(dx)) {
+                x_news_pull_distance = dy > 96 ? 96 : dy;
+                show_x_news_pull_status();
+            }
+        }
+        return;
+    }
+    if (code == LV_EVENT_RELEASED && x_news_pull_tracking) {
+        finish_x_news_pull();
+        return;
+    }
+    if (code == LV_EVENT_SCROLL && !x_news_refresh_in_flight) {
+        int32_t y = lv_obj_get_scroll_y(scroll);
+        if (y < 0) {
+            int32_t distance = -y;
+            if (distance > x_news_pull_distance) x_news_pull_distance = distance;
+            show_x_news_pull_status();
+        }
+        return;
+    }
+    if (code != LV_EVENT_SCROLL_END || x_news_refresh_in_flight) return;
+    finish_x_news_pull();
 }
 
 static void build_x_news_page(lv_obj_t *page)
@@ -520,35 +704,53 @@ static void build_x_news_page(lv_obj_t *page)
     lv_obj_add_event_cb(x_news_scroll, x_news_scroll_event, LV_EVENT_ALL, NULL);
 
     for (int i = 0; i < X_NEWS_VISIBLE_STORIES; ++i) {
-        x_news_rows[i] = create_card(x_news_scroll, 12, 4 + (i * 112), 964, 102, 14);
+        x_news_rows[i] = create_card(x_news_scroll, 12, 4 + (i * 126), 964, 116, 14);
         lv_obj_add_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
-        x_news_titles[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_MIST);
+        lv_obj_add_event_cb(x_news_rows[i], x_news_scroll_event, LV_EVENT_ALL, NULL);
+        x_news_titles[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_16, COLOR_MIST);
         lv_obj_set_width(x_news_titles[i], 700);
         lv_label_set_long_mode(x_news_titles[i], LV_LABEL_LONG_DOT);
-        lv_obj_align(x_news_titles[i], LV_ALIGN_TOP_LEFT, 18, 16);
+        lv_obj_align(x_news_titles[i], LV_ALIGN_TOP_LEFT, 18, 14);
         x_news_summaries[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_FOG);
-        lv_obj_set_width(x_news_summaries[i], 700);
-        lv_label_set_long_mode(x_news_summaries[i], LV_LABEL_LONG_DOT);
-        lv_obj_align(x_news_summaries[i], LV_ALIGN_BOTTOM_LEFT, 18, -16);
+        lv_obj_set_size(x_news_summaries[i], 928, 42);
+        lv_label_set_long_mode(x_news_summaries[i], LV_LABEL_LONG_CLIP);
+        lv_obj_set_style_text_line_space(x_news_summaries[i], 4, 0);
+        lv_obj_align(x_news_summaries[i], LV_ALIGN_TOP_LEFT, 18, 48);
         x_news_meta[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_SIGNAL);
         lv_obj_set_width(x_news_meta[i], 220);
         lv_label_set_long_mode(x_news_meta[i], LV_LABEL_LONG_DOT);
-        lv_obj_align(x_news_meta[i], LV_ALIGN_RIGHT_MID, -18, 0);
+        lv_obj_align(x_news_meta[i], LV_ALIGN_TOP_RIGHT, -18, 16);
         lv_obj_set_style_text_align(x_news_meta[i], LV_TEXT_ALIGN_RIGHT, 0);
     }
 
     x_news_empty_card = create_card(x_news_scroll, 12, 4, 964, 326, 16);
-    lv_obj_t *empty_title = create_label(x_news_empty_card, "No verified stories cached", &lv_font_montserrat_28, COLOR_MIST);
-    lv_obj_align(empty_title, LV_ALIGN_CENTER, 0, -42);
-    lv_obj_t *empty_help = create_label(
+    lv_obj_add_event_cb(x_news_empty_card, x_news_scroll_event, LV_EVENT_ALL, NULL);
+    x_news_empty_spinner = lv_spinner_create(x_news_empty_card);
+    lv_obj_clear_flag(x_news_empty_spinner, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(x_news_empty_spinner, 58, 58);
+    lv_spinner_set_anim_params(x_news_empty_spinner, 900, 250);
+    lv_obj_set_style_arc_width(x_news_empty_spinner, 6, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(x_news_empty_spinner, COLOR_STEEL, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(x_news_empty_spinner, 6, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(x_news_empty_spinner, COLOR_SIGNAL, LV_PART_INDICATOR);
+    lv_obj_align(x_news_empty_spinner, LV_ALIGN_CENTER, 0, -76);
+    lv_obj_add_flag(x_news_empty_spinner, LV_OBJ_FLAG_HIDDEN);
+    x_news_empty_title = create_label(
         x_news_empty_card,
-        "Enable the optional Grok adapter on the Mac, then run\n./tools/host x-news refresh --allow-grok-tools",
+        "Ready for your first brief",
+        &lv_font_montserrat_20,
+        COLOR_MIST
+    );
+    lv_obj_align(x_news_empty_title, LV_ALIGN_CENTER, 0, -8);
+    x_news_empty_help = create_label(
+        x_news_empty_card,
+        "Pull down to fetch the latest AI + robotics news\nthrough your paired Mac companion",
         &lv_font_montserrat_14,
         COLOR_FOG
     );
-    lv_obj_set_style_text_align(empty_help, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_line_space(empty_help, 8, 0);
-    lv_obj_align(empty_help, LV_ALIGN_CENTER, 0, 24);
+    lv_obj_set_style_text_align(x_news_empty_help, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_line_space(x_news_empty_help, 8, 0);
+    lv_obj_align(x_news_empty_help, LV_ALIGN_CENTER, 0, 44);
 
     x_news_scroll_hint = create_label(page, "SWIPE UP FOR MORE", &lv_font_montserrat_14, COLOR_CYAN);
     lv_obj_align(x_news_scroll_hint, LV_ALIGN_BOTTOM_RIGHT, -28, -4);
@@ -1123,12 +1325,54 @@ static void build_ui(void)
 
     build_screensaver(screen);
 
-    boot_pulse = lv_obj_create(screen);
-    set_clean_box(boot_pulse, COLOR_MIST, 3);
-    lv_obj_set_size(boot_pulse, 6, 72);
-    lv_obj_set_pos(boot_pulse, 0, -72);
-    lv_obj_clear_flag(boot_pulse, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_move_foreground(boot_pulse);
+    boot_ring_outer = lv_obj_create(screen);
+    lv_obj_remove_style_all(boot_ring_outer);
+    lv_obj_set_size(boot_ring_outer, 112, 112);
+    lv_obj_set_style_radius(boot_ring_outer, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(boot_ring_outer, 2, 0);
+    lv_obj_set_style_border_color(boot_ring_outer, COLOR_SIGNAL, 0);
+    lv_obj_set_style_bg_opa(boot_ring_outer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_opa(boot_ring_outer, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(boot_ring_outer, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(boot_ring_outer);
+
+    boot_ring_inner = lv_obj_create(screen);
+    lv_obj_remove_style_all(boot_ring_inner);
+    lv_obj_set_size(boot_ring_inner, 90, 90);
+    lv_obj_set_style_radius(boot_ring_inner, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(boot_ring_inner, 2, 0);
+    lv_obj_set_style_border_color(boot_ring_inner, COLOR_SIGNAL, 0);
+    lv_obj_set_style_bg_opa(boot_ring_inner, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_opa(boot_ring_inner, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(boot_ring_inner, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(boot_ring_inner);
+
+    boot_scan_line = lv_obj_create(screen);
+    set_clean_box(boot_scan_line, COLOR_MIST, 2);
+    lv_obj_set_size(boot_scan_line, 0, 3);
+    lv_obj_set_style_opa(boot_scan_line, LV_OPA_70, 0);
+    lv_obj_clear_flag(boot_scan_line, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(boot_scan_line);
+
+    boot_beacon_icon = lv_image_create(screen);
+    lv_image_set_src(boot_beacon_icon, &ilo_icon_48);
+    lv_image_set_scale(boot_beacon_icon, 320);
+    lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(boot_beacon_icon, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(boot_beacon_icon);
+
+    static const lv_point_t particle_positions[3] = {
+        { 628, 180 }, { 470, 414 }, { 650, 394 }
+    };
+    static const int32_t particle_sizes[3] = { 8, 7, 6 };
+    for (int i = 0; i < 3; ++i) {
+        boot_particles[i] = lv_obj_create(screen);
+        set_clean_box(boot_particles[i], COLOR_SIGNAL, LV_RADIUS_CIRCLE);
+        lv_obj_set_size(boot_particles[i], particle_sizes[i], particle_sizes[i]);
+        lv_obj_set_pos(boot_particles[i], particle_positions[i].x, particle_positions[i].y);
+        lv_obj_set_style_opa(boot_particles[i], LV_OPA_TRANSP, 0);
+        lv_obj_clear_flag(boot_particles[i], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    }
     update_page_chrome();
 }
 
@@ -1196,26 +1440,34 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
 
 esp_err_t dashboard_ui_present_boot(void)
 {
-    if (ui_display == NULL || work_pulse_rail == NULL || brand_icon == NULL || boot_pulse == NULL) {
+    if (ui_display == NULL || work_pulse_rail == NULL || boot_beacon_icon == NULL ||
+        boot_ring_inner == NULL || boot_ring_outer == NULL || boot_scan_line == NULL) {
         return ESP_ERR_INVALID_STATE;
+    }
+    for (int i = 0; i < 3; ++i) {
+        if (boot_particles[i] == NULL) return ESP_ERR_INVALID_STATE;
     }
 
     lvgl_port_lock(0);
-    lv_obj_set_height(work_pulse_rail, 0);
-    lv_image_set_scale(brand_icon, 136);
-    lv_obj_set_style_opa(brand_icon, LV_OPA_30, 0);
-    lv_obj_set_y(boot_pulse, -72);
+    lv_obj_set_width(work_pulse_rail, 6);
+    lv_image_set_scale(boot_beacon_icon, 320);
+    lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_TRANSP, 0);
+    set_boot_ring_size(boot_ring_inner, 90);
+    lv_obj_set_style_opa(boot_ring_inner, LV_OPA_TRANSP, 0);
+    set_boot_ring_size(boot_ring_outer, 112);
+    lv_obj_set_style_opa(boot_ring_outer, LV_OPA_TRANSP, 0);
+    set_boot_scan_width(boot_scan_line, 0);
+    for (int i = 0; i < 3; ++i) {
+        lv_obj_set_style_opa(boot_particles[i], LV_OPA_TRANSP, 0);
+    }
     lv_refr_now(ui_display);
 
     esp_err_t status = board_waveshare_5_set_backlight(true);
     if (status == ESP_OK) {
         start_boot_animation();
     } else {
-        lv_obj_set_height(work_pulse_rail, ILO_BOARD_HEIGHT);
-        lv_image_set_scale(brand_icon, 192);
-        lv_obj_set_style_opa(brand_icon, LV_OPA_COVER, 0);
-        lv_obj_delete(boot_pulse);
-        boot_pulse = NULL;
+        lv_obj_set_width(work_pulse_rail, 6);
+        remove_boot_effects();
     }
     lvgl_port_unlock();
     return status;
@@ -1313,13 +1565,23 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         lv_obj_set_style_bg_color(codex_dots[i], dot, 0);
     }
     if (!x_news_refresh_in_flight && x_news_pull_distance == 0) {
-        show_model_x_news_status();
+        if (x_news_result_visible && lv_tick_elaps(x_news_result_started_tick) < X_NEWS_RESULT_HOLD_MS) {
+            // Keep a terminal refresh result readable across the next snapshot.
+        } else {
+            x_news_result_visible = false;
+            show_model_x_news_status();
+        }
     }
     if (x_news_scroll_hint != NULL) {
         if (model->news_count > 3) {
+            char scroll_hint[32];
+            snprintf(scroll_hint, sizeof(scroll_hint), "SWIPE UP  %d STORIES", model->news_count);
+            lv_label_set_text(x_news_scroll_hint, scroll_hint);
             lv_obj_remove_flag(x_news_scroll_hint, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_scrollbar_mode(x_news_scroll, LV_SCROLLBAR_MODE_ON);
         } else {
             lv_obj_add_flag(x_news_scroll_hint, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_scrollbar_mode(x_news_scroll, LV_SCROLLBAR_MODE_OFF);
         }
     }
     for (int i = 0; i < X_NEWS_VISIBLE_STORIES; ++i) {
@@ -1408,8 +1670,61 @@ void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t stat
     }
     lvgl_port_lock(0);
     x_news_refresh_in_flight = state == DASHBOARD_X_NEWS_REFRESH_FETCHING;
+    x_news_result_visible = state != DASHBOARD_X_NEWS_REFRESH_FETCHING;
+    if (x_news_result_visible) x_news_result_started_tick = lv_tick_get();
     lv_label_set_text(x_news_status_label, text);
     lv_obj_set_style_text_color(x_news_status_label, color, 0);
+    switch (state) {
+    case DASHBOARD_X_NEWS_REFRESH_FETCHING:
+        show_x_news_empty_activity(
+            "Fetching latest AI + robotics news",
+            "Grok via Mac  ·  validating citations and timestamps\nThis can take a minute",
+            COLOR_MIST,
+            true
+        );
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_UPDATED:
+        show_x_news_empty_activity(
+            "Verified brief ready",
+            "Syncing the latest accepted stories from your Mac",
+            COLOR_SIGNAL,
+            false
+        );
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_COOLDOWN:
+        show_x_news_empty_activity(
+            "Refresh available soon",
+            "The 15-minute safety cooldown prevents duplicate Grok requests",
+            COLOR_CYAN,
+            false
+        );
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_BUSY:
+        show_x_news_empty_activity(
+            "A refresh is already running",
+            "Your Mac is still validating the current request",
+            COLOR_CYAN,
+            true
+        );
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_DISABLED:
+        show_x_news_empty_activity(
+            "X News is off on this Mac",
+            "Enable it once in the ILO Board companion to continue",
+            COLOR_AMBER,
+            false
+        );
+        break;
+    case DASHBOARD_X_NEWS_REFRESH_FAILED:
+    default:
+        show_x_news_empty_activity(
+            "No verified update accepted",
+            "Nothing unsafe was cached  ·  pull down to try again later",
+            COLOR_AMBER,
+            false
+        );
+        break;
+    }
     lvgl_port_unlock();
 }
 
