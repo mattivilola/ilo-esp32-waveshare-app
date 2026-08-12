@@ -21,6 +21,6 @@ import Testing
 @Test func mockSourceExposesReadOnlyCapability() async throws {
     let snapshot = try await MockTaskSource().snapshot(revision: 7)
     #expect(snapshot.revision == 7)
-    #expect(snapshot.capabilities == ["tasks.read", "macPower.read"])
+    #expect(snapshot.capabilities == ["tasks.read", "macPower.read", "hostTime.read"])
     #expect(snapshot.tasks.contains { $0.attentionKind == .approval })
 }

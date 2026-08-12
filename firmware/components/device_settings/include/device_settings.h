@@ -14,6 +14,8 @@ typedef struct {
     bool hide_task_summaries;
     bool use_24_hour_clock;
     bool use_fahrenheit;
+    int32_t clock_utc_offset_seconds;
+    char clock_timezone_abbreviation[8];
 } device_settings_t;
 
 device_settings_t device_settings_load(void);

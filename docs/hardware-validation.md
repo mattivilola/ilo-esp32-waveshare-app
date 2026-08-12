@@ -70,7 +70,7 @@ Use [the deterministic state gallery](ui-state-validation.md) as a semantic refe
 | HW-204 | Boot with no usable weather cache and no network. | Weather shows setup/offline/error guidance without fabricated values or an endless blocking loader. | Photo + log | NOT RUN |
 | HW-205 | Supply fixture tasks with very long UTF-8 titles/summaries from the Mac test source. | Text truncates inside its row; no overlap, crash, replacement-character corruption, or changed touch target. | Photo with sanitized fixture text | NOT RUN |
 | HW-206 | Enable privacy mode while task summaries exist, navigate away/back, then reboot. | Titles/summaries are hidden everywhere on the panel; counts/coarse state may remain; privacy survives reboot. | Photos before/after + reboot | NOT RUN |
-| HW-207 | After weather has synchronized time, compare the header and Pulse screensaver with a trusted local clock across a minute boundary. | Time advances once per minute, date/timezone are correct for the configured weather location, and unsynchronized boot never shows a fabricated time. | Timed photo pair + weather log | NOT RUN |
+| HW-207 | After time synchronization, compare the header and Pulse screensaver with a trusted local clock across a minute boundary. Repeat after changing the paired Mac timezone, then once with an older/no companion and configured weather. | Time advances once per minute; the current Mac timezone wins while supplied, weather timezone remains the compatibility fallback, the chosen offset survives reboot, and unsynchronized boot never shows a fabricated time. | Timed photo pairs + redacted host/serial logs | NOT RUN |
 
 ## D. Screensaver, backlight, and wake safety
 

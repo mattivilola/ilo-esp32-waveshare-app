@@ -125,6 +125,26 @@ static void x_news_scroll_event(lv_event_t *event);
 static void configure_x_news_page(bool enabled);
 static void update_page_chrome(void);
 static void finish_boot_animation(void);
+static void refresh_clock_labels(void);
+
+static void set_clock_timezone_locked(int32_t utc_offset_seconds, const char *abbreviation)
+{
+    if (abbreviation == NULL || abbreviation[0] == 0) return;
+    bool changed = clock_utc_offset_seconds != utc_offset_seconds
+        || strcmp(clock_timezone_abbreviation, abbreviation) != 0;
+    clock_utc_offset_seconds = utc_offset_seconds;
+    strlcpy(clock_timezone_abbreviation, abbreviation, sizeof(clock_timezone_abbreviation));
+    if (changed) {
+        current_settings.clock_utc_offset_seconds = utc_offset_seconds;
+        strlcpy(
+            current_settings.clock_timezone_abbreviation,
+            abbreviation,
+            sizeof(current_settings.clock_timezone_abbreviation)
+        );
+        device_settings_save(&current_settings);
+    }
+    refresh_clock_labels();
+}
 
 static const char *page_eyebrows[PAGE_COUNT] = {
     "ILO / WORK PULSE", "ILO / CODEX", "ILO / X NEWS", "ILO / WEATHER", "ILO / SETTINGS"
@@ -1450,6 +1470,12 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
 
     ui_display = display;
     current_settings = device_settings_load();
+    clock_utc_offset_seconds = current_settings.clock_utc_offset_seconds;
+    strlcpy(
+        clock_timezone_abbreviation,
+        current_settings.clock_timezone_abbreviation,
+        sizeof(clock_timezone_abbreviation)
+    );
     focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
     build_ui();
     lvgl_port_unlock();
@@ -1499,6 +1525,9 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
     lvgl_port_lock(0);
     latest_model = *model;
     latest_model_valid = true;
+    if (model->host_time_available) {
+        set_clock_timezone_locked(model->utc_offset_seconds, model->timezone_abbreviation);
+    }
     configure_x_news_page(model->x_news_enabled);
     refresh_settings_labels();
     if (mac_power_percent_label != NULL && mac_power_state_label != NULL) {
@@ -1848,15 +1877,10 @@ void dashboard_ui_set_weather(const weather_model_t *model)
     lvgl_port_lock(0);
     latest_weather_model = *model;
     latest_weather_valid = true;
-    if ((model->state == WEATHER_STATE_LIVE || model->state == WEATHER_STATE_STALE)
+    if ((!latest_model_valid || !latest_model.host_time_available)
+        && (model->state == WEATHER_STATE_LIVE || model->state == WEATHER_STATE_STALE)
         && model->timezone_abbreviation[0] != 0) {
-        clock_utc_offset_seconds = model->utc_offset_seconds;
-        strlcpy(
-            clock_timezone_abbreviation,
-            model->timezone_abbreviation,
-            sizeof(clock_timezone_abbreviation)
-        );
-        refresh_clock_labels();
+        set_clock_timezone_locked(model->utc_offset_seconds, model->timezone_abbreviation);
     }
     render_weather(model);
     lvgl_port_unlock();

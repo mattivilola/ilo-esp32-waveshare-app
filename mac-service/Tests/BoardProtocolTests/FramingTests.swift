@@ -27,13 +27,51 @@ import Testing
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     let encodedPower = try #require(object["macPower"] as? [String: Any])
 
-    #expect(snapshot.capabilities == ["tasks.read", "macPower.read"])
+    #expect(snapshot.capabilities == ["tasks.read", "macPower.read", "hostTime.read"])
     #expect(snapshot.xNewsEnabled == false)
     #expect(object["xNewsEnabled"] as? Bool == false)
     #expect(snapshot.macPower?.levelPercent == 100)
     #expect(encodedPower.keys.sorted() == ["levelPercent", "state"])
     #expect(encodedPower["levelPercent"] as? Int == 100)
     #expect(encodedPower["state"] as? String == "charging")
+}
+
+@Test func hostTimeSnapshotContainsOnlyBoundedTimezoneInformation() throws {
+    let helsinki = try #require(TimeZone(identifier: "Europe/Helsinki"))
+    let summer = HostTimeStatus(
+        date: Date(timeIntervalSince1970: 1_788_000_000),
+        timeZone: helsinki
+    )
+    let winter = HostTimeStatus(
+        date: try #require(ISO8601DateFormatter().date(from: "2026-01-15T12:00:00Z")),
+        timeZone: helsinki
+    )
+    let snapshot = DashboardSnapshot(revision: 9, tasks: [], hostTime: summer)
+    let data = try ProtocolJSON.encoder().encode(snapshot)
+    let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let encoded = try #require(object["hostTime"] as? [String: Any])
+
+    #expect(encoded.keys.sorted() == ["timezoneAbbreviation", "utcOffsetSeconds"])
+    #expect(encoded["utcOffsetSeconds"] as? Int == 10_800)
+    #expect(encoded["timezoneAbbreviation"] as? String == "EEST")
+    #expect(winter.utcOffsetSeconds == 7_200)
+    #expect(winter.timezoneAbbreviation == "EET")
+}
+
+@Test func legacySnapshotWithoutHostTimeRemainsCompatible() throws {
+    let data = Data("""
+    {
+        "protocolVersion":1,
+        "revision":1,
+        "generatedAt":"2026-01-15T12:00:00Z",
+        "hostState":"online",
+        "capabilities":["tasks.read"],
+        "tasks":[]
+    }
+    """.utf8)
+
+    let snapshot = try ProtocolJSON.decoder().decode(DashboardSnapshot.self, from: data)
+    #expect(snapshot.hostTime == nil)
 }
 
 @Test func softwareVersionsAreOptionalProtocolV1Metadata() throws {

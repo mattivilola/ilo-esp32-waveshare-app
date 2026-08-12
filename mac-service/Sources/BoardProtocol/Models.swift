@@ -47,6 +47,21 @@ public struct MacPowerStatus: Codable, Equatable, Sendable {
     }
 }
 
+public struct HostTimeStatus: Codable, Equatable, Sendable {
+    public let utcOffsetSeconds: Int
+    public let timezoneAbbreviation: String
+
+    public init(date: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent) {
+        utcOffsetSeconds = min(max(timeZone.secondsFromGMT(for: date), -50_400), 50_400)
+        let raw = timeZone.abbreviation(for: date) ?? "UTC"
+        let allowed = raw.unicodeScalars.filter {
+            $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "+-:".unicodeScalars.contains($0))
+        }
+        let normalized = String(String.UnicodeScalarView(allowed.prefix(7)))
+        timezoneAbbreviation = normalized.isEmpty ? "UTC" : normalized
+    }
+}
+
 public struct TaskCard: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let title: String
@@ -129,6 +144,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let xNewsEnabled: Bool
     public let newsFeed: NewsFeedSnapshot?
     public let macPower: MacPowerStatus?
+    public let hostTime: HostTimeStatus?
     public let companionVersion: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -141,6 +157,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         case xNewsEnabled
         case newsFeed
         case macPower
+        case hostTime
         case companionVersion
     }
 
@@ -152,6 +169,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         xNewsEnabled: Bool? = nil,
         newsFeed: NewsFeedSnapshot? = nil,
         macPower: MacPowerStatus? = nil,
+        hostTime: HostTimeStatus? = nil,
         companionVersion: String? = nil
     ) {
         self.protocolVersion = boardProtocolVersion
@@ -159,12 +177,13 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         self.generatedAt = generatedAt
         self.hostState = hostState
         self.capabilities = newsFeed == nil
-            ? ["tasks.read", "macPower.read"]
-            : ["tasks.read", "macPower.read", "xNews.read"]
+            ? ["tasks.read", "macPower.read", "hostTime.read"]
+            : ["tasks.read", "macPower.read", "hostTime.read", "xNews.read"]
         self.tasks = Array(tasks.prefix(12))
         self.xNewsEnabled = xNewsEnabled ?? (newsFeed != nil)
         self.newsFeed = newsFeed
         self.macPower = macPower
+        self.hostTime = hostTime
         self.companionVersion = companionVersion
     }
 
@@ -180,6 +199,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         xNewsEnabled = try container.decodeIfPresent(Bool.self, forKey: .xNewsEnabled)
             ?? (newsFeed != nil)
         macPower = try container.decodeIfPresent(MacPowerStatus.self, forKey: .macPower)
+        hostTime = try container.decodeIfPresent(HostTimeStatus.self, forKey: .hostTime)
         companionVersion = try container.decodeIfPresent(String.self, forKey: .companionVersion)
     }
 }

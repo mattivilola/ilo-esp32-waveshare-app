@@ -449,6 +449,7 @@ private final class BoardConnection: @unchecked Sendable {
                 xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,
                 macPower: macPower,
+                hostTime: HostTimeStatus(),
                 companionVersion: companionVersion
             )
             send(SnapshotMessage(snapshot: snapshot))

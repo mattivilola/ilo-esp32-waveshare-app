@@ -42,7 +42,8 @@ struct ILOBoardHostCommand {
                 tasks: raw.tasks.map(TaskSanitizer.sanitize),
                 xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,
-                macPower: macPower
+                macPower: macPower,
+                hostTime: HostTimeStatus()
             )
             let data = try ProtocolJSON.encoder().encode(snapshot)
             print(String(decoding: data, as: UTF8.self))

@@ -732,6 +732,36 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
         model->companion_version,
         sizeof(model->companion_version)
     );
+    cJSON *host_time = cJSON_GetObjectItemCaseSensitive(snapshot, "hostTime");
+    if (cJSON_IsObject(host_time)) {
+        cJSON *utc_offset = cJSON_GetObjectItemCaseSensitive(host_time, "utcOffsetSeconds");
+        cJSON *timezone = cJSON_GetObjectItemCaseSensitive(host_time, "timezoneAbbreviation");
+        bool timezone_valid = cJSON_IsString(timezone)
+            && timezone->valuestring[0] != 0
+            && strlen(timezone->valuestring) < sizeof(model->timezone_abbreviation);
+        if (timezone_valid) {
+            for (const unsigned char *character = (const unsigned char *)timezone->valuestring;
+                 *character != 0;
+                 ++character) {
+                if (!((*character >= 'A' && *character <= 'Z')
+                    || (*character >= 'a' && *character <= 'z')
+                    || (*character >= '0' && *character <= '9')
+                    || *character == '+' || *character == '-' || *character == ':')) {
+                    timezone_valid = false;
+                    break;
+                }
+            }
+        }
+        int offset = cJSON_IsNumber(utc_offset) ? (int)utc_offset->valuedouble : 0;
+        if (timezone_valid
+            && cJSON_IsNumber(utc_offset)
+            && utc_offset->valuedouble == (double)offset
+            && offset >= -50400 && offset <= 50400) {
+            model->host_time_available = true;
+            model->utc_offset_seconds = offset;
+            strlcpy(model->timezone_abbreviation, timezone->valuestring, sizeof(model->timezone_abbreviation));
+        }
+    }
     cJSON *mac_power = cJSON_GetObjectItemCaseSensitive(snapshot, "macPower");
     if (cJSON_IsObject(mac_power)) {
         cJSON *level = cJSON_GetObjectItemCaseSensitive(mac_power, "levelPercent");

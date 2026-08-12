@@ -1,6 +1,7 @@
 #include "device_settings.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "esp_log.h"
 #include "nvs.h"
@@ -44,6 +45,8 @@ device_settings_t device_settings_load(void)
         .hide_task_summaries = false,
         .use_24_hour_clock = true,
         .use_fahrenheit = false,
+        .clock_utc_offset_seconds = 0,
+        .clock_timezone_abbreviation = "UTC",
     };
     nvs_handle_t handle;
     esp_err_t status = nvs_open(SETTINGS_NAMESPACE, NVS_READONLY, &handle);
@@ -82,6 +85,16 @@ device_settings_t device_settings_load(void)
     if (nvs_get_u8(handle, "fahrenheit", &fahrenheit) == ESP_OK) {
         settings.use_fahrenheit = fahrenheit == 1;
     }
+    int32_t utc_offset = 0;
+    if (nvs_get_i32(handle, "clock_offset", &utc_offset) == ESP_OK
+        && utc_offset >= -50400 && utc_offset <= 50400) {
+        settings.clock_utc_offset_seconds = utc_offset;
+    }
+    size_t timezone_size = sizeof(settings.clock_timezone_abbreviation);
+    char timezone[sizeof(settings.clock_timezone_abbreviation)] = { 0 };
+    if (nvs_get_str(handle, "clock_zone", timezone, &timezone_size) == ESP_OK && timezone[0] != 0) {
+        strlcpy(settings.clock_timezone_abbreviation, timezone, sizeof(settings.clock_timezone_abbreviation));
+    }
     nvs_close(handle);
     return settings;
 }
@@ -103,6 +116,8 @@ void device_settings_save(const device_settings_t *settings)
     if (status == ESP_OK) status = nvs_set_u8(handle, "hide_summary", settings->hide_task_summaries ? 1 : 0);
     if (status == ESP_OK) status = nvs_set_u8(handle, "clock_24h", settings->use_24_hour_clock ? 1 : 0);
     if (status == ESP_OK) status = nvs_set_u8(handle, "fahrenheit", settings->use_fahrenheit ? 1 : 0);
+    if (status == ESP_OK) status = nvs_set_i32(handle, "clock_offset", settings->clock_utc_offset_seconds);
+    if (status == ESP_OK) status = nvs_set_str(handle, "clock_zone", settings->clock_timezone_abbreviation);
     if (status == ESP_OK) status = nvs_commit(handle);
     nvs_close(handle);
     if (status != ESP_OK) {

@@ -14,7 +14,7 @@
     "companionVersion": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9.()+ -]{1,32}$" },
     "capabilities": {
       "type": "array",
-      "items": { "enum": ["tasks.read", "macPower.read", "xNews.read"] },
+      "items": { "enum": ["tasks.read", "macPower.read", "hostTime.read", "xNews.read"] },
       "uniqueItems": true
     },
     "tasks": {
@@ -41,6 +41,15 @@
       "properties": {
         "levelPercent": { "type": "integer", "minimum": 0, "maximum": 100 },
         "state": { "enum": ["battery", "charging", "powerAdapter", "full"] }
+      }
+    },
+    "hostTime": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["utcOffsetSeconds", "timezoneAbbreviation"],
+      "properties": {
+        "utcOffsetSeconds": { "type": "integer", "minimum": -50400, "maximum": 50400 },
+        "timezoneAbbreviation": { "type": "string", "pattern": "^[A-Za-z0-9+:-]{1,7}$" }
       }
     },
     "newsFeed": {
