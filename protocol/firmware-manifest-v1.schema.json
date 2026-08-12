@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iloapps.com/schemas/ilo-board-firmware-manifest-envelope-v1.json",
+  "title": "ILO Board signed firmware manifest envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "algorithm", "keyID", "payload", "signature"],
+  "properties": {
+    "schema": { "const": "ilo-board-firmware-manifest-envelope-v1" },
+    "algorithm": { "const": "RSA-PSS-SHA256" },
+    "keyID": { "type": "string", "pattern": "^[a-f0-9]{16}$" },
+    "payload": { "type": "string", "contentEncoding": "base64", "maxLength": 10924 },
+    "signature": { "type": "string", "contentEncoding": "base64", "minLength": 512, "maxLength": 512 }
+  }
+}

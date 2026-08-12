@@ -1,6 +1,6 @@
 # OTA update and recovery policy
 
-This is a safety foundation, not an enabled remote updater. No command in this repository uploads an image, changes OTA data, contacts an update server, or writes a live board over Wi-Fi.
+OTA delivery is built as a fail-closed release path. The normal developer build still has no network installer. Only the dedicated signed release profile may contain the updater, and publishing remains a separate explicit command.
 
 ## What is implemented
 
@@ -10,6 +10,21 @@ This is a safety foundation, not an enabled remote updater. No command in this r
 - A failed health check requests rollback when a previous valid image exists. With no recovery image, the candidate remains unconfirmed and USB recovery is required.
 - `./tools/board ota-status [--sdkconfig FILE]` inspects policy without hardware.
 - `./tools/board ota-verify --image FILE.bin --public-key PUBLIC.pem --sdkconfig FILE` fail-closes unless the artifact fits a slot, is a valid ESP image, was built with rollback and signed-update enforcement, and carries a valid RSA Secure Boot v2 signature. It refuses PEM private keys and never uploads.
+- `protocol/firmware-manifest-v1.schema.json` defines the small signed-envelope boundary. `tools/firmware_manifest.py` creates and verifies the stricter executable contract.
+
+## Signed manifest v1
+
+The outer JSON envelope contains only `schema`, `algorithm`, `keyID`, a canonical JSON payload encoded as base64, and an RSA-PSS-SHA256 signature. Signing the exact payload bytes avoids ambiguous JSON canonicalization on the ESP32. The verifier rejects unknown fields, non-canonical base64 or JSON, weak/wrong keys, and malformed signatures.
+
+The signed payload binds all security-relevant metadata:
+
+- exact hardware target `waveshare-esp32-s3-touch-lcd-5b-28151`;
+- stable channel, semantic version, and monotonically increasing release sequence;
+- publication time and minimum updater version;
+- exact immutable GCS HTTPS artifact URL, byte size, and lowercase SHA-256;
+- one to eight bounded release-note strings.
+
+The mutable manifest is intentionally published last. The versioned binary is created with GCS `--if-generation-match=0`, downloaded again, and compared byte-for-byte before the manifest may change. A client therefore cannot discover a signed manifest for an unavailable or different artifact.
 
 ## Signing boundary
 
@@ -17,18 +32,20 @@ This is a safety foundation, not an enabled remote updater. No command in this r
 
 Software-only signed updates protect a future network delivery path but do not stop a person with physical flash access from replacing the bootloader. Hardware Secure Boot v2, flash encryption, and anti-rollback eFuses are stronger but irreversible. Their key ceremony and first-device provisioning require separate approval, backups, documented recovery, and physical testing; this project does not burn eFuses automatically.
 
-## Release sequence once keys and hosting exist
+## Release commands
 
-1. Build in an isolated directory using `sdkconfig.defaults` plus `sdkconfig.ota-release.defaults`.
-2. Sign the application outside the repository with the controlled RSA-3072 private key or HSM.
-3. Run `ota-verify` with the public key and the generated release sdkconfig. Record the SHA-256 it prints.
-4. Publish only the verified signed binary and an authenticated manifest over HTTPS. Publishing and device installation commands do not exist yet.
-5. Exercise HW-411 and HW-412 on a sacrificial 5B before enabling delivery for any other board.
+1. Put only paths and release metadata in ignored `Config/release.env`; the RSA-3072 private key itself must stay outside the repository and GCS.
+2. Set a strictly increasing `ILO_BOARD_FIRMWARE_RELEASE_SEQUENCE` and bounded release notes.
+3. Run `make firmware-release-local`. It builds with both sdkconfig defaults files, externally signs the ESP image, verifies the image signature, creates the manifest, verifies the manifest, and changes neither GCS nor a board.
+4. Inspect the versioned files under `artifacts/firmware/VERSION/`.
+5. Run `make firmware-release-distribute` explicitly. It repeats all local checks, refuses an existing immutable object, enforces a sequence newer than the published signed manifest, verifies the uploaded binary, and publishes the manifest last.
+
+The manifest and ESP image currently use the same controlled RSA-3072 key so there is one durable trust decision. This is domain-separated by file format and verification path. The public key is safe to embed and distribute; the private key is not.
 
 ## Remaining gates
 
 - Prove the 30-second confirmation, crash rollback, partial-write recovery, NVS preservation, and repeated A/B slot cycling on hardware.
-- Choose authenticated manifest format, pinned trust/update origin, rollout cohorts, rate limits, and revocation policy.
-- Establish offline/HSM key custody, public-key distribution, rotation, incident recovery, and audit records.
+- Establish offline/HSM key custody, public-key distribution, incident recovery, and audit records. Software-only signed updates accept only the first signature block, so changing this trust root requires another deliberate USB bridge flash.
+- Decide rollout cohorts and rate limits after the first-device physical gates pass.
 - Decide whether production devices require irreversible hardware Secure Boot, flash encryption, and eFuse anti-rollback.
 - Add a user-visible update state and explicit local recovery instructions before any automatic check or install path.

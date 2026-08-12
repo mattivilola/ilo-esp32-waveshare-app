@@ -41,6 +41,43 @@ load_release_config() {
   export ILO_BOARD_PUBLIC_VERSIONED_RELEASES_URL="${ILO_BOARD_PUBLIC_VERSIONED_RELEASES_URL:-https://storage.googleapis.com/ilo-public/ilo-board/releases}"
   export ILO_BOARD_PUBLIC_APPCAST_URI="${ILO_BOARD_PUBLIC_APPCAST_URI:-gs://ilo-public/ilo-board/appcast.xml}"
   export ILO_BOARD_PUBLIC_APPCAST_URL="${ILO_BOARD_PUBLIC_APPCAST_URL:-https://storage.googleapis.com/ilo-public/ilo-board/appcast.xml}"
+  export ILO_BOARD_FIRMWARE_RELEASES_URI="${ILO_BOARD_FIRMWARE_RELEASES_URI:-gs://ilo-public/ilo-board/firmware/releases}"
+  export ILO_BOARD_FIRMWARE_MANIFEST_URI="${ILO_BOARD_FIRMWARE_MANIFEST_URI:-gs://ilo-public/ilo-board/firmware/manifest-v1.json}"
+}
+
+firmware_version() {
+  local version
+  version="$(<"$ILO_BOARD_ROOT/firmware/version.txt")"
+  [[ "$version" == <->.<->.<-> ]] || fail "Firmware version must be major.minor.patch: $version"
+  print -- "$version"
+}
+
+firmware_release_dir() {
+  print -- "$ILO_BOARD_ARTIFACTS_DIR/firmware/$(firmware_version)"
+}
+
+firmware_release_image() {
+  print -- "$(firmware_release_dir)/ILOBoardFirmware-$(firmware_version).bin"
+}
+
+firmware_release_manifest() {
+  print -- "$(firmware_release_dir)/manifest-v1.json"
+}
+
+firmware_release_sdkconfig() {
+  print -- "$(firmware_release_dir)/sdkconfig"
+}
+
+require_firmware_signing_material() {
+  [[ -n "${ILO_BOARD_FIRMWARE_SIGNING_KEY:-}" ]] || fail "Set ILO_BOARD_FIRMWARE_SIGNING_KEY to the external RSA-3072 private key path."
+  [[ -n "${ILO_BOARD_FIRMWARE_PUBLIC_KEY:-}" ]] || fail "Set ILO_BOARD_FIRMWARE_PUBLIC_KEY to its PEM public key path."
+  [[ -f "$ILO_BOARD_FIRMWARE_SIGNING_KEY" ]] || fail "Firmware signing key does not exist."
+  [[ -f "$ILO_BOARD_FIRMWARE_PUBLIC_KEY" ]] || fail "Firmware public key does not exist."
+  local private_path public_path
+  private_path="${ILO_BOARD_FIRMWARE_SIGNING_KEY:A}"
+  public_path="${ILO_BOARD_FIRMWARE_PUBLIC_KEY:A}"
+  [[ "$private_path" != "$ILO_BOARD_ROOT"/* ]] || fail "The firmware private key must live outside this repository."
+  [[ "$public_path" != "$private_path" ]] || fail "Public and private key paths must be different."
 }
 
 release_basename() {

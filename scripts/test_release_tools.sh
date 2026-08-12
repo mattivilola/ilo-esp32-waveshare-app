@@ -17,6 +17,8 @@ for script in \
   render_appcast.sh \
   version.sh \
   firmware_version.sh \
+  firmware_release_local.sh \
+  firmware_release_distribute.sh \
   release_commit.sh \
   release_tag.sh \
   release_push.sh \
@@ -48,6 +50,9 @@ grep -Fq 'stapler validate' "$ILO_BOARD_ROOT/scripts/release_distribute.sh" || f
 grep -Fq 'cmp -s' "$ILO_BOARD_ROOT/scripts/release_distribute.sh" || fail "Distribution must reject a stale latest alias."
 grep -Fq 'SUPublicEDKey' "$ILO_BOARD_ROOT/Packaging/Info.plist" "$ILO_BOARD_ROOT/scripts/build_app.sh" || fail "Release packaging must inject a Sparkle public key."
 grep -Fq 'appcast' "$ILO_BOARD_ROOT/scripts/release_distribute.sh" || fail "Distribution must publish the Sparkle appcast."
+grep -Fq -- '--if-generation-match=0' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must forbid immutable artifact replacement."
+grep -Fq 'cmp -s' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must verify the uploaded image before publishing the manifest."
+grep -Fq 'firmware_manifest.py" verify' "$ILO_BOARD_ROOT/scripts/firmware_release_distribute.sh" || fail "Firmware distribution must verify the signed manifest."
 
 "$ILO_BOARD_ROOT/scripts/test_sparkle_release.sh"
 

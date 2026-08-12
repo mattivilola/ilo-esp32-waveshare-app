@@ -282,6 +282,8 @@ The source icon is used in the menu dashboard and converted into the packaged ap
 
 For Developer ID signing, Apple notarization, Sparkle EdDSA signing, and Google Cloud Storage delivery, follow [macOS distribution](docs/macos-distribution.md). The release pipeline refuses to upload unless the versioned DMG has a valid stapled notarization ticket, the stable alias is byte-for-byte identical, and a signed appcast with bounded `CHANGELOG.md` history can be generated. No credentials are committed, `make release-local` never uploads, and GCS writes happen only when `make release-distribute` is run explicitly. The versioned DMG and stable alias are uploaded before `appcast.xml`, so clients never discover an unavailable archive. Immutable versioned DMGs use a one-year cache policy; the mutable latest alias and appcast require revalidation to prevent an older shared-cache response after replacement.
 
+Firmware releases use a separate, equally explicit path: `make firmware-release-local` builds, externally signs, verifies, and creates a signed board-specific manifest without uploading or flashing anything. `make firmware-release-distribute` then publishes the immutable verified image first and the signed mutable manifest last. It refuses weak/wrong keys, unsigned images, a non-increasing release sequence, mutable artifact URLs, hardware other than SKU 28151, overwriting an existing versioned object, or a remote byte mismatch. See [OTA update and recovery policy](docs/ota.md) before selecting the durable RSA-3072 key or flashing the one-time signed bridge firmware.
+
 ### If flashing cannot connect
 
 The board normally supports automatic download, but its native USB connection may need a manual transition:

@@ -3,7 +3,7 @@ SHELL := /bin/zsh
 BOARD_SCREENSHOT_OUTPUT ?= artifacts/board-screenshots/ilo-board-$(shell date +%Y%m%d-%H%M%S).png
 BOARD_SCREENSHOT_TIMEOUT ?= 120
 
-.PHONY: help doctor assets versions firmware-version firmware-version-patch firmware-version-minor firmware-setup firmware-build firmware-flash firmware-flash-minor firmware-monitor ota-status ui-preview ui-screenshots board-screenshot mac-version mac-version-patch mac-version-minor mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
+.PHONY: help doctor assets versions firmware-version firmware-version-patch firmware-version-minor firmware-setup firmware-build firmware-flash firmware-flash-minor firmware-monitor ota-status firmware-release-local firmware-release-distribute ui-preview ui-screenshots board-screenshot mac-version mac-version-patch mac-version-minor mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
 
 help:
 	@printf "ILO Board commands\n\n"
@@ -19,6 +19,8 @@ help:
 	@printf "  make firmware-flash-minor  Minor-bump and flash a connected Waveshare 5B\n"
 	@printf "  make firmware-monitor    Open the board serial monitor\n"
 	@printf "  make ota-status          Inspect OTA safety gates without hardware\n"
+	@printf "  make firmware-release-local  Build, sign, and verify firmware; never upload\n"
+	@printf "  make firmware-release-distribute  Publish verified firmware and manifest\n"
 	@printf "  make ui-preview          Open the desktop 1024x600 device UI preview\n"
 	@printf "  make ui-screenshots      Export PNG previews for all five device screens\n"
 	@printf "  make board-screenshot    Save the current physical board screen as a PNG\n"
@@ -81,6 +83,12 @@ firmware-monitor:
 
 ota-status:
 	./tools/board ota-status
+
+firmware-release-local:
+	./scripts/firmware_release_local.sh
+
+firmware-release-distribute:
+	./scripts/firmware_release_distribute.sh
 
 ui-preview:
 	./tools/board ui-preview
