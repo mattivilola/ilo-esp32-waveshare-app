@@ -46,7 +46,7 @@ Touch targets are at least 48×48 logical pixels. Empty, sleeping, reconnecting,
 
 The signature is the vertical “work pulse”: one continuous status rail that makes the system's overall state readable before individual cards. Amber is reserved for genuine attention, not decoration. Dashboard is the default wake screen and should answer three questions in under two seconds: is everything connected, does anything need me, and what is moving now?
 
-On cold boot, the backlight stays off until the first real Dashboard frame is rendered. A sub-half-second “Pulse ignition” then grows the signal rail, settles the ILO roundel, and sends one highlight down the rail while connection and data startup continue normally. The animation never acts as a splash-screen gate: the Dashboard is already present and touch can finish the effect immediately.
+On cold boot, the backlight stays off until the first real Dashboard frame is rendered. A sub-half-second “ILO beacon” then appears over the live Dashboard: two signal rings expand from the centered roundel, one scan line crosses the display, and the left work-pulse rail briefly flares. Connection and data startup continue normally underneath. The animation never acts as a splash-screen gate: the Dashboard is already present and touch can finish the effect immediately.
 
 ## Codex
 
