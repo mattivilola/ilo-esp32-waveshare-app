@@ -2,6 +2,24 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.4 - 2026-08-12
+
+### Added
+- Add one-command board screenshot capture
+- Add non-blocking Pulse boot animation
+
+### Changed
+- Polish physical X News refresh experience
+- Make board screenshot reconnect automatic
+- Track firmware and companion versions
+
+### Fixed
+- Fix authenticated board screenshot transfer
+
+### Documentation
+- Document refined ILO beacon boot effect
+
+
 ## 0.1.3 - 2026-08-12
 
 ### Fixed
