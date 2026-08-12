@@ -829,11 +829,32 @@ static void make_board_text_font_safe(char *text)
             *destination++ = '.';
             *destination++ = '.';
             source += 3;
+        } else if ((source[0] == 0xE2 && source[1] == 0x80 && source[2] == 0xA2)
+            || (source[0] == 0xC2 && source[1] == 0xB7)) {
+            *destination++ = '/';
+            source += source[0] == 0xE2 ? 3 : 2;
         } else if (source[0] == 0xC2 && source[1] == 0xA0) {
             *destination++ = ' ';
             source += 2;
-        } else {
+        } else if (source[0] == 0xC3 && source[1] >= 0x80 && source[1] <= 0xBF) {
+            static const char latin1_base[] = {
+                'A','A','A','A','A','A','A','C','E','E','E','E','I','I','I','I',
+                'D','N','O','O','O','O','O', 0 ,'O','U','U','U','U','Y', 0 ,'s',
+                'a','a','a','a','a','a','a','c','e','e','e','e','i','i','i','i',
+                'd','n','o','o','o','o','o', 0 ,'o','u','u','u','u','y', 0 ,'y',
+            };
+            char mapped = latin1_base[source[1] - 0x80];
+            if (mapped != 0) *destination++ = (unsigned char)mapped;
+            source += 2;
+        } else if (*source >= 0x20 && *source <= 0x7E) {
             *destination++ = *source++;
+        } else if (*source < 0x80) {
+            if (*source == '\n' || *source == '\r' || *source == '\t') *destination++ = ' ';
+            ++source;
+        } else {
+            size_t sequence = (*source & 0xE0) == 0xC0 ? 2
+                : ((*source & 0xF0) == 0xE0 ? 3 : ((*source & 0xF8) == 0xF0 ? 4 : 1));
+            while (sequence-- > 0 && *source != '\0') ++source;
         }
     }
     *destination = '\0';
@@ -915,10 +936,13 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
         cJSON *longitude = cJSON_GetObjectItemCaseSensitive(weather_location, "longitude");
         if (cJSON_IsString(name) && name->valuestring[0] != 0 && strlen(name->valuestring) <= 40
             && cJSON_IsNumber(latitude) && cJSON_IsNumber(longitude)) {
-            model->weather_location_available = true;
             strlcpy(model->weather_location_name, name->valuestring, sizeof(model->weather_location_name));
-            model->weather_latitude = latitude->valuedouble;
-            model->weather_longitude = longitude->valuedouble;
+            make_board_text_font_safe(model->weather_location_name);
+            if (model->weather_location_name[0] != 0) {
+                model->weather_location_available = true;
+                model->weather_latitude = latitude->valuedouble;
+                model->weather_longitude = longitude->valuedouble;
+            }
         }
     }
     cJSON *task = NULL;
@@ -926,8 +950,8 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
         if (model->task_count >= DASHBOARD_MAX_TASKS) break;
         dashboard_task_t *target = &model->tasks[model->task_count++];
         copy_json_string(task, "id", target->id, sizeof(target->id));
-        copy_json_string(task, "title", target->title, sizeof(target->title));
-        copy_json_string(task, "shortSummary", target->summary, sizeof(target->summary));
+        copy_json_board_text(task, "title", target->title, sizeof(target->title));
+        copy_json_board_text(task, "shortSummary", target->summary, sizeof(target->summary));
         cJSON *state = cJSON_GetObjectItemCaseSensitive(task, "state");
         cJSON *attention_item = cJSON_GetObjectItemCaseSensitive(task, "attentionKind");
         target->state = task_state(cJSON_IsString(state) ? state->valuestring : NULL);

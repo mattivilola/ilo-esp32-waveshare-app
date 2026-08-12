@@ -6,7 +6,7 @@ import Testing
 @Test func sanitizerBoundsAndFlattensBoardVisibleText() {
     let task = TaskCard(
         id: String(repeating: "i", count: 120),
-        title: "Line one\nLine two",
+        title: "Line one\nLine two 🤖",
         state: .active,
         attentionKind: .none,
         updatedAt: Date(timeIntervalSince1970: 0),
@@ -16,6 +16,23 @@ import Testing
     #expect(sanitized.id.count == 80)
     #expect(sanitized.title == "Line one Line two")
     #expect(sanitized.shortSummary.count == 180)
+}
+
+@Test func sanitizerMapsUnsupportedCodexGlyphsToBoardSafeASCII() {
+    let task = TaskCard(
+        id: "glyphs",
+        title: "Päätös: Codex’s plan — ready… 🚀",
+        state: .waiting,
+        attentionKind: .approval,
+        updatedAt: Date(timeIntervalSince1970: 0),
+        shortSummary: "Review • then confirm"
+    )
+
+    let sanitized = TaskSanitizer.sanitize(task)
+    #expect(sanitized.title == "Paatos: Codex's plan - ready...")
+    #expect(sanitized.shortSummary == "Review / then confirm")
+    #expect(sanitized.title.unicodeScalars.allSatisfy { $0.isASCII })
+    #expect(sanitized.shortSummary.unicodeScalars.allSatisfy { $0.isASCII })
 }
 
 @Test func mockSourceExposesReadOnlyCapability() async throws {

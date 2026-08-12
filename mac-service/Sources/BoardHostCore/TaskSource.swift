@@ -59,13 +59,15 @@ public struct MockTaskSource: TaskSource {
 
 public enum TaskSanitizer {
     public static func sanitize(_ task: TaskCard) -> TaskCard {
-        TaskCard(
+        let title = BoardDisplayText.sanitized(task.title, maximum: 80)
+        let summary = BoardDisplayText.sanitized(task.shortSummary, maximum: 180)
+        return TaskCard(
             id: clipped(task.id, maximum: 80),
-            title: clipped(task.title, maximum: 80),
+            title: title.isEmpty ? "Codex task" : title,
             state: task.state,
             attentionKind: task.attentionKind,
             updatedAt: task.updatedAt,
-            shortSummary: clipped(task.shortSummary, maximum: 180)
+            shortSummary: summary.isEmpty ? "No board-safe summary" : summary
         )
     }
 

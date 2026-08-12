@@ -41,9 +41,14 @@
 
 static lv_obj_t *connection_label;
 static lv_obj_t *attention_count_label;
-static lv_obj_t *attention_hint_label;
 static lv_obj_t *mac_power_percent_label;
 static lv_obj_t *mac_power_state_label;
+static lv_obj_t *dashboard_weather_icon_box;
+static lv_obj_t *dashboard_weather_icon_label;
+static lv_obj_t *dashboard_weather_location_label;
+static lv_obj_t *dashboard_weather_temperature_label;
+static lv_obj_t *dashboard_weather_condition_label;
+static lv_obj_t *dashboard_weather_state_label;
 static lv_obj_t *task_rows[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_titles[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_summaries[DASHBOARD_MAX_TASKS];
@@ -224,15 +229,6 @@ static void set_clean_box(lv_obj_t *object, lv_color_t color, int radius)
     lv_obj_set_style_border_width(object, 0, 0);
     lv_obj_set_style_radius(object, radius, 0);
     lv_obj_set_style_pad_all(object, 0, 0);
-}
-
-static void attention_tapped(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || attention_hint_label == NULL) {
-        return;
-    }
-    lv_label_set_text(attention_hint_label, "Touch input ready\nActions stay on Mac");
-    lv_obj_set_style_text_color(attention_hint_label, COLOR_SIGNAL, 0);
 }
 
 static lv_obj_t *create_label(lv_obj_t *parent, const char *text, const lv_font_t *font, lv_color_t color)
@@ -704,7 +700,7 @@ static void build_weather_page(lv_obj_t *page)
     lv_obj_align(weather_temperature_label, LV_ALIGN_TOP_LEFT, 18, 66);
     weather_condition_label = create_label(now, "Waiting for forecast", &lv_font_montserrat_20, COLOR_CYAN);
     lv_obj_align(weather_condition_label, LV_ALIGN_TOP_LEFT, 18, 118);
-    weather_details_label = create_label(now, "Direct Wi-Fi · Mac not required", &lv_font_montserrat_14, COLOR_FOG);
+    weather_details_label = create_label(now, "Direct Wi-Fi / Mac not required", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(weather_details_label, LV_ALIGN_BOTTOM_LEFT, 18, -18);
 
     lv_obj_t *hours = create_card(page, 388, 52, 608, 230, 16);
@@ -803,7 +799,7 @@ static void finish_x_news_pull(void)
         lv_obj_set_style_text_color(x_news_status_label, COLOR_SIGNAL, 0);
         show_x_news_empty_activity(
             "Fetching latest AI + robotics news",
-            "Grok via Mac  ·  validating citations and timestamps\nThis can take a minute",
+            "Grok via Mac  /  validating citations and timestamps\nThis can take a minute",
             COLOR_MIST,
             true
         );
@@ -1065,6 +1061,9 @@ static void temperature_setting_tapped(lv_event_t *event)
     device_settings_save(&current_settings);
     refresh_settings_labels();
     if (latest_weather_valid) render_weather(&latest_weather_model);
+    else if (dashboard_weather_temperature_label != NULL) {
+        lv_label_set_text(dashboard_weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
+    }
     lv_display_trigger_activity(ui_display);
 }
 
@@ -1119,7 +1118,7 @@ static void wifi_setup_action(lv_event_t *event)
     const char *ssid = lv_textarea_get_text(wifi_ssid_input);
     const char *password = lv_textarea_get_text(wifi_password_input);
     if (strlen(ssid) == 0 || strlen(ssid) > 32 || strlen(password) < 8 || strlen(password) > 63) {
-        lv_label_set_text(wifi_setup_status, "SSID: 1-32 chars  ·  Password: 8-63 chars");
+        lv_label_set_text(wifi_setup_status, "SSID: 1-32 chars  /  Password: 8-63 chars");
         lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
         return;
     }
@@ -1136,7 +1135,7 @@ static void wifi_setup_action(lv_event_t *event)
 static void wifi_setup_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    lv_label_set_text(wifi_setup_status, "2.4 GHz WPA2/WPA3 Personal · password stays on board");
+    lv_label_set_text(wifi_setup_status, "2.4 GHz WPA2/WPA3 Personal / password stays on board");
     lv_obj_set_style_text_color(wifi_setup_status, COLOR_FOG, 0);
     lv_obj_remove_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(wifi_setup_overlay);
@@ -1195,7 +1194,7 @@ static void build_wifi_setup(lv_obj_t *screen)
     lv_obj_set_pos(title, 30, 20);
     wifi_setup_status = create_label(
         wifi_setup_overlay,
-        "2.4 GHz WPA2/WPA3 Personal · password stays on board",
+        "2.4 GHz WPA2/WPA3 Personal / password stays on board",
         &lv_font_montserrat_14,
         COLOR_FOG
     );
@@ -1590,8 +1589,6 @@ static void build_ui(void)
     set_clean_box(attention, COLOR_SLATE, 18);
     lv_obj_set_size(attention, 238, 410);
     lv_obj_set_pos(attention, 22, 8);
-    lv_obj_add_flag(attention, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(attention, attention_tapped, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *attention_title = lv_label_create(attention);
     lv_label_set_text(attention_title, "ATTENTION");
@@ -1614,12 +1611,35 @@ static void build_ui(void)
     lv_label_set_long_mode(mac_power_state_label, LV_LABEL_LONG_DOT);
     lv_obj_set_pos(mac_power_state_label, 20, 230);
 
-    attention_hint_label = lv_label_create(attention);
-    lv_label_set_text(attention_hint_label, "Tap to test touch\nFixed continue only");
-    lv_obj_set_style_text_color(attention_hint_label, COLOR_FOG, 0);
-    lv_obj_set_style_text_font(attention_hint_label, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_line_space(attention_hint_label, 8, 0);
-    lv_obj_align(attention_hint_label, LV_ALIGN_BOTTOM_LEFT, 20, -22);
+    lv_obj_t *weather_divider = lv_obj_create(attention);
+    set_clean_box(weather_divider, COLOR_STEEL, 0);
+    lv_obj_set_size(weather_divider, 198, 1);
+    lv_obj_set_pos(weather_divider, 20, 270);
+
+    dashboard_weather_icon_box = lv_obj_create(attention);
+    set_clean_box(dashboard_weather_icon_box, COLOR_STEEL, 14);
+    lv_obj_set_size(dashboard_weather_icon_box, 50, 50);
+    lv_obj_set_pos(dashboard_weather_icon_box, 20, 302);
+    dashboard_weather_icon_label = create_label(
+        dashboard_weather_icon_box,
+        LV_SYMBOL_GPS,
+        &lv_font_montserrat_20,
+        COLOR_FOG
+    );
+    lv_obj_center(dashboard_weather_icon_label);
+
+    dashboard_weather_location_label = create_label(attention, "WEATHER", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_width(dashboard_weather_location_label, 128);
+    lv_label_set_long_mode(dashboard_weather_location_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(dashboard_weather_location_label, 82, 282);
+    dashboard_weather_temperature_label = create_label(attention, "-- C", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_set_pos(dashboard_weather_temperature_label, 82, 307);
+    dashboard_weather_condition_label = create_label(attention, "Location needed", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_width(dashboard_weather_condition_label, 128);
+    lv_label_set_long_mode(dashboard_weather_condition_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(dashboard_weather_condition_label, 82, 345);
+    dashboard_weather_state_label = create_label(attention, "SETUP", &lv_font_montserrat_14, COLOR_AMBER);
+    lv_obj_set_pos(dashboard_weather_state_label, 20, 374);
 
     lv_obj_t *work_title = lv_label_create(tiles[0]);
     lv_label_set_text(work_title, "Active work");
@@ -1976,7 +1996,7 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         lv_label_set_text(x_news_titles[i], story->headline);
         lv_label_set_text(x_news_summaries[i], story->summary);
         char meta[48];
-        snprintf(meta, sizeof(meta), "%s · %s · %s", story->category, story->confidence, story->handle);
+        snprintf(meta, sizeof(meta), "%s / %s / %s", story->category, story->confidence, story->handle);
         lv_label_set_text(x_news_meta[i], meta);
     }
     char count[8];
@@ -2115,7 +2135,7 @@ void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t stat
     case DASHBOARD_X_NEWS_REFRESH_FETCHING:
         show_x_news_empty_activity(
             "Fetching latest AI + robotics news",
-            "Grok via Mac  ·  validating citations and timestamps\nThis can take a minute",
+            "Grok via Mac  /  validating citations and timestamps\nThis can take a minute",
             COLOR_MIST,
             true
         );
@@ -2156,7 +2176,7 @@ void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t stat
     default:
         show_x_news_empty_activity(
             "No verified update accepted",
-            "Nothing unsafe was cached  ·  pull down to try again later",
+            "Nothing unsafe was cached  /  pull down to try again later",
             COLOR_AMBER,
             false
         );
@@ -2179,6 +2199,16 @@ static const char *weather_condition(int code)
     return "Mixed conditions";
 }
 
+static const char *dashboard_weather_icon(int code)
+{
+    if (code == 0) return LV_SYMBOL_OK;
+    if (code <= 3 || code == 45 || code == 48) return LV_SYMBOL_IMAGE;
+    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return LV_SYMBOL_TINT;
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return LV_SYMBOL_BULLET;
+    if (code >= 95) return LV_SYMBOL_CHARGE;
+    return LV_SYMBOL_IMAGE;
+}
+
 static double display_temperature(float celsius)
 {
     return current_settings.use_fahrenheit ? ((double)celsius * 9.0 / 5.0) + 32.0 : (double)celsius;
@@ -2189,9 +2219,68 @@ static const char *temperature_unit(void)
     return current_settings.use_fahrenheit ? "F" : "C";
 }
 
+static void render_dashboard_weather(const weather_model_t *model)
+{
+    if (model == NULL || dashboard_weather_location_label == NULL) return;
+    const bool has_values = model->state == WEATHER_STATE_LIVE || model->state == WEATHER_STATE_STALE;
+    const char *location = model->location[0] != 0 ? model->location : "Weather";
+    const char *state = "OFFLINE";
+    const char *condition = "Forecast unavailable";
+    const char *icon = LV_SYMBOL_GPS;
+    lv_color_t color = COLOR_FOG;
+
+    if (model->state == WEATHER_STATE_LIVE) {
+        state = "LIVE";
+        color = COLOR_SIGNAL;
+    } else if (model->state == WEATHER_STATE_STALE) {
+        state = "STALE";
+        color = COLOR_AMBER;
+    } else if (model->state == WEATHER_STATE_LOADING) {
+        state = "UPDATING";
+        condition = "Fetching forecast";
+        icon = LV_SYMBOL_REFRESH;
+        color = COLOR_CYAN;
+    } else if (model->state == WEATHER_STATE_NOT_CONFIGURED) {
+        state = "SETUP";
+        condition = "Location needed";
+        color = COLOR_AMBER;
+    }
+
+    if (has_values) {
+        char temperature[24];
+        snprintf(
+            temperature,
+            sizeof(temperature),
+            "%.0f %s",
+            display_temperature(model->temperature_c),
+            temperature_unit()
+        );
+        lv_label_set_text(dashboard_weather_temperature_label, temperature);
+        condition = weather_condition(model->weather_code);
+        icon = dashboard_weather_icon(model->weather_code);
+    } else {
+        lv_label_set_text(
+            dashboard_weather_temperature_label,
+            current_settings.use_fahrenheit ? "-- F" : "-- C"
+        );
+    }
+    lv_label_set_text(dashboard_weather_location_label, location);
+    lv_label_set_text(dashboard_weather_icon_label, icon);
+    lv_label_set_text(dashboard_weather_condition_label, condition);
+    lv_label_set_text(dashboard_weather_state_label, state);
+    lv_obj_set_style_bg_color(dashboard_weather_icon_box, color, 0);
+    lv_obj_set_style_text_color(
+        dashboard_weather_icon_label,
+        model->state == WEATHER_STATE_LIVE ? COLOR_CARBON : COLOR_MIST,
+        0
+    );
+    lv_obj_set_style_text_color(dashboard_weather_state_label, color, 0);
+}
+
 static void render_weather(const weather_model_t *model)
 {
     if (model == NULL || weather_location_label == NULL) return;
+    render_dashboard_weather(model);
     lv_label_set_text(weather_location_label, model->location[0] != 0 ? model->location : "Weather");
 
     const char *state_text = "OFFLINE";

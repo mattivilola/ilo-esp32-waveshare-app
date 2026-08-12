@@ -28,8 +28,11 @@ final class MacWeatherLocationController: NSObject, ObservableObject, @preconcur
 
     let cache = WeatherLocationCache()
     private let manager = CLLocationManager()
+    private let geocoder = CLGeocoder()
     private let defaults: UserDefaults
-    private static let enabledKey = "ilo-board.weather-location-sharing.v1"
+    // City lookup adds a macOS reverse-geocoding step, so it requires fresh
+    // consent instead of silently reusing the earlier coordinate-only choice.
+    private static let enabledKey = "ilo-board.weather-location-sharing.v2"
 
     init(defaults: UserDefaults = .standard, autoRefresh: Bool = true) {
         self.defaults = defaults
@@ -63,6 +66,7 @@ final class MacWeatherLocationController: NSObject, ObservableObject, @preconcur
     func disable() {
         defaults.set(false, forKey: Self.enabledKey)
         manager.stopUpdatingLocation()
+        geocoder.cancelGeocode()
         state = .off
         detail = "The board has no Mac-provided weather location."
         Task { await cache.update(nil) }
@@ -74,14 +78,24 @@ final class MacWeatherLocationController: NSObject, ObservableObject, @preconcur
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard defaults.bool(forKey: Self.enabledKey), let location = locations.last else { return }
-        let weatherLocation = WeatherLocation(
-            name: "Mac location",
-            latitude: location.coordinate.latitude,
-            longitude: location.coordinate.longitude
-        )
-        state = .ready
-        detail = "About 1 km precision; sent only to the paired board."
-        Task { await cache.update(weatherLocation) }
+        let latitude = (location.coordinate.latitude * 100).rounded() / 100
+        let longitude = (location.coordinate.longitude * 100).rounded() / 100
+        let coarseLocation = CLLocation(latitude: latitude, longitude: longitude)
+        state = .requesting
+        detail = "Identifying the city from the approved coarse location."
+        Task {
+            let placemarks = try? await geocoder.reverseGeocodeLocation(coarseLocation)
+            guard defaults.bool(forKey: Self.enabledKey) else { return }
+            let placemark = placemarks?.first
+            let city = placemark?.locality
+                ?? placemark?.subAdministrativeArea
+                ?? placemark?.administrativeArea
+                ?? "Current location"
+            let weatherLocation = WeatherLocation(name: city, latitude: latitude, longitude: longitude)
+            state = .ready
+            detail = "\(weatherLocation.name) / about 1 km precision; sent only to the paired board."
+            await cache.update(weatherLocation)
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

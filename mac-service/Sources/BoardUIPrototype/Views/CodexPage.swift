@@ -17,9 +17,9 @@ struct CodexPage: View {
             }
             HStack(spacing: 16) {
                 VStack(spacing: 10) {
-                    codexRow(0, "Set up ESP32 Mac controller", "History available · eligible to continue", BoardPalette.fog)
-                    codexRow(1, "Package macOS companion", "Completed locally · tests passed", BoardPalette.signal)
-                    codexRow(2, "Design work pulse UX", "In progress · simulator data", BoardPalette.signal)
+                    codexRow(0, "Set up ESP32 Mac controller", "History available / eligible to continue", BoardPalette.fog)
+                    codexRow(1, "Package macOS companion", "Completed locally / tests passed", BoardPalette.signal)
+                    codexRow(2, "Design work pulse UX", "In progress / simulator data", BoardPalette.signal)
                 }
                 PulseCard {
                     VStack(alignment: .leading, spacing: 12) {
@@ -36,7 +36,7 @@ struct CodexPage: View {
                             .lineSpacing(5)
                         Spacer()
                         if selectedTask == 0 {
-                            Text(continueSent ? "SENT — CODEX IS CONTINUING" : (continueArmed ? "ARMED — TAP CONFIRM" : "HOLD, THEN CONFIRM"))
+                            Text(continueSent ? "SENT - CODEX IS CONTINUING" : (continueArmed ? "ARMED - TAP CONFIRM" : "HOLD, THEN CONFIRM"))
                                 .font(.board(11, weight: .bold))
                                 .foregroundStyle(continueSent ? BoardPalette.signal : BoardPalette.fog)
                             if continueArmed {
