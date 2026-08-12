@@ -38,8 +38,8 @@
         "width": { "const": 1024 },
         "height": { "const": 600 },
         "totalBytes": { "const": 1228800 },
-        "chunkBytes": { "const": 12288 },
-        "chunkCount": { "const": 100 }
+        "chunkBytes": { "const": 2880 },
+        "chunkCount": { "const": 427 }
       }
     },
     "chunk": {

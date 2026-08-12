@@ -38,7 +38,8 @@
 #define SCREEN_CAPTURE_WIDTH 1024
 #define SCREEN_CAPTURE_HEIGHT 600
 #define SCREEN_CAPTURE_BYTES (SCREEN_CAPTURE_WIDTH * SCREEN_CAPTURE_HEIGHT * 2)
-#define SCREEN_CAPTURE_CHUNK_BYTES 12288
+// Base64 plus the JSON envelope must fit CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN (4096 bytes).
+#define SCREEN_CAPTURE_CHUNK_BYTES 2880
 #define SCREEN_CAPTURE_REQUEST_ID_MAX 64
 
 typedef struct {
@@ -257,7 +258,12 @@ static bool tls_write_all(esp_tls_t *tls, const uint8_t *data, size_t size)
     size_t sent = 0;
     while (sent < size) {
         ssize_t result = esp_tls_conn_write(tls, data + sent, size - sent);
+        if (result == ESP_TLS_ERR_SSL_WANT_READ || result == ESP_TLS_ERR_SSL_WANT_WRITE) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
         if (result <= 0) {
+            ESP_LOGW(TAG, "TLS write failed after %u/%u bytes: %d", (unsigned)sent, (unsigned)size, (int)result);
             return false;
         }
         sent += (size_t)result;
@@ -270,6 +276,10 @@ static bool tls_read_all(esp_tls_t *tls, uint8_t *data, size_t size)
     size_t received = 0;
     while (received < size) {
         ssize_t result = esp_tls_conn_read(tls, data + received, size - received);
+        if (result == ESP_TLS_ERR_SSL_WANT_READ || result == ESP_TLS_ERR_SSL_WANT_WRITE) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+            continue;
+        }
         if (result <= 0) {
             return false;
         }
@@ -448,7 +458,7 @@ static bool send_capture_chunk(
     size_t encoded_size = 0;
     int status = mbedtls_base64_encode(
         (unsigned char *)encoded,
-        encoded_capacity - 1,
+        encoded_capacity,
         &encoded_size,
         pixels,
         size
@@ -485,8 +495,10 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
     cJSON *height = cJSON_GetObjectItemCaseSensitive(message, "height");
     const char *request_id_value = cJSON_IsString(request_id) ? request_id->valuestring : NULL;
     if (!valid_request_id(request_id_value)) {
+        ESP_LOGW(TAG, "Capture request has an invalid request ID");
         return false;
     }
+    ESP_LOGI(TAG, "Capture request %s received", request_id_value);
     if (!json_number_equals(version, SCREEN_CAPTURE_VERSION)
         || !cJSON_IsString(format) || strcmp(format->valuestring, "rgb565le") != 0
         || !json_number_equals(width, SCREEN_CAPTURE_WIDTH)
@@ -506,6 +518,7 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
     size_t total_bytes = 0;
     esp_err_t capture_status = dashboard_ui_capture_rgb565(&pixels, &total_bytes);
     if (capture_status != ESP_OK || pixels == NULL || total_bytes != SCREEN_CAPTURE_BYTES) {
+        ESP_LOGW(TAG, "Framebuffer capture unavailable: %s (%u bytes)", esp_err_to_name(capture_status), (unsigned)total_bytes);
         if (pixels != NULL) {
             free(pixels);
         }
@@ -523,7 +536,10 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
     uint8_t digest[32] = {0};
     bool ok = mbedtls_sha256(pixels, total_bytes, digest, 0) == 0
         && send_capture_begin(tls, request_id_value, total_bytes);
-    for (size_t offset = 0, sequence = 0; ok && offset < total_bytes; ++sequence) {
+    const size_t chunk_count = (total_bytes + SCREEN_CAPTURE_CHUNK_BYTES - 1) / SCREEN_CAPTURE_CHUNK_BYTES;
+    ESP_LOGI(TAG, "Sending %u capture bytes in %u chunks", (unsigned)total_bytes, (unsigned)chunk_count);
+    size_t sequence = 0;
+    for (size_t offset = 0; ok && offset < total_bytes; ++sequence) {
         size_t chunk_size = total_bytes - offset;
         if (chunk_size > SCREEN_CAPTURE_CHUNK_BYTES) {
             chunk_size = SCREEN_CAPTURE_CHUNK_BYTES;
@@ -539,6 +555,11 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
     digest_hex[64] = 0;
     if (ok) {
         ok = send_capture_result(tls, request_id_value, "ok", NULL, NULL, total_bytes, digest_hex);
+    }
+    if (ok) {
+        ESP_LOGI(TAG, "Capture request %s completed", request_id_value);
+    } else {
+        ESP_LOGW(TAG, "Capture request %s failed at chunk %u/%u", request_id_value, (unsigned)sequence, (unsigned)chunk_count);
     }
     free(pixels);
     return ok;

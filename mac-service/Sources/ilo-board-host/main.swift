@@ -108,7 +108,7 @@ struct ILOBoardHostCommand {
             defer { server.stop() }
             let capture = try await waitForCapture(events: events, timeoutSeconds: timeout)
             let png = try ScreenCapturePNGEncoder.encode(capture)
-            let options: Data.WritingOptions = force ? .atomic : [.atomic, .withoutOverwriting]
+            let options: Data.WritingOptions = force ? .atomic : .withoutOverwriting
             try png.write(to: outputURL, options: options)
             print("Saved authenticated 1024x600 board capture: \(outputURL.path)")
         case "doctor":

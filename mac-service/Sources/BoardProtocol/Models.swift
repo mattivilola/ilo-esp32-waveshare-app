@@ -5,7 +5,7 @@ public let boardProtocolMaximumFrameBytes = 65_536
 public let screenCaptureProtocolVersion = 1
 public let screenCaptureWidth = 1_024
 public let screenCaptureHeight = 600
-public let screenCaptureMaximumChunkBytes = 12_288
+public let screenCaptureMaximumChunkBytes = 2_880
 public let screenCaptureRGB565Bytes = screenCaptureWidth * screenCaptureHeight * 2
 public let screenCaptureChunkCount =
     (screenCaptureRGB565Bytes + screenCaptureMaximumChunkBytes - 1) / screenCaptureMaximumChunkBytes

@@ -110,6 +110,8 @@ private func beginMessage(chunkBytes: Int = screenCaptureMaximumChunkBytes) -> S
         data: Data(repeating: 0xff, count: screenCaptureMaximumChunkBytes)
     )
     let payload = try ProtocolJSON.encoder().encode(message)
+    let boardBase64Bytes = ((screenCaptureMaximumChunkBytes + 2) / 3) * 4
+    #expect(boardBase64Bytes + 256 <= 4_096)
     #expect(payload.count < boardProtocolMaximumFrameBytes)
     #expect(throws: Never.self) { try FrameEncoder.encode(payload) }
 }

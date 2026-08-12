@@ -215,9 +215,15 @@ private final class BoardConnection: @unchecked Sendable {
             guard let self else { return }
             switch state {
             case .ready:
+                self.captureLog("TLS connection ready")
                 self.onReady()
                 self.receive()
-            case .failed, .cancelled:
+            case let .failed(error):
+                self.captureLog("Connection failed: \(error.localizedDescription)")
+                self.finishCapture(.failure(.connectionClosed))
+                self.onClose(ObjectIdentifier(self))
+            case .cancelled:
+                self.captureLog("Connection closed")
                 self.finishCapture(.failure(.connectionClosed))
                 self.onClose(ObjectIdentifier(self))
             default:
@@ -247,6 +253,7 @@ private final class BoardConnection: @unchecked Sendable {
                 }
             }
             if complete || error != nil {
+                self.captureLog("Peer ended the capture stream\(error.map { ": \($0.localizedDescription)" } ?? "")")
                 self.connection.cancel()
             } else {
                 self.receive()
@@ -275,14 +282,17 @@ private final class BoardConnection: @unchecked Sendable {
                 return
             }
             helloAccepted = true
+            captureLog("Board hello accepted")
             send(HelloAcknowledgement())
         case "subscribe":
             guard helloAccepted else {
                 send(ErrorMessage(code: "helloRequired", message: "Send hello before subscribing."))
                 return
             }
+            captureLog("Board subscribed; requesting framebuffer")
             beginSubscription()
         case "screenCaptureBegin":
+            captureLog("Framebuffer transfer started")
             handleCaptureMessage(payload, as: ScreenCaptureBeginMessage.self) { assembler, message in
                 try assembler.begin(message)
                 return nil
@@ -290,9 +300,14 @@ private final class BoardConnection: @unchecked Sendable {
         case "screenCaptureChunk":
             handleCaptureMessage(payload, as: ScreenCaptureChunkMessage.self) { assembler, message in
                 try assembler.append(message)
+                let received = message.sequence + 1
+                if received == 1 || received.isMultiple(of: 100) {
+                    captureLog("Received capture chunk \(received)/\(screenCaptureChunkCount)")
+                }
                 return nil
             }
         case "screenCaptureResult":
+            captureLog("Framebuffer transfer result received")
             handleCaptureMessage(payload, as: ScreenCaptureResultMessage.self) { assembler, message in
                 try assembler.finish(message)
             }
@@ -300,6 +315,12 @@ private final class BoardConnection: @unchecked Sendable {
             handleXNewsRefreshRequest(payload)
         default:
             send(ErrorMessage(code: "unsupportedCapability", message: "Protocol v1 does not support this capability."))
+        }
+    }
+
+    private func captureLog(_ message: String) {
+        if captureRequest != nil {
+            print("[capture] \(message)")
         }
     }
 
