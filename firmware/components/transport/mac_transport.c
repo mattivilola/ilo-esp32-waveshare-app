@@ -41,6 +41,7 @@
 // Base64 plus the JSON envelope must fit CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN (4096 bytes).
 #define SCREEN_CAPTURE_CHUNK_BYTES 2880
 #define SCREEN_CAPTURE_REQUEST_ID_MAX 64
+#define TLS_IO_PROGRESS_TIMEOUT_MS 2000
 
 typedef struct {
     char wifi_ssid[WIFI_SSID_MAX];
@@ -256,9 +257,14 @@ static mac_endpoint_t endpoint_for_connection(const mac_transport_config_t *conf
 static bool tls_write_all(esp_tls_t *tls, const uint8_t *data, size_t size)
 {
     size_t sent = 0;
+    TickType_t last_progress = xTaskGetTickCount();
     while (sent < size) {
         ssize_t result = esp_tls_conn_write(tls, data + sent, size - sent);
         if (result == ESP_TLS_ERR_SSL_WANT_READ || result == ESP_TLS_ERR_SSL_WANT_WRITE) {
+            if ((xTaskGetTickCount() - last_progress) >= pdMS_TO_TICKS(TLS_IO_PROGRESS_TIMEOUT_MS)) {
+                ESP_LOGW(TAG, "TLS write made no progress for %u ms", TLS_IO_PROGRESS_TIMEOUT_MS);
+                return false;
+            }
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
         }
@@ -267,6 +273,7 @@ static bool tls_write_all(esp_tls_t *tls, const uint8_t *data, size_t size)
             return false;
         }
         sent += (size_t)result;
+        last_progress = xTaskGetTickCount();
     }
     return true;
 }
@@ -274,9 +281,14 @@ static bool tls_write_all(esp_tls_t *tls, const uint8_t *data, size_t size)
 static bool tls_read_all(esp_tls_t *tls, uint8_t *data, size_t size)
 {
     size_t received = 0;
+    TickType_t last_progress = xTaskGetTickCount();
     while (received < size) {
         ssize_t result = esp_tls_conn_read(tls, data + received, size - received);
         if (result == ESP_TLS_ERR_SSL_WANT_READ || result == ESP_TLS_ERR_SSL_WANT_WRITE) {
+            if ((xTaskGetTickCount() - last_progress) >= pdMS_TO_TICKS(TLS_IO_PROGRESS_TIMEOUT_MS)) {
+                ESP_LOGI(TAG, "TLS peer stopped responding; reconnecting");
+                return false;
+            }
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
         }
@@ -284,6 +296,7 @@ static bool tls_read_all(esp_tls_t *tls, uint8_t *data, size_t size)
             return false;
         }
         received += (size_t)result;
+        last_progress = xTaskGetTickCount();
     }
     return true;
 }
