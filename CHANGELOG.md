@@ -2,6 +2,12 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.6 - 2026-08-12
+
+### Changed
+- Redesign Mac companion dashboard
+
+
 ## 0.1.5 - 2026-08-12
 
 ### Added
