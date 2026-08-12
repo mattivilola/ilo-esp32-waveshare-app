@@ -112,7 +112,7 @@ The first LVGL port now mirrors the adaptive four/five-page structure with `lv_t
 
 ## macOS menu-bar companion
 
-The Mac companion uses a SwiftUI `MenuBarExtra` with window-style content and intentionally stays out of the Dock during this development phase. Its compact 420×540-point dashboard mirrors the board's status hierarchy without copying the fixed dark palette: it uses native macOS material, semantic text colors, and state tints so Light and Dark appearances both remain legible. Overview keeps connection health, device facts, and quick controls visible; Features contains the complete firmware and opt-in controls; Activity keeps the bounded connection log available without making the default panel taller.
+The Mac companion uses a SwiftUI `MenuBarExtra` with window-style content and intentionally stays out of the Dock during this development phase. Its compact 420×580-point dashboard mirrors the board's status hierarchy without copying the fixed dark palette: it uses native macOS material, semantic text colors, and state tints so Light and Dark appearances both remain legible. Overview keeps connection health, device facts, and quick controls visible; Features contains the complete firmware and opt-in controls; Activity keeps the bounded connection log available without making the default panel taller.
 
 The compact surface shows:
 
