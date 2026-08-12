@@ -43,6 +43,7 @@
 #define SCREEN_CAPTURE_CHUNK_BYTES 2880
 #define SCREEN_CAPTURE_REQUEST_ID_MAX 64
 #define TLS_IO_PROGRESS_TIMEOUT_MS 2000
+#define CODEX_TASK_ID_MAX 80
 
 typedef struct {
     char wifi_ssid[WIFI_SSID_MAX];
@@ -60,6 +61,12 @@ static bool mdns_available;
 static portMUX_TYPE refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool transport_online;
 static bool x_news_refresh_requested;
+static bool codex_continue_requested;
+static bool codex_continue_in_flight;
+static char codex_continue_task_id[CODEX_TASK_ID_MAX + 1];
+static char codex_continue_request_id[25];
+
+static bool json_number_equals(cJSON *item, int expected);
 
 typedef struct {
     char address[HOST_ADDRESS_MAX];
@@ -329,6 +336,69 @@ static bool take_x_news_refresh_request(void)
     x_news_refresh_requested = false;
     portEXIT_CRITICAL(&refresh_lock);
     return requested;
+}
+
+static bool take_codex_continue_request(char *task_id, size_t task_id_size, char *request_id, size_t request_id_size)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool requested = codex_continue_requested;
+    if (requested) {
+        strlcpy(task_id, codex_continue_task_id, task_id_size);
+        strlcpy(request_id, codex_continue_request_id, request_id_size);
+        codex_continue_requested = false;
+        codex_continue_in_flight = true;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    return requested;
+}
+
+static bool send_codex_continue_request(esp_tls_t *tls, const char *task_id, const char *request_id)
+{
+    cJSON *request = cJSON_CreateObject();
+    if (request == NULL) return false;
+    cJSON_AddStringToObject(request, "type", "codexContinueRequest");
+    cJSON_AddNumberToObject(request, "version", 1);
+    cJSON_AddStringToObject(request, "requestID", request_id);
+    cJSON_AddStringToObject(request, "taskID", task_id);
+    cJSON_AddStringToObject(request, "action", "continue");
+    bool ok = send_json(tls, request);
+    cJSON_Delete(request);
+    if (ok) {
+        ESP_LOGI(TAG, "Fixed Codex continue request sent to paired Mac");
+    }
+    return ok;
+}
+
+static void handle_codex_continue_status(cJSON *message)
+{
+    cJSON *version = cJSON_GetObjectItemCaseSensitive(message, "version");
+    cJSON *request_id = cJSON_GetObjectItemCaseSensitive(message, "requestID");
+    cJSON *status = cJSON_GetObjectItemCaseSensitive(message, "status");
+    if (!json_number_equals(version, 1) || !cJSON_IsString(request_id) || !cJSON_IsString(status)) return;
+
+    bool matches = false;
+    portENTER_CRITICAL(&refresh_lock);
+    matches = codex_continue_in_flight
+        && strcmp(request_id->valuestring, codex_continue_request_id) == 0;
+    if (matches) codex_continue_in_flight = false;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (!matches) {
+        ESP_LOGW(TAG, "Ignoring unmatched Codex continue response");
+        return;
+    }
+
+    dashboard_codex_continue_state_t state = DASHBOARD_CODEX_CONTINUE_FAILED;
+    if (strcmp(status->valuestring, "accepted") == 0) {
+        state = DASHBOARD_CODEX_CONTINUE_ACCEPTED;
+    } else if (strcmp(status->valuestring, "unavailable") == 0) {
+        state = DASHBOARD_CODEX_CONTINUE_UNAVAILABLE;
+    } else if (strcmp(status->valuestring, "busy") == 0) {
+        state = DASHBOARD_CODEX_CONTINUE_BUSY;
+    } else if (strcmp(status->valuestring, "rejected") == 0) {
+        state = DASHBOARD_CODEX_CONTINUE_REJECTED;
+    }
+    ESP_LOGI(TAG, "Codex continue status: %s", status->valuestring);
+    dashboard_ui_set_codex_continue_state(state);
 }
 
 static bool send_x_news_refresh_request(esp_tls_t *tls)
@@ -790,6 +860,17 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
         target->state = task_state(cJSON_IsString(state) ? state->valuestring : NULL);
         target->attention = attention(cJSON_IsString(attention_item) ? attention_item->valuestring : NULL);
     }
+    cJSON *capabilities = cJSON_GetObjectItemCaseSensitive(snapshot, "capabilities");
+    if (cJSON_IsArray(capabilities)) {
+        cJSON *capability = NULL;
+        cJSON_ArrayForEach(capability, capabilities) {
+            if (cJSON_IsString(capability)
+                && strcmp(capability->valuestring, "tasks.continue.fixed") == 0) {
+                model->codex_continue_enabled = true;
+                break;
+            }
+        }
+    }
     cJSON *news_feed = cJSON_GetObjectItemCaseSensitive(snapshot, "newsFeed");
     cJSON *x_news_enabled = cJSON_GetObjectItemCaseSensitive(snapshot, "xNewsEnabled");
     model->x_news_enabled = cJSON_IsTrue(x_news_enabled)
@@ -849,6 +930,7 @@ static void transport_task(void *argument)
             cJSON *capabilities = cJSON_AddArrayToObject(hello, "capabilities");
             if (capabilities != NULL) {
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.read"));
+                cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.continue.fixed"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("display.capture.rgb565"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("xNews.refresh.request"));
             }
@@ -871,6 +953,17 @@ static void transport_task(void *argument)
                 portEXIT_CRITICAL(&refresh_lock);
                 for (;;) {
                     if (take_x_news_refresh_request() && !send_x_news_refresh_request(tls)) break;
+                    char continue_task_id[CODEX_TASK_ID_MAX + 1];
+                    char continue_request_id[sizeof(codex_continue_request_id)];
+                    if (take_codex_continue_request(
+                            continue_task_id,
+                            sizeof(continue_task_id),
+                            continue_request_id,
+                            sizeof(continue_request_id)
+                        ) && !send_codex_continue_request(tls, continue_task_id, continue_request_id)) {
+                        dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
+                        break;
+                    }
                     int data_ready = wait_for_tls_data(tls, 250);
                     if (data_ready < 0) break;
                     if (data_ready == 0) continue;
@@ -890,6 +983,12 @@ static void transport_task(void *argument)
                         cJSON_Delete(message);
                         continue;
                     }
+                    if (cJSON_IsString(message_type)
+                        && strcmp(message_type->valuestring, "codexContinueStatus") == 0) {
+                        handle_codex_continue_status(message);
+                        cJSON_Delete(message);
+                        continue;
+                    }
                     dashboard_model_t model;
                     if (parse_snapshot(message, &model) && model_callback != NULL) {
                         model_callback(&model);
@@ -901,7 +1000,13 @@ static void transport_task(void *argument)
         portENTER_CRITICAL(&refresh_lock);
         transport_online = false;
         x_news_refresh_requested = false;
+        bool continue_was_pending = codex_continue_requested || codex_continue_in_flight;
+        codex_continue_requested = false;
+        codex_continue_in_flight = false;
         portEXIT_CRITICAL(&refresh_lock);
+        if (continue_was_pending) {
+            dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
+        }
         dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
         esp_tls_conn_destroy(tls);
         vTaskDelay(pdMS_TO_TICKS(5000));
@@ -915,6 +1020,39 @@ bool mac_transport_request_x_news_refresh(void)
     if (accepted) x_news_refresh_requested = true;
     portEXIT_CRITICAL(&refresh_lock);
     ESP_LOGI(TAG, "X News refresh gesture %s", accepted ? "queued" : "not queued");
+    return accepted;
+}
+
+bool mac_transport_request_codex_continue(const char *task_id)
+{
+    if (task_id == NULL) return false;
+    size_t task_id_size = strlen(task_id);
+    if (task_id_size == 0 || task_id_size > CODEX_TASK_ID_MAX) return false;
+    for (size_t index = 0; index < task_id_size; ++index) {
+        char character = task_id[index];
+        if (!((character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z')
+            || (character >= '0' && character <= '9')
+            || character == '-')) {
+            return false;
+        }
+    }
+
+    portENTER_CRITICAL(&refresh_lock);
+    bool accepted = transport_online && !codex_continue_requested && !codex_continue_in_flight;
+    if (accepted) {
+        strlcpy(codex_continue_task_id, task_id, sizeof(codex_continue_task_id));
+        snprintf(
+            codex_continue_request_id,
+            sizeof(codex_continue_request_id),
+            "board-%08lx-%08lx",
+            (unsigned long)esp_random(),
+            (unsigned long)esp_random()
+        );
+        codex_continue_requested = true;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    ESP_LOGI(TAG, "Codex continue action %s", accepted ? "queued" : "not queued");
     return accepted;
 }
 

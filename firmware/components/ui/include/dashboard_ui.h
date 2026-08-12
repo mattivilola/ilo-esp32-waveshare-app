@@ -31,6 +31,17 @@ typedef enum {
 
 typedef bool (*dashboard_x_news_refresh_callback_t)(void);
 
+typedef enum {
+    DASHBOARD_CODEX_CONTINUE_SENDING,
+    DASHBOARD_CODEX_CONTINUE_ACCEPTED,
+    DASHBOARD_CODEX_CONTINUE_UNAVAILABLE,
+    DASHBOARD_CODEX_CONTINUE_BUSY,
+    DASHBOARD_CODEX_CONTINUE_REJECTED,
+    DASHBOARD_CODEX_CONTINUE_FAILED,
+} dashboard_codex_continue_state_t;
+
+typedef bool (*dashboard_codex_continue_callback_t)(const char *task_id);
+
 esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd);
 esp_err_t dashboard_ui_present_boot(void);
 void dashboard_ui_set_model(const dashboard_model_t *model);
@@ -38,6 +49,8 @@ void dashboard_ui_set_connection_state(dashboard_connection_state_t state);
 void dashboard_ui_set_weather(const weather_model_t *model);
 void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_t callback);
 void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t state);
+void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_t callback);
+void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t state);
 esp_err_t dashboard_ui_capture_rgb565(uint8_t **pixels, size_t *size);
 
 #ifdef __cplusplus

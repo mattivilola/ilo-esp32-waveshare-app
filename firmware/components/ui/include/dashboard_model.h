@@ -59,6 +59,7 @@ typedef struct {
     dashboard_mac_power_state_t mac_power_state;
     uint8_t task_count;
     dashboard_task_t tasks[DASHBOARD_MAX_TASKS];
+    bool codex_continue_enabled;
     bool x_news_enabled;
     uint8_t news_count;
     dashboard_news_story_t news[DASHBOARD_MAX_NEWS];
