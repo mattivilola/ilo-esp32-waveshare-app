@@ -28,13 +28,11 @@ struct CodexPage: View {
                 PulseCard {
                     VStack(alignment: .leading, spacing: 12) {
                         SectionLabel(title: "Related chat")
-                        Text(selectedTask == 0 ? "Set up ESP32 Mac controller" : "Action unavailable")
+                        Text(selectedTaskTitle)
                             .font(.board(19, weight: .bold))
                             .foregroundStyle(BoardPalette.mist)
                             .lineLimit(2)
-                        Text(selectedTask == 0
-                            ? "The Mac constructs exactly: Please continue."
-                            : "Only idle recent tasks can use the fixed continue action.")
+                        Text(selectedTaskDetail)
                             .font(.board(13))
                             .foregroundStyle(BoardPalette.fog)
                             .lineSpacing(5)
@@ -86,7 +84,7 @@ struct CodexPage: View {
                         .foregroundStyle(BoardPalette.fog)
                 }
                 Spacer()
-                Text(index == 0 ? "IDLE" : "ACTIVE")
+                Text(taskStatus(index))
                     .font(.board(10, weight: .bold))
                     .tracking(0.7)
                     .foregroundStyle(tint)
@@ -95,5 +93,29 @@ struct CodexPage: View {
         }
         .buttonStyle(.plain)
         .frame(height: 106)
+    }
+
+    private var selectedTaskTitle: String {
+        switch selectedTask {
+        case 1: "Package macOS companion"
+        case 2: "Design work pulse UX"
+        default: "Set up ESP32 Mac controller"
+        }
+    }
+
+    private var selectedTaskDetail: String {
+        switch selectedTask {
+        case 1: "Completed locally / tests passed. Continue is unavailable."
+        case 2: "Plan review needed on Mac. Continue is unavailable."
+        default: "The Mac constructs exactly: Please continue."
+        }
+    }
+
+    private func taskStatus(_ index: Int) -> String {
+        switch index {
+        case 1: "DONE"
+        case 2: "REVIEW"
+        default: "IDLE"
+        }
     }
 }
