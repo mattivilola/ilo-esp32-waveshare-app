@@ -3,6 +3,7 @@
 #include "nvs_flash.h"
 
 #include "board_waveshare_5.h"
+#include "clock_sync.h"
 #include "dashboard_model.h"
 #include "dashboard_ui.h"
 #include "mac_transport.h"
@@ -10,6 +11,18 @@
 #include "weather_client.h"
 
 static const char *TAG = "ilo_board";
+
+static void handle_mac_model(const dashboard_model_t *model)
+{
+    if (model != nullptr && model->weather_location_available) {
+        weather_client_update_location(
+            model->weather_location_name,
+            model->weather_latitude,
+            model->weather_longitude
+        );
+    }
+    dashboard_ui_set_model(model);
+}
 
 extern "C" void app_main()
 {
@@ -28,6 +41,8 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(board_waveshare_5_init());
     ESP_ERROR_CHECK(dashboard_ui_init(board_waveshare_5_lcd()));
     dashboard_ui_set_x_news_refresh_callback(mac_transport_request_x_news_refresh);
+    dashboard_ui_set_wifi_update_callback(mac_transport_update_wifi);
+    dashboard_ui_set_wifi_scan_callback(mac_transport_scan_wifi);
     dashboard_ui_set_codex_continue_callback(mac_transport_request_codex_continue);
 
     dashboard_model_t initial = dashboard_model_demo();
@@ -37,10 +52,22 @@ extern "C" void app_main()
              (long long)((esp_timer_get_time() - startup_begin_us) / 1000));
     ESP_ERROR_CHECK(ota_policy_confirm_after_stability());
 
-    if (!mac_transport_start(dashboard_ui_set_model)) {
-        ESP_LOGW(TAG, "Wireless host is not configured; keeping the offline demo snapshot");
+    if (!mac_transport_start(handle_mac_model)) {
+        bool wifi_started = mac_transport_start_wifi_only();
+        ESP_LOGW(TAG, "Mac host is not configured; keeping the offline demo snapshot");
         dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_NOT_CONFIGURED);
-    } else if (!weather_client_start(dashboard_ui_set_weather)) {
-        ESP_LOGW(TAG, "Direct weather is not configured yet");
+        if (wifi_started && !clock_sync_start()) {
+            ESP_LOGW(TAG, "Clock synchronization could not be started");
+        }
+        if (!weather_client_start(dashboard_ui_set_weather)) {
+            ESP_LOGW(TAG, "Weather client could not be started");
+        }
+    } else {
+        if (!clock_sync_start()) {
+            ESP_LOGW(TAG, "Clock synchronization could not be started");
+        }
+        if (!weather_client_start(dashboard_ui_set_weather)) {
+            ESP_LOGW(TAG, "Direct weather is not configured yet");
+        }
     }
 }

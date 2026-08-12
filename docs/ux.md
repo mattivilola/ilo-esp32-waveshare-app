@@ -52,7 +52,7 @@ On cold boot, the backlight stays off until the first real Dashboard frame is re
 
 Codex shows sanitized task names, coarse state, last update, and attention type. It also keeps the capability boundary visible: history from a separately launched App Server is not presented as authoritative live Desktop state. Full prompts, transcripts, paths, commands, diffs, and credentials do not belong on the board.
 
-When actions are introduced later, “approval needed” must never imply that the board has already been authorized to approve it. A separate design will require explicit action text, origin, consequence, expiry, hold-to-confirm, and a Mac-side audit trail.
+The fixed continue action is deliberately distinct from approval: tapping a task shows the exact `Please continue.` consequence, holding only arms it, and a separate tap confirms it. “Approval needed” never implies that the board can approve. Any future approval design still requires explicit action text, origin, consequence, expiry, hold-to-confirm, and a Mac-side audit trail.
 
 ## Weather
 
@@ -75,7 +75,7 @@ The first device-manageable preferences are:
 
 Settings reports whether X News is Mac-enabled, but cannot grant Grok consent or change its paid-tool schedule.
 
-Reboot, pairing reset, erase, and update installation require a separate confirmation surface. Wi-Fi SSID/password entry remains in the secure USB/macOS flow initially; a five-inch touch keyboard is poor credential UX and easier to shoulder-surf.
+Reboot, pairing reset, erase, and update installation require a separate confirmation surface. Wi-Fi can be changed locally from Settings with a masked touch keyboard; the flow clearly warns about shoulder-surfing, validates WPA2/WPA3 Personal credential lengths, and retains USB provisioning as the recovery route.
 
 ## Screensaver and power
 

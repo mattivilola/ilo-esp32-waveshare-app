@@ -29,6 +29,7 @@ final class HostStatusStore: ObservableObject {
     private let xNewsFeatureController: XNewsFeatureController
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
     private let xNewsFeedCache: XNewsFeedCache
+    private let weatherLocationSource: any WeatherLocationProviding
     private let usesCompanionCredential: Bool
     private var powerMonitorTask: Task<Void, Never>?
     private var xNewsMonitorTask: Task<Void, Never>?
@@ -41,7 +42,9 @@ final class HostStatusStore: ObservableObject {
         xNewsFeatureController: XNewsFeatureController = XNewsFeatureController(),
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
         xNewsFeedCache: XNewsFeedCache = XNewsFeedCache(),
-        usesCompanionCredential: Bool = KeychainPSKStore.shouldUseCompanionCredential
+        weatherLocationSource: any WeatherLocationProviding = NoWeatherLocationSource(),
+        usesCompanionCredential: Bool = KeychainPSKStore.shouldUseCompanionCredential,
+        autoStart: Bool = true
     ) {
         self.defaults = defaults
         self.powerStatusSource = powerStatusSource
@@ -49,6 +52,7 @@ final class HostStatusStore: ObservableObject {
         self.xNewsFeatureController = xNewsFeatureController
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.xNewsFeedCache = xNewsFeedCache
+        self.weatherLocationSource = weatherLocationSource
         self.usesCompanionCredential = usesCompanionCredential
         historyLog = ConnectionHistoryLog.decode(defaults.data(forKey: Self.historyDefaultsKey))
         connectionHistory = historyLog.entries
@@ -57,6 +61,7 @@ final class HostStatusStore: ObservableObject {
         xNewsStatus = xNewsFeatureController.status()
         xNewsNotice = nil
         pairingAuthorizationNotice = nil
+        guard autoStart else { return }
         start()
         powerMonitorTask = Task { [weak self, powerStatusSource] in
             while !Task.isCancelled {
@@ -259,6 +264,7 @@ final class HostStatusStore: ObservableObject {
             source: CodexHistoryTaskSource(continueFeature: codexContinueFeature),
             powerStatusSource: powerStatusSource,
             xNewsRefreshCoordinator: xNewsRefreshCoordinator,
+            weatherLocationSource: weatherLocationSource,
             companionVersion: AppReleaseInfo(infoDictionary: Bundle.main.infoDictionary).marketingVersion,
             eventHandler: { [weak self] event in
                 Task { @MainActor in self?.handle(event) }

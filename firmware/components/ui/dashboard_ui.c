@@ -114,6 +114,15 @@ static lv_obj_t *settings_temperature_value;
 static lv_obj_t *settings_focus_value;
 static lv_obj_t *settings_x_news_value;
 static lv_obj_t *settings_versions_value;
+static lv_obj_t *wifi_setup_overlay;
+static lv_obj_t *wifi_ssid_input;
+static lv_obj_t *wifi_password_input;
+static lv_obj_t *wifi_keyboard;
+static lv_obj_t *wifi_setup_status;
+static dashboard_wifi_update_callback_t wifi_update_callback;
+static dashboard_wifi_scan_callback_t wifi_scan_callback;
+static lv_obj_t *wifi_network_buttons[4];
+static char wifi_network_ssids[4][33];
 static lv_obj_t *weather_location_label;
 static lv_obj_t *weather_state_label;
 static lv_obj_t *weather_temperature_label;
@@ -422,7 +431,6 @@ static void finish_boot_animation(void)
 
     lv_anim_delete(work_pulse_rail, set_boot_rail_width);
     if (boot_beacon_icon != NULL) {
-        lv_anim_delete(boot_beacon_icon, set_boot_icon_scale);
         lv_anim_delete(boot_beacon_icon, set_boot_icon_opacity);
     }
     if (boot_ring_inner != NULL) {
@@ -456,6 +464,10 @@ static void boot_animation_completed(lv_anim_t *animation)
 static void start_boot_animation(void)
 {
     boot_animation_active = true;
+    // Keep the ARGB icon at its native size. Continuously scaling it forces a
+    // costly software transform on every RGB565 frame and can starve IDLE1.
+    lv_image_set_scale(boot_beacon_icon, 256);
+    lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_COVER, 0);
 
     lv_anim_t animation;
     lv_anim_init(&animation);
@@ -466,26 +478,6 @@ static void start_boot_animation(void)
     lv_anim_set_reverse_delay(&animation, 80);
     lv_anim_set_reverse_duration(&animation, 160);
     lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
-    lv_anim_start(&animation);
-
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, boot_beacon_icon);
-    lv_anim_set_exec_cb(&animation, set_boot_icon_scale);
-    lv_anim_set_values(&animation, 320, 512);
-    lv_anim_set_duration(&animation, 220);
-    lv_anim_set_delay(&animation, 15);
-    lv_anim_set_path_cb(&animation, lv_anim_path_overshoot);
-    lv_anim_start(&animation);
-
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, boot_beacon_icon);
-    lv_anim_set_exec_cb(&animation, set_boot_icon_opacity);
-    lv_anim_set_values(&animation, LV_OPA_TRANSP, LV_OPA_COVER);
-    lv_anim_set_duration(&animation, 100);
-    lv_anim_set_delay(&animation, 15);
-    lv_anim_set_reverse_delay(&animation, 225);
-    lv_anim_set_reverse_duration(&animation, 140);
-    lv_anim_set_completed_cb(&animation, boot_animation_completed);
     lv_anim_start(&animation);
 
     lv_anim_init(&animation);
@@ -534,6 +526,7 @@ static void start_boot_animation(void)
     lv_anim_set_delay(&animation, 70);
     lv_anim_set_reverse_delay(&animation, 35);
     lv_anim_set_reverse_duration(&animation, 160);
+    lv_anim_set_completed_cb(&animation, boot_animation_completed);
     lv_anim_start(&animation);
 
     static const uint32_t particle_delays[3] = { 95, 130, 160 };
@@ -1097,6 +1090,175 @@ static void sleep_now_tapped(lv_event_t *event)
     }
 }
 
+static void wifi_input_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_FOCUSED) return;
+    lv_obj_t *input = lv_event_get_target_obj(event);
+    lv_keyboard_set_textarea(wifi_keyboard, input);
+    lv_keyboard_set_mode(
+        wifi_keyboard,
+        input == wifi_password_input ? LV_KEYBOARD_MODE_TEXT_LOWER : LV_KEYBOARD_MODE_TEXT_LOWER
+    );
+}
+
+static void wifi_setup_close(void)
+{
+    if (wifi_setup_overlay != NULL) lv_obj_add_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_keyboard_set_textarea(wifi_keyboard, NULL);
+    lv_textarea_set_text(wifi_password_input, "");
+}
+
+static void wifi_setup_action(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    intptr_t action = (intptr_t)lv_event_get_user_data(event);
+    if (action == 0) {
+        wifi_setup_close();
+        return;
+    }
+    const char *ssid = lv_textarea_get_text(wifi_ssid_input);
+    const char *password = lv_textarea_get_text(wifi_password_input);
+    if (strlen(ssid) == 0 || strlen(ssid) > 32 || strlen(password) < 8 || strlen(password) > 63) {
+        lv_label_set_text(wifi_setup_status, "SSID: 1-32 chars  ·  Password: 8-63 chars");
+        lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
+        return;
+    }
+    if (wifi_update_callback != NULL && wifi_update_callback(ssid, password)) {
+        lv_label_set_text(wifi_setup_status, "Saved securely - reconnecting...");
+        lv_obj_set_style_text_color(wifi_setup_status, COLOR_SIGNAL, 0);
+        lv_textarea_set_text(wifi_password_input, "");
+    } else {
+        lv_label_set_text(wifi_setup_status, "Could not save Wi-Fi - USB recovery remains available");
+        lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
+    }
+}
+
+static void wifi_setup_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    lv_label_set_text(wifi_setup_status, "2.4 GHz WPA2/WPA3 Personal · password stays on board");
+    lv_obj_set_style_text_color(wifi_setup_status, COLOR_FOG, 0);
+    lv_obj_remove_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(wifi_setup_overlay);
+    size_t network_count = wifi_scan_callback != NULL
+        ? wifi_scan_callback(wifi_network_ssids, 4)
+        : 0;
+    for (size_t index = 0; index < 4; ++index) {
+        if (index < network_count) {
+            lv_label_set_text(lv_obj_get_child(wifi_network_buttons[index], 0), wifi_network_ssids[index]);
+            lv_obj_remove_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    lv_obj_add_state(wifi_ssid_input, LV_STATE_FOCUSED);
+    lv_keyboard_set_textarea(wifi_keyboard, wifi_ssid_input);
+}
+
+static void wifi_scan_refresh(lv_timer_t *timer)
+{
+    (void)timer;
+    if (wifi_setup_overlay == NULL || lv_obj_has_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN)) return;
+    size_t network_count = wifi_scan_callback != NULL
+        ? wifi_scan_callback(wifi_network_ssids, 4)
+        : 0;
+    for (size_t index = 0; index < 4; ++index) {
+        if (index < network_count) {
+            lv_label_set_text(lv_obj_get_child(wifi_network_buttons[index], 0), wifi_network_ssids[index]);
+            lv_obj_remove_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void wifi_network_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    if (index < 0 || index >= 4 || wifi_network_ssids[index][0] == 0) return;
+    lv_textarea_set_text(wifi_ssid_input, wifi_network_ssids[index]);
+    lv_obj_add_state(wifi_password_input, LV_STATE_FOCUSED);
+    lv_keyboard_set_textarea(wifi_keyboard, wifi_password_input);
+}
+
+static void build_wifi_setup(lv_obj_t *screen)
+{
+    wifi_setup_overlay = lv_obj_create(screen);
+    set_clean_box(wifi_setup_overlay, COLOR_CARBON, 0);
+    lv_obj_set_size(wifi_setup_overlay, ILO_BOARD_WIDTH, ILO_BOARD_HEIGHT);
+    lv_obj_center(wifi_setup_overlay);
+    lv_obj_add_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(wifi_setup_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = create_label(wifi_setup_overlay, "Connect this board to Wi-Fi", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_pos(title, 30, 20);
+    wifi_setup_status = create_label(
+        wifi_setup_overlay,
+        "2.4 GHz WPA2/WPA3 Personal · password stays on board",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_set_pos(wifi_setup_status, 30, 56);
+
+    wifi_ssid_input = lv_textarea_create(wifi_setup_overlay);
+    lv_obj_set_size(wifi_ssid_input, 390, 58);
+    lv_obj_set_pos(wifi_ssid_input, 30, 92);
+    lv_textarea_set_one_line(wifi_ssid_input, true);
+    lv_textarea_set_max_length(wifi_ssid_input, 32);
+    lv_textarea_set_placeholder_text(wifi_ssid_input, "Wi-Fi network name (SSID)");
+    lv_obj_add_event_cb(wifi_ssid_input, wifi_input_tapped, LV_EVENT_FOCUSED, NULL);
+
+    wifi_password_input = lv_textarea_create(wifi_setup_overlay);
+    lv_obj_set_size(wifi_password_input, 390, 58);
+    lv_obj_set_pos(wifi_password_input, 30, 160);
+    lv_textarea_set_one_line(wifi_password_input, true);
+    lv_textarea_set_password_mode(wifi_password_input, true);
+    lv_textarea_set_password_bullet(wifi_password_input, "*");
+    lv_textarea_set_max_length(wifi_password_input, 63);
+    lv_textarea_set_placeholder_text(wifi_password_input, "Wi-Fi password");
+    lv_obj_add_event_cb(wifi_password_input, wifi_input_tapped, LV_EVENT_FOCUSED, NULL);
+
+    for (int index = 0; index < 4; ++index) {
+        wifi_network_buttons[index] = lv_button_create(wifi_setup_overlay);
+        set_clean_box(wifi_network_buttons[index], COLOR_STEEL, 10);
+        lv_obj_set_size(wifi_network_buttons[index], 250, 42);
+        lv_obj_set_pos(wifi_network_buttons[index], 435 + ((index % 2) * 260), 160 + ((index / 2) * 48));
+        lv_obj_add_event_cb(
+            wifi_network_buttons[index],
+            wifi_network_tapped,
+            LV_EVENT_CLICKED,
+            (void *)(intptr_t)index
+        );
+        lv_obj_t *label = create_label(wifi_network_buttons[index], "", &lv_font_montserrat_14, COLOR_MIST);
+        lv_obj_set_width(label, 220);
+        lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
+        lv_obj_center(label);
+        lv_obj_add_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    lv_obj_t *cancel = lv_button_create(wifi_setup_overlay);
+    set_clean_box(cancel, COLOR_STEEL, 12);
+    lv_obj_set_size(cancel, 140, 52);
+    lv_obj_set_pos(cancel, 478, 97);
+    lv_obj_add_event_cb(cancel, wifi_setup_action, LV_EVENT_CLICKED, (void *)0);
+    lv_obj_t *cancel_label = create_label(cancel, "Cancel", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_center(cancel_label);
+
+    lv_obj_t *save = lv_button_create(wifi_setup_overlay);
+    set_clean_box(save, COLOR_SIGNAL, 12);
+    lv_obj_set_size(save, 180, 52);
+    lv_obj_set_pos(save, 630, 97);
+    lv_obj_add_event_cb(save, wifi_setup_action, LV_EVENT_CLICKED, (void *)1);
+    lv_obj_t *save_label = create_label(save, "Save & connect", &lv_font_montserrat_14, COLOR_CARBON);
+    lv_obj_center(save_label);
+
+    wifi_keyboard = lv_keyboard_create(wifi_setup_overlay);
+    lv_obj_set_size(wifi_keyboard, 964, 330);
+    lv_obj_align(wifi_keyboard, LV_ALIGN_BOTTOM_MID, 0, -10);
+    lv_timer_create(wifi_scan_refresh, 2000, NULL);
+}
+
 static lv_obj_t *create_setting_row(
     lv_obj_t *parent,
     int y,
@@ -1180,9 +1342,11 @@ static void build_settings_page(lv_obj_t *page)
     lv_obj_align(settings_privacy_value, LV_ALIGN_RIGHT_MID, -20, 0);
 
     lv_obj_t *connections = create_card(page, 518, 330, 478, 64, 16);
+    lv_obj_add_flag(connections, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(connections, wifi_setup_tapped, LV_EVENT_CLICKED, NULL);
     lv_obj_t *connection_values = create_label(
         connections,
-        "WI-FI  KNOWN     MAC  PAIRED     WEATHER  DIRECT",
+        "WI-FI  TAP TO CHANGE     MAC  PAIRED     WEATHER  DIRECT",
         &lv_font_montserrat_14,
         COLOR_MIST
     );
@@ -1552,7 +1716,7 @@ static void build_ui(void)
 
     boot_beacon_icon = lv_image_create(screen);
     lv_image_set_src(boot_beacon_icon, &ilo_icon_48);
-    lv_image_set_scale(boot_beacon_icon, 320);
+    lv_image_set_scale(boot_beacon_icon, 256);
     lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(boot_beacon_icon, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(boot_beacon_icon);
@@ -1636,6 +1800,7 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
     );
     focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
     build_ui();
+    build_wifi_setup(lv_screen_active());
     lvgl_port_unlock();
     return ESP_OK;
 }
@@ -1652,7 +1817,7 @@ esp_err_t dashboard_ui_present_boot(void)
 
     lvgl_port_lock(0);
     lv_obj_set_width(work_pulse_rail, 6);
-    lv_image_set_scale(boot_beacon_icon, 320);
+    lv_image_set_scale(boot_beacon_icon, 256);
     lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_TRANSP, 0);
     set_boot_ring_size(boot_ring_inner, 90);
     lv_obj_set_style_opa(boot_ring_inner, LV_OPA_TRANSP, 0);
@@ -2087,8 +2252,8 @@ static void render_weather(const weather_model_t *model)
         }
     } else if (model->state == WEATHER_STATE_NOT_CONFIGURED) {
         lv_label_set_text(weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
-        lv_label_set_text(weather_condition_label, "Add location over USB");
-        lv_label_set_text(weather_details_label, "Run ./tools/board provision");
+        lv_label_set_text(weather_condition_label, "Choose a weather location");
+        lv_label_set_text(weather_details_label, "Use Mac companion location or USB setup");
     } else if (model->state == WEATHER_STATE_ERROR) {
         lv_label_set_text(weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
         lv_label_set_text(weather_condition_label, "Forecast unavailable");

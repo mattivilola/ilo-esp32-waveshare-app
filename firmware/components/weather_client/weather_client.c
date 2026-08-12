@@ -4,12 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <math.h>
 
 #include "cJSON.h"
+#include "clock_sync.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
-#include "esp_netif_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "mac_transport.h"
@@ -33,6 +34,10 @@ typedef struct {
 
 static const char *TAG = "weather_client";
 static weather_model_callback_t model_callback;
+static TaskHandle_t weather_task_handle;
+static portMUX_TYPE config_lock = portMUX_INITIALIZER_UNLOCKED;
+static weather_config_t active_config;
+static bool active_config_valid;
 
 static esp_err_t nvs_string(nvs_handle_t handle, const char *key, char *destination, size_t size)
 {
@@ -49,6 +54,19 @@ static bool load_weather_config(weather_config_t *config)
     if (status == ESP_OK) status = nvs_string(handle, "weather_lon", config->longitude, sizeof(config->longitude));
     nvs_close(handle);
     return status == ESP_OK && config->location[0] != 0 && config->latitude[0] != 0 && config->longitude[0] != 0;
+}
+
+static bool save_weather_config(const weather_config_t *config)
+{
+    nvs_handle_t handle;
+    esp_err_t status = nvs_open("ilo_board", NVS_READWRITE, &handle);
+    if (status != ESP_OK) return false;
+    if (status == ESP_OK) status = nvs_set_str(handle, "weather_name", config->location);
+    if (status == ESP_OK) status = nvs_set_str(handle, "weather_lat", config->latitude);
+    if (status == ESP_OK) status = nvs_set_str(handle, "weather_lon", config->longitude);
+    if (status == ESP_OK) status = nvs_commit(handle);
+    nvs_close(handle);
+    return status == ESP_OK;
 }
 
 static esp_err_t http_event(esp_http_client_event_t *event)
@@ -131,17 +149,6 @@ static bool parse_weather(const char *json, weather_model_t *model)
     return ok;
 }
 
-static bool sync_clock(void)
-{
-    time_t now = time(NULL);
-    if (now > 1700000000) return true;
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    esp_err_t status = esp_netif_sntp_init(&config);
-    if (status != ESP_OK && status != ESP_ERR_INVALID_STATE) return false;
-    status = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000));
-    return status == ESP_OK;
-}
-
 static bool fetch_weather(const weather_config_t *weather_config, weather_model_t *model)
 {
     char url[768];
@@ -186,17 +193,30 @@ static void publish(const weather_model_t *model)
 
 static void weather_task(void *argument)
 {
-    weather_config_t *config = argument;
+    (void)argument;
     weather_model_t model = { .state = WEATHER_STATE_LOADING };
-    strlcpy(model.location, config->location, sizeof(model.location));
-    publish(&model);
 
     for (;;) {
-        if (!mac_transport_wait_for_network(30000)) {
-            vTaskDelay(pdMS_TO_TICKS(RETRY_INTERVAL_MS));
+        weather_config_t config;
+        taskENTER_CRITICAL(&config_lock);
+        config = active_config;
+        bool configured = active_config_valid;
+        taskEXIT_CRITICAL(&config_lock);
+        if (!configured) {
+            model = (weather_model_t) { .state = WEATHER_STATE_NOT_CONFIGURED };
+            strlcpy(model.location, "Weather setup needed", sizeof(model.location));
+            publish(&model);
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             continue;
         }
-        bool ok = sync_clock() && fetch_weather(config, &model);
+        model.state = WEATHER_STATE_LOADING;
+        strlcpy(model.location, config.location, sizeof(model.location));
+        publish(&model);
+        if (!mac_transport_wait_for_network(30000)) {
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(RETRY_INTERVAL_MS));
+            continue;
+        }
+        bool ok = clock_sync_wait(15000) && fetch_weather(&config, &model);
         if (ok) {
             model.state = WEATHER_STATE_LIVE;
             model.updated_epoch = (int64_t)time(NULL);
@@ -204,25 +224,49 @@ static void weather_task(void *argument)
             model.state = model.updated_epoch > 0 ? WEATHER_STATE_STALE : WEATHER_STATE_ERROR;
         }
         publish(&model);
-        vTaskDelay(pdMS_TO_TICKS(ok ? REFRESH_INTERVAL_MS : RETRY_INTERVAL_MS));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(ok ? REFRESH_INTERVAL_MS : RETRY_INTERVAL_MS));
     }
 }
 
 bool weather_client_start(weather_model_callback_t callback)
 {
     model_callback = callback;
-    weather_config_t *config = calloc(1, sizeof(*config));
-    if (config == NULL) return false;
-    if (!load_weather_config(config)) {
-        weather_model_t model = { .state = WEATHER_STATE_NOT_CONFIGURED };
-        strlcpy(model.location, "Weather setup needed", sizeof(model.location));
-        publish(&model);
-        free(config);
+    weather_config_t config = { 0 };
+    active_config_valid = load_weather_config(&config);
+    if (active_config_valid) active_config = config;
+    if (xTaskCreatePinnedToCore(weather_task, "weather", 8192, NULL, 3, &weather_task_handle, 0) != pdPASS) {
+        weather_task_handle = NULL;
         return false;
     }
-    if (xTaskCreatePinnedToCore(weather_task, "weather", 8192, config, 3, NULL, 0) != pdPASS) {
-        free(config);
+    return true;
+}
+
+bool weather_client_update_location(const char *name, double latitude, double longitude)
+{
+    if (name == NULL || name[0] == 0 || strlen(name) > 40
+        || !isfinite(latitude) || latitude < -90.0 || latitude > 90.0
+        || !isfinite(longitude) || longitude < -180.0 || longitude > 180.0) {
         return false;
     }
+    weather_config_t config = { 0 };
+    strlcpy(config.location, name, sizeof(config.location));
+    if (snprintf(config.latitude, sizeof(config.latitude), "%.2f", latitude) <= 0
+        || snprintf(config.longitude, sizeof(config.longitude), "%.2f", longitude) <= 0) {
+        return false;
+    }
+    taskENTER_CRITICAL(&config_lock);
+    bool unchanged = active_config_valid
+        && strcmp(active_config.location, config.location) == 0
+        && strcmp(active_config.latitude, config.latitude) == 0
+        && strcmp(active_config.longitude, config.longitude) == 0;
+    taskEXIT_CRITICAL(&config_lock);
+    if (unchanged) return true;
+    if (!save_weather_config(&config)) return false;
+    taskENTER_CRITICAL(&config_lock);
+    active_config = config;
+    active_config_valid = true;
+    taskEXIT_CRITICAL(&config_lock);
+    if (weather_task_handle != NULL) xTaskNotifyGive(weather_task_handle);
+    ESP_LOGI(TAG, "Weather location updated from authenticated companion");
     return true;
 }

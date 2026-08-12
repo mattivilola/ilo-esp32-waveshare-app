@@ -37,6 +37,8 @@ ILO_BOARD_FIRMWARE_VERSION_FILE="$firmware_version_test_file" "$ILO_BOARD_ROOT/s
 grep -Fxq "1.3.0" "$firmware_version_test_file" || fail "Firmware minor bump produced the wrong version."
 
 grep -Fq 'LSUIElement' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must remain menu-bar only."
+grep -Fq 'ILOSupportsPromptFreeScreenCapture' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must advertise stable-identity screen capture support."
+grep -Fq 'NSLocationUsageDescription' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must explain optional weather location use."
 grep -Fq '_iloboard._tcp' "$ILO_BOARD_ROOT/Packaging/Info.plist" || fail "Packaged app must declare its Bonjour service."
 grep -Fq 'disable-library-validation' "$ILO_BOARD_ROOT/Packaging/Debug.entitlements" || fail "Ad-hoc Sparkle builds need the documented debug library-validation exception."
 if grep -Fq 'Debug.entitlements' "$ILO_BOARD_ROOT/scripts/sign_release.sh"; then

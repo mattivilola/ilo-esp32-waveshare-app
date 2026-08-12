@@ -28,6 +28,7 @@ public final class BoardServer: @unchecked Sendable {
     private let source: any TaskSource
     private let powerStatusSource: any MacPowerStatusProviding
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
+    private let weatherLocationSource: any WeatherLocationProviding
     private let companionVersion: String?
     private let eventHandler: @Sendable (BoardServerEvent) -> Void
     private let screenCaptureHandler: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
@@ -41,6 +42,7 @@ public final class BoardServer: @unchecked Sendable {
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
+        weatherLocationSource: any WeatherLocationProviding = NoWeatherLocationSource(),
         companionVersion: String? = nil,
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
     ) {
@@ -49,6 +51,7 @@ public final class BoardServer: @unchecked Sendable {
         self.source = source
         self.powerStatusSource = powerStatusSource
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
+        self.weatherLocationSource = weatherLocationSource
         self.companionVersion = companionVersion
         self.screenCaptureHandler = nil
         self.eventHandler = eventHandler
@@ -60,6 +63,7 @@ public final class BoardServer: @unchecked Sendable {
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
+        weatherLocationSource: any WeatherLocationProviding = NoWeatherLocationSource(),
         companionVersion: String? = nil,
         screenCaptureHandler: @escaping @Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void,
         eventHandler: @escaping @Sendable (BoardServerEvent) -> Void = { _ in }
@@ -69,6 +73,7 @@ public final class BoardServer: @unchecked Sendable {
         self.source = source
         self.powerStatusSource = powerStatusSource
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
+        self.weatherLocationSource = weatherLocationSource
         self.companionVersion = companionVersion
         self.screenCaptureHandler = screenCaptureHandler
         self.eventHandler = eventHandler
@@ -159,6 +164,7 @@ public final class BoardServer: @unchecked Sendable {
             source: source,
             powerStatusSource: powerStatusSource,
             xNewsRefreshCoordinator: xNewsRefreshCoordinator,
+            weatherLocationSource: weatherLocationSource,
             companionVersion: companionVersion,
             captureRequest: captureRequest,
             onScreenCapture: screenCaptureHandler,
@@ -181,6 +187,7 @@ private final class BoardConnection: @unchecked Sendable {
     private let source: any TaskSource
     private let powerStatusSource: any MacPowerStatusProviding
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
+    private let weatherLocationSource: any WeatherLocationProviding
     private let companionVersion: String?
     private let captureRequest: ScreenCaptureRequest?
     private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
@@ -201,6 +208,7 @@ private final class BoardConnection: @unchecked Sendable {
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding,
         xNewsRefreshCoordinator: XNewsRefreshCoordinator,
+        weatherLocationSource: any WeatherLocationProviding,
         companionVersion: String?,
         captureRequest: ScreenCaptureRequest?,
         onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
@@ -214,6 +222,7 @@ private final class BoardConnection: @unchecked Sendable {
         self.source = source
         self.powerStatusSource = powerStatusSource
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
+        self.weatherLocationSource = weatherLocationSource
         self.companionVersion = companionVersion
         self.captureRequest = captureRequest
         self.onScreenCapture = onScreenCapture
@@ -481,6 +490,7 @@ private final class BoardConnection: @unchecked Sendable {
         do {
             let raw = try await source.snapshot(revision: revision)
             let macPower = await powerStatusSource.currentStatus()
+            let weatherLocation = await weatherLocationSource.currentLocation()
             let tasks = raw.tasks.map(TaskSanitizer.sanitize)
             let snapshot = DashboardSnapshot(
                 revision: raw.revision,
@@ -492,6 +502,7 @@ private final class BoardConnection: @unchecked Sendable {
                 newsFeed: raw.newsFeed,
                 macPower: macPower,
                 hostTime: HostTimeStatus(),
+                weatherLocation: weatherLocation,
                 companionVersion: companionVersion
             )
             send(SnapshotMessage(snapshot: snapshot))

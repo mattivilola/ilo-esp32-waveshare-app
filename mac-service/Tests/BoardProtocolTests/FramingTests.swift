@@ -103,6 +103,17 @@ import Testing
     #expect(snapshot.hostTime == nil)
 }
 
+@Test func weatherLocationIsRoundedAndBoundedBeforeTransport() {
+    let location = WeatherLocation(
+        name: String(repeating: "L", count: 60),
+        latitude: 60.1699,
+        longitude: 24.9384
+    )
+    #expect(location.name.count == 40)
+    #expect(location.latitude == 60.17)
+    #expect(location.longitude == 24.94)
+}
+
 @Test func softwareVersionsAreOptionalProtocolV1Metadata() throws {
     let snapshot = DashboardSnapshot(
         revision: 10,

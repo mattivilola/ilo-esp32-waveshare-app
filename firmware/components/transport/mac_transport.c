@@ -65,6 +65,10 @@ static bool codex_continue_requested;
 static bool codex_continue_in_flight;
 static char codex_continue_task_id[CODEX_TASK_ID_MAX + 1];
 static char codex_continue_request_id[25];
+static bool wifi_scan_in_progress;
+static size_t wifi_scan_count;
+static char wifi_scan_ssids[4][33];
+static TaskHandle_t wifi_scan_task_handle;
 
 static bool json_number_equals(cJSON *item, int expected);
 
@@ -73,9 +77,47 @@ typedef struct {
     uint16_t port;
 } mac_endpoint_t;
 
+static void wifi_scan_task(void *argument)
+{
+    (void)argument;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        uint16_t count = 20;
+        wifi_ap_record_t *records = calloc(count, sizeof(*records));
+        size_t accepted = 0;
+        if (records != NULL && esp_wifi_scan_get_ap_records(&count, records) == ESP_OK) {
+            char discovered[4][33] = { 0 };
+            for (uint16_t index = 0; index < count && accepted < 4; ++index) {
+                if (records[index].ssid[0] == 0 || records[index].authmode < WIFI_AUTH_WPA2_PSK) continue;
+                bool duplicate = false;
+                for (size_t existing = 0; existing < accepted; ++existing) {
+                    if (strcmp(discovered[existing], (const char *)records[index].ssid) == 0) {
+                        duplicate = true;
+                        break;
+                    }
+                }
+                if (!duplicate) {
+                    strlcpy(discovered[accepted], (const char *)records[index].ssid, 33);
+                    ++accepted;
+                }
+            }
+            portENTER_CRITICAL(&refresh_lock);
+            memcpy(wifi_scan_ssids, discovered, sizeof(discovered));
+            wifi_scan_count = accepted;
+            portEXIT_CRITICAL(&refresh_lock);
+        }
+        free(records);
+        portENTER_CRITICAL(&refresh_lock);
+        wifi_scan_in_progress = false;
+        portEXIT_CRITICAL(&refresh_lock);
+    }
+}
+
 static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *data)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        if (wifi_scan_task_handle != NULL) xTaskNotifyGive(wifi_scan_task_handle);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(wifi_events, WIFI_READY_BIT);
@@ -135,6 +177,18 @@ static esp_err_t load_config(mac_transport_config_t *config)
     return ESP_OK;
 }
 
+static esp_err_t load_wifi_config(mac_transport_config_t *config)
+{
+    nvs_handle_t handle;
+    ESP_RETURN_ON_ERROR(nvs_open("ilo_board", NVS_READONLY, &handle), TAG, "Wi-Fi is not configured");
+    esp_err_t status = nvs_read_string(handle, "wifi_ssid", config->wifi_ssid, sizeof(config->wifi_ssid));
+    if (status == ESP_OK) {
+        status = nvs_read_string(handle, "wifi_password", config->wifi_password, sizeof(config->wifi_password));
+    }
+    nvs_close(handle);
+    return status == ESP_OK && config->wifi_ssid[0] != 0 ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
 static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
 {
     wifi_events = xEventGroupCreate();
@@ -146,15 +200,21 @@ static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
     esp_netif_create_default_wifi_sta();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "Wi-Fi init failed");
+    if (xTaskCreate(wifi_scan_task, "wifi_scan", 4096, NULL, 3, &wifi_scan_task_handle) != pdPASS) {
+        wifi_scan_task_handle = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL), TAG, "Wi-Fi handler failed");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL), TAG, "IP handler failed");
 
-    wifi_config_t config = { 0 };
-    memcpy(config.sta.ssid, transport_config->wifi_ssid, strlen(transport_config->wifi_ssid));
-    memcpy(config.sta.password, transport_config->wifi_password, strlen(transport_config->wifi_password));
-    config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "Wi-Fi mode failed");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config failed");
+    if (transport_config->wifi_ssid[0] != 0) {
+        wifi_config_t config = { 0 };
+        memcpy(config.sta.ssid, transport_config->wifi_ssid, strlen(transport_config->wifi_ssid));
+        memcpy(config.sta.password, transport_config->wifi_password, strlen(transport_config->wifi_password));
+        config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+        ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config failed");
+    }
     return esp_wifi_start();
 }
 
@@ -848,6 +908,19 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
             model->mac_power_percent = (uint8_t)level_value;
         }
     }
+    cJSON *weather_location = cJSON_GetObjectItemCaseSensitive(snapshot, "weatherLocation");
+    if (cJSON_IsObject(weather_location)) {
+        cJSON *name = cJSON_GetObjectItemCaseSensitive(weather_location, "name");
+        cJSON *latitude = cJSON_GetObjectItemCaseSensitive(weather_location, "latitude");
+        cJSON *longitude = cJSON_GetObjectItemCaseSensitive(weather_location, "longitude");
+        if (cJSON_IsString(name) && name->valuestring[0] != 0 && strlen(name->valuestring) <= 40
+            && cJSON_IsNumber(latitude) && cJSON_IsNumber(longitude)) {
+            model->weather_location_available = true;
+            strlcpy(model->weather_location_name, name->valuestring, sizeof(model->weather_location_name));
+            model->weather_latitude = latitude->valuedouble;
+            model->weather_longitude = longitude->valuedouble;
+        }
+    }
     cJSON *task = NULL;
     cJSON_ArrayForEach(task, tasks) {
         if (model->task_count >= DASHBOARD_MAX_TASKS) break;
@@ -1084,6 +1157,63 @@ bool mac_transport_start(mac_transport_model_callback_t callback)
         return false;
     }
     return true;
+}
+
+bool mac_transport_update_wifi(const char *ssid, const char *password)
+{
+    if (wifi_events == NULL || ssid == NULL || password == NULL) return false;
+    size_t ssid_size = strlen(ssid);
+    size_t password_size = strlen(password);
+    if (ssid_size == 0 || ssid_size > 32 || password_size < 8 || password_size > 63) return false;
+
+    nvs_handle_t handle = 0;
+    esp_err_t status = nvs_open("ilo_board", NVS_READWRITE, &handle);
+    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_ssid", ssid);
+    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_password", password);
+    if (status == ESP_OK) status = nvs_commit(handle);
+    if (handle != 0) nvs_close(handle);
+    if (status != ESP_OK) return false;
+
+    wifi_config_t config = { 0 };
+    memcpy(config.sta.ssid, ssid, ssid_size);
+    memcpy(config.sta.password, password, password_size);
+    config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    if (esp_wifi_set_config(WIFI_IF_STA, &config) != ESP_OK) return false;
+    dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_CONNECTING);
+    esp_wifi_disconnect();
+    esp_wifi_connect();
+    ESP_LOGI(TAG, "Saved new Wi-Fi credentials; reconnecting");
+    return true;
+}
+
+size_t mac_transport_scan_wifi(char (*ssids)[33], size_t maximum_count)
+{
+    if (wifi_events == NULL || ssids == NULL || maximum_count == 0) return 0;
+    portENTER_CRITICAL(&refresh_lock);
+    size_t available = wifi_scan_count;
+    if (available > maximum_count) available = maximum_count;
+    for (size_t index = 0; index < available; ++index) {
+        strlcpy(ssids[index], wifi_scan_ssids[index], 33);
+    }
+    bool should_start = !wifi_scan_in_progress;
+    if (should_start) wifi_scan_in_progress = true;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (should_start) {
+        wifi_scan_config_t scan = { .show_hidden = false };
+        if (esp_wifi_scan_start(&scan, false) != ESP_OK) {
+            portENTER_CRITICAL(&refresh_lock);
+            wifi_scan_in_progress = false;
+            portEXIT_CRITICAL(&refresh_lock);
+        }
+    }
+    return available;
+}
+
+bool mac_transport_start_wifi_only(void)
+{
+    mac_transport_config_t config = { 0 };
+    load_wifi_config(&config);
+    return wifi_start(&config) == ESP_OK;
 }
 
 bool mac_transport_wait_for_network(uint32_t timeout_ms)

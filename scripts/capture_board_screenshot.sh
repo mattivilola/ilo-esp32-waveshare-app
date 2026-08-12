@@ -29,7 +29,13 @@ fi
 
 mkdir -p "${output_path:h}"
 
+if [[ ! -x "$installed_menu_executable" ]]; then
+  fail "Install the latest signed ILO Board app before capturing. Screenshots use its stable identity to avoid recurring Keychain prompts."
+fi
+
 if [[ -x "$installed_menu_executable" ]]; then
+  capture_supported="$(/usr/libexec/PlistBuddy -c 'Print :ILOSupportsPromptFreeScreenCapture' "/Applications/ILO Board.app/Contents/Info.plist" 2>/dev/null || true)"
+  [[ "$capture_supported" == "true" ]] || fail "Install the latest signed ILO Board app before capturing. This prevents recurring Keychain prompts from rebuilt development tools."
   menu_pids=("${(@f)$(pgrep -f "^${installed_menu_executable}$" || true)}")
   if (( ${#menu_pids} > 0 )) && [[ -n "$menu_pids[1]" ]]; then
     menu_was_running=1
@@ -54,5 +60,6 @@ if [[ -x "$installed_menu_executable" ]]; then
   fi
 fi
 
-"$ILO_BOARD_ROOT/tools/host" screenshot --output "$output_path" --timeout "$capture_timeout"
+capture_arguments=("--capture-board-screen" "$output_path" "--capture-timeout" "$capture_timeout")
+"$installed_menu_executable" "${capture_arguments[@]}"
 log "Saved live board screenshot: $output_path"

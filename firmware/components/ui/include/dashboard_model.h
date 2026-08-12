@@ -54,6 +54,10 @@ typedef struct {
     bool host_time_available;
     int32_t utc_offset_seconds;
     char timezone_abbreviation[8];
+    bool weather_location_available;
+    char weather_location_name[41];
+    double weather_latitude;
+    double weather_longitude;
     bool mac_power_available;
     uint8_t mac_power_percent;
     dashboard_mac_power_state_t mac_power_state;
