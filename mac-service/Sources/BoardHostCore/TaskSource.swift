@@ -3,6 +3,21 @@ import Foundation
 
 public protocol TaskSource: Sendable {
     func snapshot(revision: UInt64) async throws -> DashboardSnapshot
+    func continueTask(id: String, requestID: String) async -> CodexContinueOutcome
+}
+
+public enum CodexContinueOutcome: Sendable {
+    case accepted
+    case unavailable
+    case busy
+    case rejected
+    case failed
+}
+
+public extension TaskSource {
+    func continueTask(id: String, requestID: String) async -> CodexContinueOutcome {
+        .unavailable
+    }
 }
 
 public struct MockTaskSource: TaskSource {
@@ -35,7 +50,7 @@ public struct MockTaskSource: TaskSource {
                     state: .waiting,
                     attentionKind: .approval,
                     updatedAt: now.addingTimeInterval(-12),
-                    shortSummary: "Review on Mac — remote actions are disabled"
+                    shortSummary: "Review stays on Mac — fixed continue only"
                 ),
             ]
         )
@@ -58,4 +73,3 @@ public enum TaskSanitizer {
         String(value.replacingOccurrences(of: "\n", with: " ").prefix(maximum))
     }
 }
-

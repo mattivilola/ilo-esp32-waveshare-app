@@ -331,6 +331,8 @@ private final class BoardConnection: @unchecked Sendable {
             }
         case "xNewsRefreshRequest":
             handleXNewsRefreshRequest(payload)
+        case "codexContinueRequest":
+            handleCodexContinueRequest(payload)
         default:
             send(ErrorMessage(code: "unsupportedCapability", message: "Protocol v1 does not support this capability."))
         }
@@ -374,8 +376,47 @@ private final class BoardConnection: @unchecked Sendable {
         }
     }
 
+    private func handleCodexContinueRequest(_ payload: Data) {
+        guard helloAccepted, subscribed,
+              let request = try? ProtocolJSON.decoder().decode(CodexContinueRequest.self, from: payload),
+              request.type == "codexContinueRequest",
+              request.version == 1,
+              request.action == "continue",
+              Self.validRequestID(request.requestID),
+              Self.validTaskID(request.taskID)
+        else {
+            send(ErrorMessage(
+                code: "invalidCodexContinue",
+                message: "A subscribed session, fixed action, and bounded identifiers are required."
+            ))
+            return
+        }
+        Task { [weak self, source] in
+            let outcome = await source.continueTask(id: request.taskID, requestID: request.requestID)
+            guard let self else { return }
+            let response: (CodexContinueStatus, String) = switch outcome {
+            case .accepted: (.accepted, "Please continue was sent")
+            case .unavailable: (.unavailable, "Task control is unavailable")
+            case .busy: (.busy, "Codex is busy; try again")
+            case .rejected: (.rejected, "Task is not eligible to continue")
+            case .failed: (.failed, "Codex did not accept the request")
+            }
+            self.send(CodexContinueStatusMessage(
+                requestID: request.requestID,
+                status: response.0,
+                message: response.1
+            ))
+        }
+    }
+
     private static func validRequestID(_ value: String) -> Bool {
         !value.isEmpty && value.count <= 64 && value.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-")
+        }
+    }
+
+    private static func validTaskID(_ value: String) -> Bool {
+        !value.isEmpty && value.count <= 80 && value.allSatisfy {
             $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-")
         }
     }
@@ -446,6 +487,7 @@ private final class BoardConnection: @unchecked Sendable {
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: tasks,
+                codexContinueEnabled: raw.capabilities.contains("tasks.continue.fixed"),
                 xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,
                 macPower: macPower,

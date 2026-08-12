@@ -40,6 +40,7 @@ struct ILOBoardHostCommand {
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: raw.tasks.map(TaskSanitizer.sanitize),
+                codexContinueEnabled: raw.capabilities.contains("tasks.continue.fixed"),
                 xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,
                 macPower: macPower,
@@ -65,7 +66,7 @@ struct ILOBoardHostCommand {
             )
             try server.start(port: port)
             print(arguments.contains("--mock") ? "Serving sanitized mock task status." : "Serving sanitized Codex recent-task history.")
-            print("Remote actions are disabled.")
+            print("Only hold-confirmed fixed Codex continuation is enabled; other remote actions are disabled.")
             let xNewsScheduleTask = Task { await XNewsRefreshCoordinator.shared.run() }
             defer { xNewsScheduleTask.cancel() }
             await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
@@ -114,7 +115,7 @@ struct ILOBoardHostCommand {
             print("Saved authenticated 1024x600 board capture: \(outputURL.path)")
         case "doctor":
             print("ILO Board Host")
-            print("  protocol: v\(boardProtocolVersion), tasks.read + macPower.read + xNews.read/refresh.request + display.capture.rgb565")
+            print("  protocol: v\(boardProtocolVersion), tasks.read/continue.fixed + macPower.read + xNews.read/refresh.request + display.capture.rgb565")
             print("  service: _iloboard._tcp")
             print("  transport: TLS 1.2 PSK")
             print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")

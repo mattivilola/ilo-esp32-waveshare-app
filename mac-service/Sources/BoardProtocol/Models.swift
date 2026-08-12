@@ -166,6 +166,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         generatedAt: Date = Date(),
         hostState: HostState = .online,
         tasks: [TaskCard],
+        codexContinueEnabled: Bool = false,
         xNewsEnabled: Bool? = nil,
         newsFeed: NewsFeedSnapshot? = nil,
         macPower: MacPowerStatus? = nil,
@@ -176,9 +177,11 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         self.revision = revision
         self.generatedAt = generatedAt
         self.hostState = hostState
-        self.capabilities = newsFeed == nil
-            ? ["tasks.read", "macPower.read", "hostTime.read"]
-            : ["tasks.read", "macPower.read", "hostTime.read", "xNews.read"]
+        var capabilities = ["tasks.read"]
+        if codexContinueEnabled { capabilities.append("tasks.continue.fixed") }
+        capabilities.append(contentsOf: ["macPower.read", "hostTime.read"])
+        if newsFeed != nil { capabilities.append("xNews.read") }
+        self.capabilities = capabilities
         self.tasks = Array(tasks.prefix(12))
         self.xNewsEnabled = xNewsEnabled ?? (newsFeed != nil)
         self.newsFeed = newsFeed
@@ -226,11 +229,51 @@ public struct ClientMessage: Codable, Equatable, Sendable {
 public struct HelloAcknowledgement: Encodable, Equatable, Sendable {
     public let type = "helloAck"
     public let protocolVersion = boardProtocolVersion
-    public let capabilities = ["tasks.read", "macPower.read", "xNews.refresh.request"]
+    public let capabilities = ["tasks.read", "tasks.continue.fixed", "macPower.read", "xNews.refresh.request"]
     public let serverTime: Date
 
     public init(serverTime: Date = Date()) {
         self.serverTime = serverTime
+    }
+}
+
+public struct CodexContinueRequest: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let requestID: String
+    public let taskID: String
+    public let action: String
+
+    public init(requestID: String, taskID: String) {
+        type = "codexContinueRequest"
+        version = 1
+        self.requestID = requestID
+        self.taskID = taskID
+        action = "continue"
+    }
+}
+
+public enum CodexContinueStatus: String, Codable, Equatable, Sendable {
+    case accepted
+    case unavailable
+    case busy
+    case rejected
+    case failed
+}
+
+public struct CodexContinueStatusMessage: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let requestID: String
+    public let status: CodexContinueStatus
+    public let message: String
+
+    public init(requestID: String, status: CodexContinueStatus, message: String) {
+        type = "codexContinueStatus"
+        version = 1
+        self.requestID = requestID
+        self.status = status
+        self.message = message
     }
 }
 

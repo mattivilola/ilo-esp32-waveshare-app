@@ -36,6 +36,35 @@ import Testing
     #expect(encodedPower["state"] as? String == "charging")
 }
 
+@Test func fixedCodexContinueCapabilityRequiresMacOptIn() {
+    let disabled = DashboardSnapshot(revision: 1, tasks: [])
+    let enabled = DashboardSnapshot(revision: 2, tasks: [], codexContinueEnabled: true)
+    #expect(!disabled.capabilities.contains("tasks.continue.fixed"))
+    #expect(enabled.capabilities.contains("tasks.continue.fixed"))
+}
+
+@Test func codexContinueMessagesCarryOnlyFixedBoundedActionData() throws {
+    let request = CodexContinueRequest(requestID: "board-A12", taskID: "019f-task-7")
+    let requestData = try ProtocolJSON.encoder().encode(request)
+    let requestObject = try #require(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+    #expect(requestObject.keys.sorted() == ["action", "requestID", "taskID", "type", "version"])
+    #expect(requestObject["type"] as? String == "codexContinueRequest")
+    #expect(requestObject["action"] as? String == "continue")
+    #expect(requestObject["taskID"] as? String == "019f-task-7")
+    #expect(requestObject["version"] as? Int == 1)
+
+    let response = CodexContinueStatusMessage(
+        requestID: "board-A12",
+        status: .accepted,
+        message: "Please continue was sent"
+    )
+    let decoded = try ProtocolJSON.decoder().decode(
+        CodexContinueStatusMessage.self,
+        from: ProtocolJSON.encoder().encode(response)
+    )
+    #expect(decoded == response)
+}
+
 @Test func hostTimeSnapshotContainsOnlyBoundedTimezoneInformation() throws {
     let helsinki = try #require(TimeZone(identifier: "Europe/Helsinki"))
     let summer = HostTimeStatus(
