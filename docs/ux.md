@@ -46,6 +46,8 @@ Touch targets are at least 48×48 logical pixels. Empty, sleeping, reconnecting,
 
 The signature is the vertical “work pulse”: one continuous status rail that makes the system's overall state readable before individual cards. Amber is reserved for genuine attention, not decoration. Dashboard is the default wake screen and should answer three questions in under two seconds: is everything connected, does anything need me, and what is moving now?
 
+On cold boot, the backlight stays off until the first real Dashboard frame is rendered. A sub-half-second “Pulse ignition” then grows the signal rail, settles the ILO roundel, and sends one highlight down the rail while connection and data startup continue normally. The animation never acts as a splash-screen gate: the Dashboard is already present and touch can finish the effect immediately.
+
 ## Codex
 
 Codex shows sanitized task names, coarse state, last update, and attention type. It also keeps the capability boundary visible: history from a separately launched App Server is not presented as authoritative live Desktop state. Full prompts, transcripts, paths, commands, diffs, and credentials do not belong on the board.

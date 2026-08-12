@@ -21,6 +21,7 @@ static constexpr uint32_t I2C_SPEED_HZ = 400000;
 // CH422G command addresses are separate I2C slave addresses, not registers.
 static constexpr uint16_t CH422G_WRITE_SET_ADDRESS = 0x24;
 static constexpr uint16_t CH422G_WRITE_IO_ADDRESS = 0x38;
+static constexpr uint8_t CH422G_BACKLIGHT_MASK = 1U << 2;
 
 static i2c_master_bus_handle_t i2c_bus;
 static i2c_master_dev_handle_t ch422g_set_device;
@@ -46,6 +47,13 @@ static esp_err_t ch422g_write(i2c_master_dev_handle_t device, uint8_t value)
     return i2c_master_transmit(device, &value, sizeof(value), 1000);
 }
 
+static esp_err_t ch422g_write_backlight_off(uint8_t value)
+{
+    // Preserve Waveshare's reset patterns while holding the independent
+    // EXIO2/DISP output low until LVGL has rendered its first useful frame.
+    return ch422g_write(ch422g_io_device, value & (uint8_t)~CH422G_BACKLIGHT_MASK);
+}
+
 static esp_err_t init_i2c_and_expander(void)
 {
     i2c_master_bus_config_t bus_config = {};
@@ -68,9 +76,9 @@ static esp_err_t init_i2c_and_expander(void)
 static esp_err_t reset_lcd_and_touch(void)
 {
     // Waveshare maps LCD_RST to EXIO3. Preserve its published output pattern.
-    ESP_RETURN_ON_ERROR(ch422g_write(ch422g_io_device, 0x26), TAG, "LCD reset low failed");
+    ESP_RETURN_ON_ERROR(ch422g_write_backlight_off(0x26), TAG, "LCD reset low failed");
     vTaskDelay(pdMS_TO_TICKS(10));
-    ESP_RETURN_ON_ERROR(ch422g_write(ch422g_io_device, 0x2E), TAG, "LCD reset high failed");
+    ESP_RETURN_ON_ERROR(ch422g_write_backlight_off(0x2E), TAG, "LCD reset high failed");
     vTaskDelay(pdMS_TO_TICKS(100));
 
     // GT911 address selection: IRQ low while EXIO1 releases reset selects 0x5D.
@@ -79,9 +87,9 @@ static esp_err_t reset_lcd_and_touch(void)
     ESP_RETURN_ON_ERROR(gpio_set_level(static_cast<gpio_num_t>(TOUCH_INTERRUPT), 0), TAG,
                         "Touch interrupt address select failed");
     vTaskDelay(pdMS_TO_TICKS(10));
-    ESP_RETURN_ON_ERROR(ch422g_write(ch422g_io_device, 0x2C), TAG, "Touch reset low failed");
+    ESP_RETURN_ON_ERROR(ch422g_write_backlight_off(0x2C), TAG, "Touch reset low failed");
     vTaskDelay(pdMS_TO_TICKS(100));
-    ESP_RETURN_ON_ERROR(ch422g_write(ch422g_io_device, 0x2E), TAG, "Touch reset high failed");
+    ESP_RETURN_ON_ERROR(ch422g_write_backlight_off(0x2E), TAG, "Touch reset high failed");
     vTaskDelay(pdMS_TO_TICKS(200));
     return gpio_reset_pin(static_cast<gpio_num_t>(TOUCH_INTERRUPT));
 }
@@ -156,9 +164,10 @@ extern "C" esp_err_t board_waveshare_5_init(void)
     ESP_RETURN_ON_ERROR(reset_lcd_and_touch(), TAG, "Panel reset sequence failed");
     ESP_RETURN_ON_ERROR(init_rgb_panel(), TAG, "LCD startup failed");
     ESP_RETURN_ON_ERROR(init_touch(), TAG, "Touch startup failed");
-    // Waveshare's published 0x1E pattern enables DISP on EXIO2.
-    ESP_RETURN_ON_ERROR(ch422g_write(ch422g_io_device, 0x1E), TAG, "Backlight enable failed");
-    backlight_enabled = true;
+    // Leave DISP low until the application explicitly presents a rendered
+    // LVGL frame. This avoids exposing uninitialized framebuffer contents.
+    ESP_RETURN_ON_ERROR(ch422g_write(ch422g_io_device, 0x1A), TAG, "Backlight hold-off failed");
+    backlight_enabled = false;
 
     initialized = true;
     ESP_LOGI(TAG, "Waveshare 5B 1024x600 display and GT911 touch initialized");

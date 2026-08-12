@@ -32,6 +32,7 @@ typedef enum {
 typedef bool (*dashboard_x_news_refresh_callback_t)(void);
 
 esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd);
+esp_err_t dashboard_ui_present_boot(void);
 void dashboard_ui_set_model(const dashboard_model_t *model);
 void dashboard_ui_set_connection_state(dashboard_connection_state_t state);
 void dashboard_ui_set_weather(const weather_model_t *model);

@@ -60,6 +60,9 @@ static int32_t x_news_pull_distance;
 static bool x_news_refresh_in_flight;
 static lv_obj_t *page_eyebrow_label;
 static lv_obj_t *page_title_label;
+static lv_obj_t *brand_icon;
+static lv_obj_t *work_pulse_rail;
+static lv_obj_t *boot_pulse;
 static lv_obj_t *tileview;
 static lv_obj_t *tiles[PAGE_COUNT];
 static lv_obj_t *nav_buttons[PAGE_COUNT];
@@ -92,6 +95,7 @@ static bool x_news_page_enabled;
 static bool navigation_configured;
 static bool display_asleep;
 static bool consuming_wake_touch;
+static bool boot_animation_active;
 static uint32_t screensaver_tick;
 static uint32_t focus_remaining_seconds;
 static bool focus_running;
@@ -104,6 +108,7 @@ static void render_weather(const weather_model_t *model);
 static void x_news_scroll_event(lv_event_t *event);
 static void configure_x_news_page(bool enabled);
 static void update_page_chrome(void);
+static void finish_boot_animation(void);
 
 static const char *page_eyebrows[PAGE_COUNT] = {
     "ILO / WORK PULSE", "ILO / CODEX", "ILO / X NEWS", "ILO / WEATHER", "ILO / SETTINGS"
@@ -118,6 +123,9 @@ static void touch_read(lv_indev_t *input, lv_indev_data_t *data)
     uint16_t x = 0;
     uint16_t y = 0;
     if (board_waveshare_5_read_touch(&x, &y)) {
+        if (boot_animation_active) {
+            finish_boot_animation();
+        }
         if (display_asleep) {
             board_waveshare_5_set_backlight(true);
             display_asleep = false;
@@ -181,6 +189,93 @@ static lv_obj_t *create_card(lv_obj_t *parent, int x, int y, int width, int heig
     lv_obj_set_pos(card, x, y);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     return card;
+}
+
+static void set_boot_rail_height(void *object, int32_t value)
+{
+    lv_obj_set_height((lv_obj_t *)object, value);
+}
+
+static void set_boot_icon_scale(void *object, int32_t value)
+{
+    lv_image_set_scale((lv_obj_t *)object, value);
+}
+
+static void set_boot_icon_opacity(void *object, int32_t value)
+{
+    lv_obj_set_style_opa((lv_obj_t *)object, (lv_opa_t)value, 0);
+}
+
+static void set_boot_pulse_y(void *object, int32_t value)
+{
+    lv_obj_set_y((lv_obj_t *)object, value);
+}
+
+static void finish_boot_animation(void)
+{
+    if (!boot_animation_active) {
+        return;
+    }
+    boot_animation_active = false;
+
+    lv_anim_delete(work_pulse_rail, set_boot_rail_height);
+    lv_anim_delete(brand_icon, set_boot_icon_scale);
+    lv_anim_delete(brand_icon, set_boot_icon_opacity);
+    if (boot_pulse != NULL) {
+        lv_anim_delete(boot_pulse, set_boot_pulse_y);
+        lv_obj_delete(boot_pulse);
+        boot_pulse = NULL;
+    }
+
+    lv_obj_set_height(work_pulse_rail, ILO_BOARD_HEIGHT);
+    lv_obj_set_style_opa(work_pulse_rail, LV_OPA_COVER, 0);
+    lv_image_set_scale(brand_icon, 192);
+    lv_obj_set_style_opa(brand_icon, LV_OPA_COVER, 0);
+}
+
+static void boot_animation_completed(lv_anim_t *animation)
+{
+    (void)animation;
+    finish_boot_animation();
+}
+
+static void start_boot_animation(void)
+{
+    boot_animation_active = true;
+
+    lv_anim_t animation;
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, work_pulse_rail);
+    lv_anim_set_exec_cb(&animation, set_boot_rail_height);
+    lv_anim_set_values(&animation, 0, ILO_BOARD_HEIGHT);
+    lv_anim_set_duration(&animation, 420);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
+    lv_anim_start(&animation);
+
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, brand_icon);
+    lv_anim_set_exec_cb(&animation, set_boot_icon_scale);
+    lv_anim_set_values(&animation, 136, 192);
+    lv_anim_set_duration(&animation, 320);
+    lv_anim_set_delay(&animation, 35);
+    lv_anim_set_path_cb(&animation, lv_anim_path_overshoot);
+    lv_anim_start(&animation);
+
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, brand_icon);
+    lv_anim_set_exec_cb(&animation, set_boot_icon_opacity);
+    lv_anim_set_values(&animation, LV_OPA_30, LV_OPA_COVER);
+    lv_anim_set_duration(&animation, 180);
+    lv_anim_start(&animation);
+
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, boot_pulse);
+    lv_anim_set_exec_cb(&animation, set_boot_pulse_y);
+    lv_anim_set_values(&animation, -72, ILO_BOARD_HEIGHT);
+    lv_anim_set_duration(&animation, 460);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_in_out);
+    lv_anim_set_completed_cb(&animation, boot_animation_completed);
+    lv_anim_start(&animation);
 }
 
 static bool local_clock(struct tm *clock)
@@ -885,17 +980,17 @@ static void build_ui(void)
     set_clean_box(screen, COLOR_CARBON, 0);
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_OFF);
 
-    lv_obj_t *rail = lv_obj_create(screen);
-    set_clean_box(rail, COLOR_SIGNAL, 0);
-    lv_obj_set_size(rail, 6, ILO_BOARD_HEIGHT);
-    lv_obj_align(rail, LV_ALIGN_LEFT_MID, 0, 0);
+    work_pulse_rail = lv_obj_create(screen);
+    set_clean_box(work_pulse_rail, COLOR_SIGNAL, 0);
+    lv_obj_set_size(work_pulse_rail, 6, ILO_BOARD_HEIGHT);
+    lv_obj_align(work_pulse_rail, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lv_obj_t *header = lv_obj_create(screen);
     set_clean_box(header, COLOR_CARBON, 0);
     lv_obj_set_size(header, ILO_BOARD_WIDTH - 40, 68);
     lv_obj_align(header, LV_ALIGN_TOP_LEFT, 22, 0);
 
-    lv_obj_t *brand_icon = lv_image_create(header);
+    brand_icon = lv_image_create(header);
     lv_image_set_src(brand_icon, &ilo_icon_48);
     lv_image_set_scale(brand_icon, 192);
     lv_obj_align(brand_icon, LV_ALIGN_LEFT_MID, 0, 0);
@@ -1027,6 +1122,13 @@ static void build_ui(void)
     configure_x_news_page(false);
 
     build_screensaver(screen);
+
+    boot_pulse = lv_obj_create(screen);
+    set_clean_box(boot_pulse, COLOR_MIST, 3);
+    lv_obj_set_size(boot_pulse, 6, 72);
+    lv_obj_set_pos(boot_pulse, 0, -72);
+    lv_obj_clear_flag(boot_pulse, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_move_foreground(boot_pulse);
     update_page_chrome();
 }
 
@@ -1090,6 +1192,33 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
     build_ui();
     lvgl_port_unlock();
     return ESP_OK;
+}
+
+esp_err_t dashboard_ui_present_boot(void)
+{
+    if (ui_display == NULL || work_pulse_rail == NULL || brand_icon == NULL || boot_pulse == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    lvgl_port_lock(0);
+    lv_obj_set_height(work_pulse_rail, 0);
+    lv_image_set_scale(brand_icon, 136);
+    lv_obj_set_style_opa(brand_icon, LV_OPA_30, 0);
+    lv_obj_set_y(boot_pulse, -72);
+    lv_refr_now(ui_display);
+
+    esp_err_t status = board_waveshare_5_set_backlight(true);
+    if (status == ESP_OK) {
+        start_boot_animation();
+    } else {
+        lv_obj_set_height(work_pulse_rail, ILO_BOARD_HEIGHT);
+        lv_image_set_scale(brand_icon, 192);
+        lv_obj_set_style_opa(brand_icon, LV_OPA_COVER, 0);
+        lv_obj_delete(boot_pulse);
+        boot_pulse = NULL;
+    }
+    lvgl_port_unlock();
+    return status;
 }
 
 void dashboard_ui_set_model(const dashboard_model_t *model)
