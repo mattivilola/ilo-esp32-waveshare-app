@@ -14,7 +14,6 @@
 #include "lvgl.h"
 #include "board_waveshare_5.h"
 #include "device_settings.h"
-#include "ilo_icon_48.h"
 
 #define COLOR_CARBON  lv_color_hex(0x0A0F14)
 #define COLOR_SLATE   lv_color_hex(0x131B22)
@@ -241,6 +240,9 @@ static void set_clean_box(lv_obj_t *object, lv_color_t color, int radius)
     lv_obj_set_style_bg_color(object, color, 0);
     lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(object, 0, 0);
+    lv_obj_set_style_outline_width(object, 0, 0);
+    lv_obj_set_style_shadow_width(object, 0, 0);
+    lv_obj_set_style_shadow_opa(object, LV_OPA_TRANSP, 0);
     lv_obj_set_style_radius(object, radius, 0);
     lv_obj_set_style_pad_all(object, 0, 0);
 }
@@ -252,6 +254,17 @@ static lv_obj_t *create_label(lv_obj_t *parent, const char *text, const lv_font_
     lv_obj_set_style_text_font(label, font, 0);
     lv_obj_set_style_text_color(label, color, 0);
     return label;
+}
+
+static lv_obj_t *create_ilo_roundel(lv_obj_t *parent, int size)
+{
+    lv_obj_t *roundel = lv_obj_create(parent);
+    set_clean_box(roundel, COLOR_MIST, LV_RADIUS_CIRCLE);
+    lv_obj_set_size(roundel, size, size);
+    lv_obj_clear_flag(roundel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *label = create_label(roundel, "ILO", &lv_font_montserrat_14, COLOR_CARBON);
+    lv_obj_center(label);
+    return roundel;
 }
 
 static lv_obj_t *create_card(lv_obj_t *parent, int x, int y, int width, int height, int radius)
@@ -506,9 +519,6 @@ static void boot_animation_completed(lv_anim_t *animation)
 static void start_boot_animation(void)
 {
     boot_animation_active = true;
-    // Keep the ARGB icon at its native size. Continuously scaling it forces a
-    // costly software transform on every RGB565 frame and can starve IDLE1.
-    lv_image_set_scale(boot_beacon_icon, 256);
     lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_COVER, 0);
 
     lv_anim_t animation;
@@ -1396,8 +1406,7 @@ static void build_settings_page(lv_obj_t *page)
     lv_obj_t *privacy = create_card(page, 518, 214, 478, 104, 16);
     lv_obj_add_flag(privacy, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(privacy, privacy_setting_tapped, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *privacy_icon = lv_image_create(privacy);
-    lv_image_set_src(privacy_icon, &ilo_icon_48);
+    lv_obj_t *privacy_icon = create_ilo_roundel(privacy, 48);
     lv_obj_align(privacy_icon, LV_ALIGN_LEFT_MID, 18, 0);
     lv_obj_t *privacy_text = create_label(
         privacy,
@@ -1549,14 +1558,6 @@ static void screensaver_timer(lv_timer_t *timer)
     }
     if (saver_timeout > 0 && inactive >= saver_timeout) {
         lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
-        ++screensaver_tick;
-        if (screensaver_tick % 5 == 0 && screensaver_content != NULL) {
-            static const int offsets[][2] = {
-                { -160, -100 }, { 150, -80 }, { 130, 95 }, { -145, 90 }, { 0, 0 },
-            };
-            size_t index = (screensaver_tick / 5) % (sizeof(offsets) / sizeof(offsets[0]));
-            lv_obj_align(screensaver_content, LV_ALIGN_CENTER, offsets[index][0], offsets[index][1]);
-        }
     } else {
         lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
         screensaver_tick = 0;
@@ -1582,15 +1583,10 @@ static void build_screensaver(lv_obj_t *screen)
 
     // Keep the saver cheap to redraw: moving an ARGB image across the RGB565
     // framebuffer can hold the software renderer long enough to starve IDLE1
-    // on the ESP32-S3. A native LVGL roundel keeps the same visual anchor
-    // without invoking the image transform path on every position change.
-    lv_obj_t *roundel = lv_obj_create(screensaver_content);
-    set_clean_box(roundel, COLOR_MIST, LV_RADIUS_CIRCLE);
-    lv_obj_set_size(roundel, 56, 56);
+    // on the ESP32-S3. A static native LVGL roundel keeps the same visual
+    // anchor without invoking the image transform path.
+    lv_obj_t *roundel = create_ilo_roundel(screensaver_content, 56);
     lv_obj_align(roundel, LV_ALIGN_LEFT_MID, 12, 0);
-    lv_obj_clear_flag(roundel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *roundel_label = create_label(roundel, "ILO", &lv_font_montserrat_14, COLOR_CARBON);
-    lv_obj_center(roundel_label);
     lv_obj_t *pulse = create_label(screensaver_content, "ILO / PULSE", &lv_font_montserrat_20, COLOR_SIGNAL);
     lv_obj_align(pulse, LV_ALIGN_TOP_LEFT, 92, 7);
     screensaver_clock_label = create_label(screensaver_content, "--:--", &lv_font_montserrat_28, COLOR_MIST);
@@ -1624,9 +1620,7 @@ static void build_ui(void)
     lv_obj_set_size(header, ILO_BOARD_WIDTH - 40, 68);
     lv_obj_align(header, LV_ALIGN_TOP_LEFT, 22, 0);
 
-    brand_icon = lv_image_create(header);
-    lv_image_set_src(brand_icon, &ilo_icon_48);
-    lv_image_set_scale(brand_icon, 192);
+    brand_icon = create_ilo_roundel(header, 36);
     lv_obj_align(brand_icon, LV_ALIGN_LEFT_MID, 0, 0);
 
     page_eyebrow_label = create_label(header, page_eyebrows[0], &lv_font_montserrat_14, COLOR_SIGNAL);
@@ -1819,11 +1813,8 @@ static void build_ui(void)
     lv_obj_clear_flag(boot_scan_line, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(boot_scan_line);
 
-    boot_beacon_icon = lv_image_create(screen);
-    lv_image_set_src(boot_beacon_icon, &ilo_icon_48);
-    lv_image_set_scale(boot_beacon_icon, 256);
+    boot_beacon_icon = create_ilo_roundel(screen, 56);
     lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_TRANSP, 0);
-    lv_obj_clear_flag(boot_beacon_icon, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_center(boot_beacon_icon);
 
     static const lv_point_t particle_positions[3] = {
@@ -1911,35 +1902,21 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
 
 esp_err_t dashboard_ui_present_boot(void)
 {
-    if (ui_display == NULL || work_pulse_rail == NULL || boot_beacon_icon == NULL ||
-        boot_ring_inner == NULL || boot_ring_outer == NULL || boot_scan_line == NULL) {
+    if (ui_display == NULL || work_pulse_rail == NULL) {
         return ESP_ERR_INVALID_STATE;
-    }
-    for (int i = 0; i < 3; ++i) {
-        if (boot_particles[i] == NULL) return ESP_ERR_INVALID_STATE;
     }
 
     lvgl_port_lock(0);
+    // A full-screen animated reveal makes the software renderer continuously
+    // redraw the 1024x600 RGB565 panel and can starve CPU1's idle task. Keep
+    // startup deterministic: reveal the already-built dashboard in one frame.
+    boot_animation_active = false;
+    remove_boot_effects();
     lv_obj_set_width(work_pulse_rail, 6);
-    lv_image_set_scale(boot_beacon_icon, 256);
-    lv_obj_set_style_opa(boot_beacon_icon, LV_OPA_TRANSP, 0);
-    set_boot_ring_size(boot_ring_inner, 90);
-    lv_obj_set_style_opa(boot_ring_inner, LV_OPA_TRANSP, 0);
-    set_boot_ring_size(boot_ring_outer, 112);
-    lv_obj_set_style_opa(boot_ring_outer, LV_OPA_TRANSP, 0);
-    set_boot_scan_width(boot_scan_line, 0);
-    for (int i = 0; i < 3; ++i) {
-        lv_obj_set_style_opa(boot_particles[i], LV_OPA_TRANSP, 0);
-    }
+    lv_obj_set_style_opa(work_pulse_rail, LV_OPA_COVER, 0);
     lv_refr_now(ui_display);
 
     esp_err_t status = board_waveshare_5_set_backlight(true);
-    if (status == ESP_OK) {
-        start_boot_animation();
-    } else {
-        lv_obj_set_width(work_pulse_rail, 6);
-        remove_boot_effects();
-    }
     lvgl_port_unlock();
     return status;
 }

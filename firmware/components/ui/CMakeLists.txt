@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "dashboard_model.c" "dashboard_ui.c" "assets/ilo_icon_48.c"
+    SRCS "dashboard_model.c" "dashboard_ui.c"
     INCLUDE_DIRS "include" "assets"
     REQUIRES board_waveshare_5 device_settings weather_model esp_app_format esp_lvgl_port lvgl esp_lcd
 )

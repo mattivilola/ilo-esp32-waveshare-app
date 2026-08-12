@@ -76,13 +76,13 @@ Use [the deterministic state gallery](ui-state-validation.md) as a semantic refe
 
 | ID | Procedure | Pass condition | Evidence | Result |
 | --- | --- | --- | --- | --- |
-| HW-301 | Set Pulse screensaver to 2 minutes and leave the board untouched. | Saver appears at approximately 2 minutes and its content changes position over time without clipping. | Timed video | NOT RUN |
+| HW-301 | Set Pulse screensaver to 2 minutes and leave the board untouched. | Static saver appears at approximately 2 minutes; time/status continue updating and serial remains free of watchdog, panic, or reboot output for at least 5 minutes. | Timed video + serial log | NOT RUN |
 | HW-302 | Touch once while only the screensaver is active. | Normal UI returns and the touch does not activate the control underneath it. | Video | NOT RUN |
 | HW-303 | Set display off to 5 minutes and leave the board untouched. | CH422G `DISP` makes the physical backlight fully dark at approximately 5 minutes; this is not merely a black framebuffer. | Dark-room video + current observation if available | NOT RUN |
 | HW-304 | Touch once while the backlight is off. | Backlight returns; the wake touch is consumed and no hidden control changes. | Video showing unchanged setting/page | NOT RUN |
 | HW-305 | Tap **Turn display off now**, wait, wake, then repeat ten times. | 10/10 cycles turn off and recover without a reset, frozen touch controller, or accidental action. | Video + cycle count + serial log | NOT RUN |
 | HW-306 | Select `Never` for both timeouts and leave untouched for longer than the former timeout. | Screensaver and backlight remain on; setting is honored after reboot. | Timed notes + photos | NOT RUN |
-| HW-307 | Cold-boot ten times while recording the panel and serial output; tap a visible Dashboard target during the ILO beacon on one run. | No uninitialized or torn frame appears before the first Dashboard frame; centered roundel, two rings, one horizontal scan, and the brief rail flare complete smoothly in under 500 ms; the serial log reports first-frame time; touch finishes the effect without delaying or freezing startup. | Slow-motion video + ten first-frame timings + touch video | NOT RUN |
+| HW-307 | Cold-boot ten times while recording the panel and serial output. | No uninitialized or torn frame appears before the first Dashboard frame; the clean one-frame reveal does not animate or stall the 1024×600 software renderer; serial reports first-frame time with no watchdog, panic, or reboot. | Slow-motion video + ten first-frame timings | NOT RUN |
 
 ## E. Network and data paths
 
