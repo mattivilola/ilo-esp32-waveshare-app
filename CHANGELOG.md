@@ -2,6 +2,18 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.5 - 2026-08-12
+
+### Added
+- Add consent-gated Codex continue action
+- Add consent-gated Codex continue firmware
+- Add standalone networking and companion handoffs
+
+### Changed
+- Polish dashboard weather and board glyphs
+- Align Pulse screensaver content
+
+
 ## 0.1.4 - 2026-08-12
 
 ### Added
