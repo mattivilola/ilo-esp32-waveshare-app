@@ -53,6 +53,9 @@ static lv_obj_t *task_rows[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_titles[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_summaries[DASHBOARD_MAX_TASKS];
 static lv_obj_t *task_dots[DASHBOARD_MAX_TASKS];
+static lv_obj_t *dashboard_signal_eyebrow;
+static lv_obj_t *dashboard_signal_headline;
+static lv_obj_t *dashboard_signal_action;
 static lv_obj_t *codex_rows[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_titles[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_summaries[CODEX_VISIBLE_TASKS];
@@ -110,7 +113,6 @@ static lv_obj_t *screensaver_status_dot;
 static lv_obj_t *screensaver_clock_label;
 static lv_obj_t *screensaver_date_label;
 static lv_obj_t *header_clock_label;
-static lv_obj_t *focus_timer_label;
 static lv_obj_t *settings_screensaver_value;
 static lv_obj_t *settings_display_off_value;
 static lv_obj_t *settings_privacy_value;
@@ -150,8 +152,6 @@ static bool display_asleep;
 static bool consuming_wake_touch;
 static bool boot_animation_active;
 static uint32_t screensaver_tick;
-static uint32_t focus_remaining_seconds;
-static bool focus_running;
 static int32_t clock_utc_offset_seconds;
 static char clock_timezone_abbreviation[8] = "UTC";
 static weather_model_t latest_weather_model;
@@ -164,6 +164,14 @@ static void update_page_chrome(void);
 static void finish_boot_animation(void);
 static void refresh_clock_labels(void);
 static void render_codex_detail(void);
+
+static void show_page(int index, lv_anim_enable_t animation)
+{
+    if (tileview == NULL || index < 0 || index >= PAGE_COUNT) return;
+    if (index == PAGE_X_NEWS && !x_news_page_enabled) return;
+    lv_tileview_set_tile(tileview, tiles[index], animation);
+    lv_display_trigger_activity(ui_display);
+}
 
 static void set_clock_timezone_locked(int32_t utc_offset_seconds, const char *abbreviation)
 {
@@ -275,6 +283,17 @@ static bool codex_task_can_continue(const dashboard_task_t *task)
         && task->attention == DASHBOARD_ATTENTION_NONE;
 }
 
+static void refresh_codex_row_selection(void)
+{
+    for (int index = 0; index < CODEX_VISIBLE_TASKS; ++index) {
+        bool selected = latest_model_valid
+            && index < latest_model.task_count
+            && codex_selected_task_id[0] != 0
+            && strcmp(latest_model.tasks[index].id, codex_selected_task_id) == 0;
+        lv_obj_set_style_bg_color(codex_rows[index], selected ? COLOR_STEEL : COLOR_SLATE, 0);
+    }
+}
+
 static void set_codex_button_visible(lv_obj_t *button, bool visible)
 {
     if (button == NULL) return;
@@ -288,6 +307,7 @@ static void set_codex_button_visible(lv_obj_t *button, bool visible)
 static void render_codex_detail(void)
 {
     if (codex_detail_title == NULL) return;
+    refresh_codex_row_selection();
     const dashboard_task_t *task = selected_codex_task();
     if (task == NULL) {
         lv_label_set_text(codex_detail_eyebrow, "BOUNDED CONTROL");
@@ -300,7 +320,7 @@ static void render_codex_detail(void)
         return;
     }
 
-    lv_label_set_text(codex_detail_eyebrow, "TASK DETAIL");
+    lv_label_set_text(codex_detail_eyebrow, "RELATED CHAT");
     lv_label_set_text(codex_detail_title, task->title);
     lv_label_set_text(
         codex_detail_summary,
@@ -329,15 +349,35 @@ static void render_codex_detail(void)
     if (codex_hold_label != NULL) lv_label_set_text(codex_hold_label, "HOLD TO ARM");
 }
 
-static void codex_row_tapped(lv_event_t *event)
+static void select_codex_task(int index)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_continue_in_flight) return;
-    int index = (int)(intptr_t)lv_event_get_user_data(event);
     if (!latest_model_valid || index < 0 || index >= latest_model.task_count) return;
     strlcpy(codex_selected_task_id, latest_model.tasks[index].id, sizeof(codex_selected_task_id));
     codex_continue_armed = false;
     codex_result_visible = false;
     render_codex_detail();
+}
+
+static void codex_row_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_continue_in_flight) return;
+    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    select_codex_task(index);
+}
+
+static void dashboard_task_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_continue_in_flight) return;
+    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    select_codex_task(index);
+    show_page(PAGE_CODEX, LV_ANIM_ON);
+}
+
+static void dashboard_signal_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !latest_model_valid) return;
+    bool has_news = latest_model.x_news_enabled && latest_model.news_count > 0;
+    show_page(has_news ? PAGE_X_NEWS : PAGE_CODEX, LV_ANIM_ON);
 }
 
 static void codex_hold_event(lv_event_t *event)
@@ -588,38 +628,6 @@ static void refresh_clock_labels(void)
         );
         lv_label_set_text(screensaver_date_label, dated_zone);
     }
-}
-
-static void refresh_focus_label(void)
-{
-    if (focus_timer_label == NULL) return;
-    if (focus_remaining_seconds == 0) {
-        lv_label_set_text(focus_timer_label, "FOCUS COMPLETE    TAP TO RESTART");
-        lv_obj_set_style_text_color(focus_timer_label, COLOR_SIGNAL, 0);
-        return;
-    }
-    char text[64];
-    snprintf(
-        text,
-        sizeof(text),
-        "FOCUS %02u:%02u    %s",
-        (unsigned int)(focus_remaining_seconds / 60),
-        (unsigned int)(focus_remaining_seconds % 60),
-        focus_running ? "PAUSE" : (focus_remaining_seconds < (uint32_t)current_settings.focus_minutes * 60U ? "RESUME" : "START")
-    );
-    lv_label_set_text(focus_timer_label, text);
-    lv_obj_set_style_text_color(focus_timer_label, focus_running ? COLOR_SIGNAL : COLOR_MIST, 0);
-}
-
-static void focus_tapped(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    if (focus_remaining_seconds == 0) {
-        focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
-    }
-    focus_running = !focus_running;
-    refresh_focus_label();
-    lv_display_trigger_activity(ui_display);
 }
 
 static void build_codex_page(lv_obj_t *page)
@@ -1057,6 +1065,36 @@ static void refresh_task_summaries(void)
     }
 }
 
+static void render_dashboard_signal(const dashboard_model_t *model)
+{
+    if (model == NULL || dashboard_signal_headline == NULL) return;
+    if (model->x_news_enabled && model->news_count > 0) {
+        lv_label_set_text(dashboard_signal_eyebrow, "X SIGNAL");
+        lv_label_set_text(dashboard_signal_headline, model->news[0].headline);
+        lv_label_set_text(dashboard_signal_action, "OPEN X NEWS  " LV_SYMBOL_RIGHT);
+        lv_obj_set_style_text_color(dashboard_signal_eyebrow, COLOR_CYAN, 0);
+        return;
+    }
+
+    unsigned int active_count = 0;
+    for (int index = 0; index < model->task_count && index < DASHBOARD_MAX_TASKS; ++index) {
+        if (model->tasks[index].state == DASHBOARD_TASK_ACTIVE) ++active_count;
+    }
+    char pulse[96];
+    snprintf(
+        pulse,
+        sizeof(pulse),
+        "%u active / %u recent Codex task%s",
+        active_count,
+        (unsigned int)model->task_count,
+        model->task_count == 1 ? "" : "s"
+    );
+    lv_label_set_text(dashboard_signal_eyebrow, "WORK PULSE");
+    lv_label_set_text(dashboard_signal_headline, pulse);
+    lv_label_set_text(dashboard_signal_action, "OPEN CODEX  " LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_color(dashboard_signal_eyebrow, COLOR_SIGNAL, 0);
+}
+
 static void screensaver_setting_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
@@ -1113,11 +1151,7 @@ static void focus_setting_tapped(lv_event_t *event)
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     current_settings.focus_minutes = device_settings_next_focus(current_settings.focus_minutes);
     device_settings_save(&current_settings);
-    if (!focus_running) {
-        focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
-    }
     refresh_settings_labels();
-    refresh_focus_label();
     lv_display_trigger_activity(ui_display);
 }
 
@@ -1481,7 +1515,7 @@ static void nav_tapped(lv_event_t *event)
     }
     int index = (int)(intptr_t)lv_event_get_user_data(event);
     if (index >= 0 && index < PAGE_COUNT && (index != PAGE_X_NEWS || x_news_page_enabled)) {
-        lv_tileview_set_tile(tileview, tiles[index], LV_ANIM_ON);
+        show_page(index, LV_ANIM_ON);
     }
 }
 
@@ -1499,11 +1533,6 @@ static void screensaver_timer(lv_timer_t *timer)
 {
     (void)timer;
     refresh_clock_labels();
-    if (focus_running && focus_remaining_seconds > 0) {
-        --focus_remaining_seconds;
-        if (focus_remaining_seconds == 0) focus_running = false;
-        refresh_focus_label();
-    }
     uint32_t inactive = lv_display_get_inactive_time(ui_display);
     uint32_t saver_timeout = (uint32_t)current_settings.screensaver_minutes * MINUTE_MS;
     uint32_t off_timeout = (uint32_t)current_settings.display_off_minutes * MINUTE_MS;
@@ -1662,31 +1691,34 @@ static void build_ui(void)
 
     dashboard_weather_icon_box = lv_obj_create(attention);
     set_clean_box(dashboard_weather_icon_box, COLOR_STEEL, 14);
-    lv_obj_set_size(dashboard_weather_icon_box, 50, 50);
-    lv_obj_set_pos(dashboard_weather_icon_box, 20, 302);
+    lv_obj_set_size(dashboard_weather_icon_box, 52, 52);
+    lv_obj_set_pos(dashboard_weather_icon_box, 20, 318);
     dashboard_weather_icon_label = create_label(
         dashboard_weather_icon_box,
         LV_SYMBOL_GPS,
-        &lv_font_montserrat_20,
+        &lv_font_montserrat_14,
         COLOR_FOG
     );
     lv_obj_center(dashboard_weather_icon_label);
 
     dashboard_weather_location_label = create_label(attention, "WEATHER", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_set_width(dashboard_weather_location_label, 128);
+    lv_obj_set_width(dashboard_weather_location_label, 136);
     lv_label_set_long_mode(dashboard_weather_location_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_pos(dashboard_weather_location_label, 82, 282);
+    lv_obj_set_pos(dashboard_weather_location_label, 20, 288);
     dashboard_weather_temperature_label = create_label(attention, "-- C", &lv_font_montserrat_28, COLOR_MIST);
-    lv_obj_set_pos(dashboard_weather_temperature_label, 82, 307);
+    lv_obj_set_width(dashboard_weather_temperature_label, 134);
+    lv_obj_set_pos(dashboard_weather_temperature_label, 84, 313);
     dashboard_weather_condition_label = create_label(attention, "Location needed", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_set_width(dashboard_weather_condition_label, 128);
+    lv_obj_set_width(dashboard_weather_condition_label, 134);
     lv_label_set_long_mode(dashboard_weather_condition_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_pos(dashboard_weather_condition_label, 82, 345);
+    lv_obj_set_pos(dashboard_weather_condition_label, 84, 350);
     dashboard_weather_state_label = create_label(attention, "SETUP", &lv_font_montserrat_14, COLOR_AMBER);
-    lv_obj_set_pos(dashboard_weather_state_label, 20, 374);
+    lv_obj_set_width(dashboard_weather_state_label, 58);
+    lv_obj_set_style_text_align(dashboard_weather_state_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_pos(dashboard_weather_state_label, 160, 288);
 
     lv_obj_t *work_title = lv_label_create(tiles[0]);
-    lv_label_set_text(work_title, "Active work");
+    lv_label_set_text(work_title, "Recent Codex work");
     lv_obj_set_style_text_color(work_title, COLOR_MIST, 0);
     lv_obj_set_style_text_font(work_title, &lv_font_montserrat_20, 0);
     lv_obj_set_pos(work_title, 286, 14);
@@ -1696,7 +1728,9 @@ static void build_ui(void)
         set_clean_box(task_rows[i], COLOR_SLATE, 14);
         lv_obj_set_size(task_rows[i], 714, 80);
         lv_obj_set_pos(task_rows[i], 286, 54 + (i * 88));
-        lv_obj_add_flag(task_rows[i], LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(task_rows[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_bg_color(task_rows[i], COLOR_STEEL, LV_STATE_PRESSED);
+        lv_obj_add_event_cb(task_rows[i], dashboard_task_tapped, LV_EVENT_CLICKED, (void *)(intptr_t)i);
 
         task_dots[i] = lv_obj_create(task_rows[i]);
         set_clean_box(task_dots[i], COLOR_STEEL, LV_RADIUS_CIRCLE);
@@ -1709,21 +1743,28 @@ static void build_ui(void)
         lv_obj_align(task_titles[i], LV_ALIGN_TOP_LEFT, 42, 12);
 
         task_summaries[i] = lv_label_create(task_rows[i]);
-        lv_obj_set_width(task_summaries[i], 640);
+        lv_obj_set_width(task_summaries[i], 604);
         lv_label_set_long_mode(task_summaries[i], LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_color(task_summaries[i], COLOR_FOG, 0);
         lv_obj_set_style_text_font(task_summaries[i], &lv_font_montserrat_14, 0);
         lv_obj_align(task_summaries[i], LV_ALIGN_BOTTOM_LEFT, 42, -10);
+
+        lv_obj_t *open = create_label(task_rows[i], LV_SYMBOL_RIGHT, &lv_font_montserrat_14, COLOR_FOG);
+        lv_obj_align(open, LV_ALIGN_RIGHT_MID, -18, 0);
     }
 
-    lv_obj_t *focus = create_card(tiles[0], 286, 326, 714, 72, 14);
-    lv_obj_add_flag(focus, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(focus, focus_tapped, LV_EVENT_CLICKED, NULL);
-    focus_timer_label = create_label(focus, "", &lv_font_montserrat_20, COLOR_MIST);
-    lv_obj_align(focus_timer_label, LV_ALIGN_LEFT_MID, 18, 0);
-    lv_obj_t *focus_note = create_label(focus, "LOCAL ONLY", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(focus_note, LV_ALIGN_RIGHT_MID, -18, 0);
-    refresh_focus_label();
+    lv_obj_t *signal = create_card(tiles[0], 286, 326, 714, 72, 14);
+    lv_obj_add_flag(signal, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(signal, COLOR_STEEL, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(signal, dashboard_signal_tapped, LV_EVENT_CLICKED, NULL);
+    dashboard_signal_eyebrow = create_label(signal, "WORK PULSE", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_set_pos(dashboard_signal_eyebrow, 18, 12);
+    dashboard_signal_headline = create_label(signal, "Waiting for Codex activity", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_set_width(dashboard_signal_headline, 500);
+    lv_label_set_long_mode(dashboard_signal_headline, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(dashboard_signal_headline, 18, 39);
+    dashboard_signal_action = create_label(signal, "OPEN CODEX  " LV_SYMBOL_RIGHT, &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_align(dashboard_signal_action, LV_ALIGN_RIGHT_MID, -18, 0);
 
     build_codex_page(tiles[1]);
     build_x_news_page(tiles[2]);
@@ -1862,7 +1903,6 @@ esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd)
         current_settings.clock_timezone_abbreviation,
         sizeof(clock_timezone_abbreviation)
     );
-    focus_remaining_seconds = (uint32_t)current_settings.focus_minutes * 60U;
     build_ui();
     build_wifi_setup(lv_screen_active());
     lvgl_port_unlock();
@@ -1917,6 +1957,7 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
     }
     configure_x_news_page(model->x_news_enabled);
     refresh_settings_labels();
+    render_dashboard_signal(model);
     if (mac_power_percent_label != NULL && mac_power_state_label != NULL) {
         if (model->mac_power_available) {
             char percent[8];
@@ -2261,12 +2302,13 @@ static const char *weather_condition(int code)
 
 static const char *dashboard_weather_icon(int code)
 {
-    if (code == 0) return LV_SYMBOL_OK;
-    if (code <= 3 || code == 45 || code == 48) return LV_SYMBOL_IMAGE;
-    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return LV_SYMBOL_TINT;
-    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return LV_SYMBOL_BULLET;
-    if (code >= 95) return LV_SYMBOL_CHARGE;
-    return LV_SYMBOL_IMAGE;
+    if (code == 0) return "SUN";
+    if (code <= 3) return "CLOUD";
+    if (code == 45 || code == 48) return "FOG";
+    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "RAIN";
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "SNOW";
+    if (code >= 95) return "STORM";
+    return "MIX";
 }
 
 static double display_temperature(float celsius)
@@ -2328,7 +2370,11 @@ static void render_dashboard_weather(const weather_model_t *model)
     lv_label_set_text(dashboard_weather_icon_label, icon);
     lv_label_set_text(dashboard_weather_condition_label, condition);
     lv_label_set_text(dashboard_weather_state_label, state);
-    lv_obj_set_style_bg_color(dashboard_weather_icon_box, color, 0);
+    lv_obj_set_style_bg_color(
+        dashboard_weather_icon_box,
+        model->state == WEATHER_STATE_LIVE ? COLOR_CYAN : color,
+        0
+    );
     lv_obj_set_style_text_color(
         dashboard_weather_icon_label,
         model->state == WEATHER_STATE_LIVE ? COLOR_CARBON : COLOR_MIST,

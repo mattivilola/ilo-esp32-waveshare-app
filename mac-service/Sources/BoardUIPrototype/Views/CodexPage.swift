@@ -1,9 +1,13 @@
 import SwiftUI
 
 struct CodexPage: View {
-    @State private var selectedTask = 0
+    @Binding var selectedTask: Int
     @State private var continueArmed = false
     @State private var continueSent = false
+
+    init(selectedTask: Binding<Int> = .constant(0)) {
+        _selectedTask = selectedTask
+    }
 
     var body: some View {
         VStack(spacing: 14) {
@@ -23,7 +27,7 @@ struct CodexPage: View {
                 }
                 PulseCard {
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionLabel(title: "Task detail")
+                        SectionLabel(title: "Related chat")
                         Text(selectedTask == 0 ? "Set up ESP32 Mac controller" : "Action unavailable")
                             .font(.board(19, weight: .bold))
                             .foregroundStyle(BoardPalette.mist)

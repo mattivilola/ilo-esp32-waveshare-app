@@ -2,6 +2,7 @@ import SwiftUI
 
 public struct BoardDeviceView: View {
     @State private var page: BoardPage
+    @State private var selectedCodexTask = 0
     private let interactive: Bool
     private let fixedPage: BoardPage?
     private let scenario: BoardPreviewScenario?
@@ -104,8 +105,20 @@ public struct BoardDeviceView: View {
             BoardValidationScenarioView(scenario: scenario)
         } else {
             switch visiblePage {
-            case .dashboard: DashboardPage()
-            case .codex: CodexPage()
+            case .dashboard:
+                DashboardPage(
+                    onOpenTask: { index in
+                        guard interactive else { return }
+                        selectedCodexTask = index
+                        page = .codex
+                    },
+                    onOpenXNews: {
+                        guard interactive else { return }
+                        page = xNewsEnabled ? .xNews : .codex
+                    },
+                    xNewsEnabled: xNewsEnabled
+                )
+            case .codex: CodexPage(selectedTask: $selectedCodexTask)
             case .xNews: XNewsPage(interactive: interactive)
             case .weather: WeatherPage()
             case .settings: SettingsPage(xNewsEnabled: xNewsEnabled)

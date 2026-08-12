@@ -1,7 +1,19 @@
 import SwiftUI
 
 struct DashboardPage: View {
-    @State private var focusRunning = false
+    let onOpenTask: (Int) -> Void
+    let onOpenXNews: () -> Void
+    let xNewsEnabled: Bool
+
+    init(
+        onOpenTask: @escaping (Int) -> Void = { _ in },
+        onOpenXNews: @escaping () -> Void = {},
+        xNewsEnabled: Bool = true
+    ) {
+        self.onOpenTask = onOpenTask
+        self.onOpenXNews = onOpenXNews
+        self.xNewsEnabled = xNewsEnabled
+    }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -36,23 +48,32 @@ struct DashboardPage: View {
                     Divider()
                         .overlay(BoardPalette.steel)
                         .padding(.bottom, 13)
-                    HStack(spacing: 12) {
-                        Image(systemName: "cloud.sun.fill")
-                            .font(.system(size: 21, weight: .semibold))
-                            .foregroundStyle(BoardPalette.carbon)
-                            .frame(width: 46, height: 46)
-                            .background(BoardPalette.cyan, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                        VStack(alignment: .leading, spacing: 2) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
                             Text("HELSINKI")
                                 .font(.board(10, weight: .bold))
                                 .tracking(0.8)
                                 .foregroundStyle(BoardPalette.fog)
-                            Text("14 C")
-                                .font(.board(24, weight: .bold))
-                                .foregroundStyle(BoardPalette.mist)
-                            Text("Light rain / LIVE")
-                                .font(.board(11, weight: .semibold))
+                            Spacer()
+                            Text("LIVE")
+                                .font(.board(10, weight: .bold))
+                                .tracking(0.8)
                                 .foregroundStyle(BoardPalette.signal)
+                        }
+                        HStack(alignment: .center, spacing: 12) {
+                            Image(systemName: "cloud.rain.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(BoardPalette.carbon)
+                            .frame(width: 48, height: 48)
+                            .background(BoardPalette.cyan, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("14 C")
+                                    .font(.board(24, weight: .bold))
+                                    .foregroundStyle(BoardPalette.mist)
+                                Text("Light rain")
+                                    .font(.board(11, weight: .semibold))
+                                    .foregroundStyle(BoardPalette.fog)
+                            }
                         }
                     }
                 }
@@ -61,66 +82,85 @@ struct DashboardPage: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("Active work")
+                    Text("Recent Codex work")
                         .font(.board(20, weight: .semibold))
                         .foregroundStyle(BoardPalette.mist)
                     Spacer()
-                    MetricChip(value: "3", label: "active", tint: BoardPalette.signal)
+                    MetricChip(value: "1", label: "active", tint: BoardPalette.signal)
                     MetricChip(value: "1", label: "waiting", tint: BoardPalette.amber)
                 }
-                taskRow("ESP32 work pulse", "Five-page navigation and device UX", BoardPalette.signal)
-                taskRow("Mac companion", "Universal release pipeline verified", BoardPalette.signal)
-                taskRow("Codex decisions", "Plan review needed on Mac", BoardPalette.amber)
+                taskRow(0, "Set up ESP32 Mac controller", "History available / eligible to continue", "IDLE", BoardPalette.fog)
+                taskRow(1, "Package macOS companion", "Completed locally / tests passed", "DONE", BoardPalette.signal)
+                taskRow(2, "Design work pulse UX", "Plan review needed on Mac", "REVIEW", BoardPalette.amber)
                 Button {
-                    focusRunning.toggle()
+                    onOpenXNews()
                 } label: {
                     HStack(spacing: 12) {
-                        Text("FOCUS")
+                        Image(systemName: xNewsEnabled ? "bolt.horizontal.fill" : "waveform.path.ecg")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundStyle(BoardPalette.cyan)
+                        Text(xNewsEnabled ? "X SIGNAL" : "WORK PULSE")
                             .font(.board(11, weight: .bold))
                             .tracking(1)
-                            .foregroundStyle(BoardPalette.fog)
-                        Text("25:00")
-                            .font(.system(size: 16, weight: .bold, design: .monospaced))
-                            .foregroundStyle(focusRunning ? BoardPalette.signal : BoardPalette.mist)
-                        Text("Build the smallest safe next slice")
+                            .foregroundStyle(BoardPalette.cyan)
+                        Text(xNewsEnabled ? "AI agents move into desktop workflows" : "2 active / 3 recent Codex tasks")
                             .font(.board(13, weight: .semibold))
                             .foregroundStyle(BoardPalette.mist)
+                            .lineLimit(1)
                         Spacer()
-                        Text(focusRunning ? "PAUSE" : "START")
+                        Text(xNewsEnabled ? "OPEN X NEWS" : "OPEN CODEX")
                             .font(.board(11, weight: .bold))
                             .tracking(0.8)
-                            .foregroundStyle(focusRunning ? BoardPalette.signal : BoardPalette.fog)
+                            .foregroundStyle(BoardPalette.fog)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(BoardPalette.fog)
                     }
                     .padding(.horizontal, 16)
                     .frame(height: 45)
                     .background(BoardPalette.slate, in: RoundedRectangle(cornerRadius: 13, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(focusRunning ? "Pause 25 minute focus session" : "Start 25 minute focus session")
+                .accessibilityLabel(xNewsEnabled ? "Open latest X News signal" : "Open Codex work pulse")
             }
         }
         .padding(.vertical, 4)
     }
 
-    private func taskRow(_ title: String, _ summary: String, _ tint: Color) -> some View {
-        HStack(spacing: 15) {
-            StatusDot(color: tint)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.board(15, weight: .semibold))
-                    .foregroundStyle(BoardPalette.mist)
-                Text(summary)
-                    .font(.board(12))
+    private func taskRow(
+        _ index: Int,
+        _ title: String,
+        _ summary: String,
+        _ status: String,
+        _ tint: Color
+    ) -> some View {
+        Button {
+            onOpenTask(index)
+        } label: {
+            HStack(spacing: 15) {
+                StatusDot(color: tint)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.board(15, weight: .semibold))
+                        .foregroundStyle(BoardPalette.mist)
+                    Text(summary)
+                        .font(.board(12))
+                        .foregroundStyle(BoardPalette.fog)
+                }
+                Spacer()
+                Text(status)
+                    .font(.board(10, weight: .bold))
+                    .tracking(0.8)
+                    .foregroundStyle(tint)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(BoardPalette.fog)
             }
-            Spacer()
-            Text(tint == BoardPalette.amber ? "REVIEW" : "ACTIVE")
-                .font(.board(10, weight: .bold))
-                .tracking(0.8)
-                .foregroundStyle(tint)
+            .padding(.horizontal, 17)
+            .frame(height: 76)
+            .background(BoardPalette.slate, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .padding(.horizontal, 17)
-        .frame(height: 76)
-        .background(BoardPalette.slate, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .buttonStyle(.plain)
+        .accessibilityLabel("Open Codex chat: \(title)")
     }
 }
