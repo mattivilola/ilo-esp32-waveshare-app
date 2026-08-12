@@ -24,3 +24,11 @@ import Testing
     #expect(snapshot.capabilities == ["tasks.read", "macPower.read", "hostTime.read"])
     #expect(snapshot.tasks.contains { $0.attentionKind == .approval })
 }
+
+@Test func taskSourcesRejectControlUnlessExplicitlyImplemented() async {
+    let outcome = await MockTaskSource().continueTask(id: "codex-decisions", requestID: "fixture-1")
+    guard case .unavailable = outcome else {
+        Issue.record("Mock/read-only task sources must not claim a real Codex action")
+        return
+    }
+}

@@ -45,3 +45,43 @@ import Testing
     let resolved = CodexExecutableResolver.resolve(environment: ["ILO_BOARD_CODEX_PATH": "/bin/sh"])
     #expect(resolved?.path == "/bin/sh")
 }
+
+@Test func codexContinuePolicyAllowsOnlyIdleOrUnloadedTasks() {
+    for status in ["idle", "notLoaded"] {
+        let thread = CodexThreadRecord(
+            id: status,
+            name: status,
+            updatedAt: 1,
+            status: CodexThreadStatus(type: status, activeFlags: nil)
+        )
+        #expect(CodexContinuationPolicy.allows(thread))
+    }
+    for status in ["active", "systemError", "completed", "unknown"] {
+        let thread = CodexThreadRecord(
+            id: status,
+            name: status,
+            updatedAt: 1,
+            status: CodexThreadStatus(type: status, activeFlags: nil)
+        )
+        #expect(!CodexContinuationPolicy.allows(thread))
+    }
+}
+
+@Test func codexContinuePolicyRequiresReplaySafeRequestIDs() {
+    #expect(CodexContinuationPolicy.validRequestID("board-A12-9"))
+    #expect(!CodexContinuationPolicy.validRequestID(""))
+    #expect(!CodexContinuationPolicy.validRequestID("contains spaces"))
+    #expect(!CodexContinuationPolicy.validRequestID(String(repeating: "a", count: 65)))
+}
+
+@Test func fixedCodexContinueIsOffByDefaultAndRevocable() throws {
+    let suite = "CodexContinueFeatureControllerTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let controller = CodexContinueFeatureController(defaults: defaults)
+    #expect(!controller.isEnabled)
+    controller.setEnabled(true)
+    #expect(controller.isEnabled)
+    controller.setEnabled(false)
+    #expect(!controller.isEnabled)
+}

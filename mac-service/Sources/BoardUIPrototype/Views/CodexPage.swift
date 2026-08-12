@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct CodexPage: View {
+    @State private var selectedTask = 0
+    @State private var continueArmed = false
+    @State private var continueSent = false
+
     var body: some View {
         VStack(spacing: 14) {
             HStack {
@@ -13,25 +17,45 @@ struct CodexPage: View {
             }
             HStack(spacing: 16) {
                 VStack(spacing: 10) {
-                    codexRow("Set up ESP32 Mac controller", "History available · live Desktop state unavailable", BoardPalette.amber)
-                    codexRow("Package macOS companion", "Completed locally · tests passed", BoardPalette.signal)
-                    codexRow("Design work pulse UX", "In progress · simulator data", BoardPalette.signal)
+                    codexRow(0, "Set up ESP32 Mac controller", "History available · eligible to continue", BoardPalette.fog)
+                    codexRow(1, "Package macOS companion", "Completed locally · tests passed", BoardPalette.signal)
+                    codexRow(2, "Design work pulse UX", "In progress · simulator data", BoardPalette.signal)
                 }
                 PulseCard {
                     VStack(alignment: .leading, spacing: 12) {
-                        SectionLabel(title: "Safety boundary")
-                        Text("READ ONLY")
-                            .font(.board(26, weight: .bold))
-                            .foregroundStyle(BoardPalette.signal)
-                        Text("Recent task history can be shown safely. Approvals, answers and commands remain on the Mac.")
+                        SectionLabel(title: "Task detail")
+                        Text(selectedTask == 0 ? "Set up ESP32 Mac controller" : "Action unavailable")
+                            .font(.board(19, weight: .bold))
+                            .foregroundStyle(BoardPalette.mist)
+                            .lineLimit(2)
+                        Text(selectedTask == 0
+                            ? "The Mac constructs exactly: Please continue."
+                            : "Only idle recent tasks can use the fixed continue action.")
                             .font(.board(13))
                             .foregroundStyle(BoardPalette.fog)
                             .lineSpacing(5)
                         Spacer()
-                        Divider().overlay(BoardPalette.steel)
-                        statusLine("App Server", "LOCAL")
-                        statusLine("Desktop tasks", "HISTORY")
-                        statusLine("Remote actions", "OFF")
+                        if selectedTask == 0 {
+                            Text(continueSent ? "SENT — CODEX IS CONTINUING" : (continueArmed ? "ARMED — TAP CONFIRM" : "HOLD, THEN CONFIRM"))
+                                .font(.board(11, weight: .bold))
+                                .foregroundStyle(continueSent ? BoardPalette.signal : BoardPalette.fog)
+                            if continueArmed {
+                                Button("CONFIRM CONTINUE") {
+                                    continueArmed = false
+                                    continueSent = true
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(BoardPalette.signal)
+                            } else if !continueSent {
+                                Text("HOLD TO ARM")
+                                    .font(.board(12, weight: .bold))
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                                    .background(BoardPalette.steel, in: RoundedRectangle(cornerRadius: 12))
+                                    .onLongPressGesture(minimumDuration: 0.9) {
+                                        continueArmed = true
+                                    }
+                            }
+                        }
                     }
                 }
                 .frame(width: 290)
@@ -40,8 +64,13 @@ struct CodexPage: View {
         .padding(.vertical, 4)
     }
 
-    private func codexRow(_ title: String, _ detail: String, _ tint: Color) -> some View {
-        PulseCard {
+    private func codexRow(_ index: Int, _ title: String, _ detail: String, _ tint: Color) -> some View {
+        Button {
+            selectedTask = index
+            continueArmed = false
+            continueSent = false
+        } label: {
+            PulseCard {
             HStack(spacing: 15) {
                 StatusDot(color: tint)
                 VStack(alignment: .leading, spacing: 5) {
@@ -53,25 +82,14 @@ struct CodexPage: View {
                         .foregroundStyle(BoardPalette.fog)
                 }
                 Spacer()
-                Text(tint == BoardPalette.amber ? "CHECK MAC" : "ACTIVE")
+                Text(index == 0 ? "IDLE" : "ACTIVE")
                     .font(.board(10, weight: .bold))
                     .tracking(0.7)
                     .foregroundStyle(tint)
             }
         }
-        .frame(height: 106)
-    }
-
-    private func statusLine(_ title: String, _ value: String) -> some View {
-        HStack {
-            Text(title)
-                .font(.board(12))
-                .foregroundStyle(BoardPalette.fog)
-            Spacer()
-            Text(value)
-                .font(.board(11, weight: .bold))
-                .tracking(0.7)
-                .foregroundStyle(BoardPalette.mist)
         }
+        .buttonStyle(.plain)
+        .frame(height: 106)
     }
 }

@@ -13,6 +13,7 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var firmwareVersion = "Waiting for board"
     @Published private(set) var connectionHistory: [ConnectionHistoryEntry]
     @Published private(set) var macPowerStatus: MacPowerStatus?
+    @Published private(set) var codexContinueEnabled: Bool
     @Published private(set) var xNewsStatus: XNewsFeatureStatus
     @Published private(set) var xNewsRefreshActivity: XNewsRefreshActivity = .idle
     @Published private(set) var xNewsCachedStoryCount = 0
@@ -24,6 +25,7 @@ final class HostStatusStore: ObservableObject {
     private var historyLog: ConnectionHistoryLog
     private let defaults: UserDefaults
     private let powerStatusSource: any MacPowerStatusProviding
+    private let codexContinueFeature: CodexContinueFeatureController
     private let xNewsFeatureController: XNewsFeatureController
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
     private let xNewsFeedCache: XNewsFeedCache
@@ -35,6 +37,7 @@ final class HostStatusStore: ObservableObject {
     init(
         defaults: UserDefaults = .standard,
         powerStatusSource: any MacPowerStatusProviding = CachedMacPowerStatusSource(),
+        codexContinueFeature: CodexContinueFeatureController = CodexContinueFeatureController(),
         xNewsFeatureController: XNewsFeatureController = XNewsFeatureController(),
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
         xNewsFeedCache: XNewsFeedCache = XNewsFeedCache(),
@@ -42,6 +45,7 @@ final class HostStatusStore: ObservableObject {
     ) {
         self.defaults = defaults
         self.powerStatusSource = powerStatusSource
+        self.codexContinueFeature = codexContinueFeature
         self.xNewsFeatureController = xNewsFeatureController
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.xNewsFeedCache = xNewsFeedCache
@@ -49,6 +53,7 @@ final class HostStatusStore: ObservableObject {
         historyLog = ConnectionHistoryLog.decode(defaults.data(forKey: Self.historyDefaultsKey))
         connectionHistory = historyLog.entries
         macPowerStatus = nil
+        codexContinueEnabled = codexContinueFeature.isEnabled
         xNewsStatus = xNewsFeatureController.status()
         xNewsNotice = nil
         pairingAuthorizationNotice = nil
@@ -148,6 +153,16 @@ final class HostStatusStore: ObservableObject {
         NSPasteboard.general.setString(boardID, forType: .string)
     }
 
+    func enableCodexContinue() {
+        codexContinueFeature.setEnabled(true)
+        codexContinueEnabled = true
+    }
+
+    func disableCodexContinue() {
+        codexContinueFeature.setEnabled(false)
+        codexContinueEnabled = false
+    }
+
     func refreshXNewsStatus() {
         xNewsStatus = xNewsFeatureController.status()
         if let feed = try? xNewsFeedCache.load() {
@@ -241,7 +256,7 @@ final class HostStatusStore: ObservableObject {
         let server = BoardServer(
             boardID: configuration.boardID,
             secret: secret,
-            source: CodexHistoryTaskSource(),
+            source: CodexHistoryTaskSource(continueFeature: codexContinueFeature),
             powerStatusSource: powerStatusSource,
             xNewsRefreshCoordinator: xNewsRefreshCoordinator,
             companionVersion: AppReleaseInfo(infoDictionary: Bundle.main.infoDictionary).marketingVersion,

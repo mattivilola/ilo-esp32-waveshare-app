@@ -9,6 +9,7 @@ struct MenuDashboardView: View {
     @ObservedObject var updater: SparkleUpdaterController
     @State private var diagnosticNotice: String?
     @State private var showingXNewsConsent = false
+    @State private var showingCodexContinueConsent = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -19,6 +20,7 @@ struct MenuDashboardView: View {
             } else {
                 details
                 companionControls
+                codexContinueControls
                 xNewsControls
                 recentActivity
             }
@@ -31,6 +33,16 @@ struct MenuDashboardView: View {
         .onAppear {
             launchAtLogin.refresh()
             store.refreshXNewsStatus()
+        }
+        .confirmationDialog(
+            "Enable board Continue action?",
+            isPresented: $showingCodexContinueConsent,
+            titleVisibility: .visible
+        ) {
+            Button("Enable Fixed Continue") { store.enableCodexContinue() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("After you hold and separately confirm on the paired board, it may resume one idle visible Codex task with exactly “Please continue.” It cannot approve commands, answer questions, or send other text.")
         }
         .confirmationDialog(
             "Enable X News?",
@@ -111,7 +123,7 @@ struct MenuDashboardView: View {
             detailRow("Last sync", value: lastSyncDescription)
             detailRow("MacBook", value: macPowerDescription)
             detailRow("Source", value: "Codex recent history")
-            detailRow("Security", value: "TLS 1.2 · Read only")
+            detailRow("Security", value: store.codexContinueEnabled ? "TLS 1.2 · Fixed continue on" : "TLS 1.2 · Actions off")
             detailRow("Mac companion", value: appReleaseInfo.displayVersion)
             detailRow("Firmware", value: store.firmwareVersion)
         }
@@ -250,6 +262,30 @@ struct MenuDashboardView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private var codexContinueControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Codex Continue", systemImage: "play.circle")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(store.codexContinueEnabled ? "Enabled" : "Off")
+                    .font(.caption)
+                    .foregroundStyle(store.codexContinueEnabled ? .green : .secondary)
+            }
+            Text("Allows only the fixed “Please continue.” message for an idle visible task after hold plus separate confirmation on the board.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if store.codexContinueEnabled {
+                Button("Disable") { store.disableCodexContinue() }
+            } else {
+                Button("Enable Fixed Continue…") { showingCodexContinueConsent = true }
             }
         }
         .padding(12)

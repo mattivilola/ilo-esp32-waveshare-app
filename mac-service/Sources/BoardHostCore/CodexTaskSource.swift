@@ -1,5 +1,6 @@
 import BoardProtocol
 import Foundation
+import OSLog
 
 public enum CodexSourceError: Error, LocalizedError, Sendable {
     case executableNotFound
@@ -63,14 +64,13 @@ private struct ThreadListResult: Decodable, Sendable {
     let data: [CodexThreadRecord]
 }
 
-private struct RPCErrorBody: Decodable, Sendable {
-    let message: String
-}
+private struct CodexTurnStartResult: Decodable, Sendable {
+    struct Turn: Decodable, Sendable {
+        let id: String
+        let status: String
+    }
 
-private struct ThreadListEnvelope: Decodable, Sendable {
-    let id: Int?
-    let result: ThreadListResult?
-    let error: RPCErrorBody?
+    let turn: Turn
 }
 
 actor CodexAppServerClient {
@@ -79,33 +79,51 @@ actor CodexAppServerClient {
     private var output: FileHandle?
     private var buffer = Data()
     private var pendingID: Int?
-    private var pending: CheckedContinuation<[CodexThreadRecord], Error>?
+    private var pending: CheckedContinuation<Data, Error>?
     private var timeoutTask: Task<Void, Never>?
     private var nextID = 2
 
     func listThreads(limit: Int) async throws -> [CodexThreadRecord] {
-        guard pending == nil else { throw CodexSourceError.requestAlreadyRunning }
-        guard let executable = CodexExecutableResolver.resolve() else {
-            throw CodexSourceError.executableNotFound
+        let data = try await request(method: "thread/list", params: [
+            "limit": max(1, min(limit, 12)),
+            "archived": false,
+            "sortKey": "updated_at",
+            "sortDirection": "desc",
+        ] as [String: Any])
+        guard let result = try? JSONDecoder().decode(ThreadListResult.self, from: data) else {
+            throw CodexSourceError.invalidResponse
         }
-        try start(executable: executable)
+        return result.data
+    }
+
+    func continueThread(id threadID: String, requestID: String) async throws {
+        _ = try await request(method: "thread/resume", params: [
+            "threadId": threadID,
+            "excludeTurns": true,
+        ] as [String: Any])
+        let data = try await request(method: "turn/start", params: [
+            "threadId": threadID,
+            "input": [["type": "text", "text": "Please continue."]],
+            "clientUserMessageId": "ilo-board-\(requestID)",
+        ] as [String: Any])
+        guard let result = try? JSONDecoder().decode(CodexTurnStartResult.self, from: data),
+              !result.turn.id.isEmpty,
+              result.turn.status == "inProgress" || result.turn.status == "completed"
+        else {
+            throw CodexSourceError.invalidResponse
+        }
+    }
+
+    private func request(method: String, params: [String: Any]) async throws -> Data {
+        guard pending == nil else { throw CodexSourceError.requestAlreadyRunning }
+        try ensureStarted()
         let requestID = nextID
         nextID += 1
         return try await withCheckedThrowingContinuation { continuation in
             pendingID = requestID
             pending = continuation
             do {
-                try send([
-                    "id": requestID,
-                    "method": "thread/list",
-                    "params": [
-                        "limit": max(1, min(limit, 12)),
-                        "archived": false,
-                        "sortKey": "updated_at",
-                        "sortDirection": "desc",
-                        "useStateDbOnly": true,
-                    ] as [String: Any],
-                ])
+                try send(["id": requestID, "method": method, "params": params])
                 timeoutTask = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(5))
                     await self?.timeout(requestID: requestID)
@@ -116,8 +134,14 @@ actor CodexAppServerClient {
         }
     }
 
-    private func start(executable: URL) throws {
+    private func ensureStarted() throws {
+        if process?.isRunning == true, input != nil, output != nil {
+            return
+        }
         shutdown()
+        guard let executable = CodexExecutableResolver.resolve() else {
+            throw CodexSourceError.executableNotFound
+        }
         let process = Process()
         let stdin = Pipe()
         let stdout = Pipe()
@@ -127,7 +151,6 @@ actor CodexAppServerClient {
         process.standardOutput = stdout
         process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] process in
-            guard process.terminationStatus != 15 else { return }
             Task { await self?.terminated(status: process.terminationStatus) }
         }
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -173,15 +196,18 @@ actor CodexAppServerClient {
             let line = Data(buffer[..<newline])
             buffer.removeSubrange(...newline)
             guard !line.isEmpty,
-                  let envelope = try? JSONDecoder().decode(ThreadListEnvelope.self, from: line),
-                  envelope.id == pendingID
+                  let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  let responseID = (object["id"] as? NSNumber)?.intValue,
+                  responseID == pendingID
             else {
                 continue
             }
-            if let error = envelope.error {
-                finish(.failure(CodexSourceError.rpcError(error.message)))
-            } else if let result = envelope.result {
-                finish(.success(result.data))
+            if let error = object["error"] as? [String: Any],
+               let message = error["message"] as? String {
+                finish(.failure(CodexSourceError.rpcError(message)))
+            } else if let result = object["result"], JSONSerialization.isValidJSONObject(result),
+                      let data = try? JSONSerialization.data(withJSONObject: result) {
+                finish(.success(data))
             } else {
                 finish(.failure(CodexSourceError.invalidResponse))
             }
@@ -194,17 +220,22 @@ actor CodexAppServerClient {
     }
 
     private func terminated(status: Int32) {
-        guard pending != nil else { return }
-        finish(.failure(CodexSourceError.processFailed("exit status \(status)")))
+        output?.readabilityHandler = nil
+        process = nil
+        input = nil
+        output = nil
+        buffer.removeAll(keepingCapacity: true)
+        if pending != nil {
+            finish(.failure(CodexSourceError.processFailed("exit status \(status)")))
+        }
     }
 
-    private func finish(_ result: Result<[CodexThreadRecord], Error>) {
+    private func finish(_ result: Result<Data, Error>) {
         let continuation = pending
         pending = nil
         pendingID = nil
         timeoutTask?.cancel()
         timeoutTask = nil
-        shutdown()
         continuation?.resume(with: result)
     }
 
@@ -270,12 +301,29 @@ enum CodexHistoryMapper {
     }
 }
 
+enum CodexContinuationPolicy {
+    static func allows(_ thread: CodexThreadRecord) -> Bool {
+        thread.status.type == "idle" || thread.status.type == "notLoaded"
+    }
+
+    static func validRequestID(_ value: String) -> Bool {
+        !value.isEmpty && value.count <= 64 && value.allSatisfy {
+            $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-")
+        }
+    }
+}
+
 public actor CodexHistoryTaskSource: TaskSource {
+    private let actionLog = Logger(subsystem: "com.iloapps.iloboard", category: "CodexFixedAction")
     private let client = CodexAppServerClient()
+    private let continueFeature: CodexContinueFeatureController
     private var cachedAt = Date.distantPast
     private var cachedThreads = [CodexThreadRecord]()
+    private var usedContinuationRequests = [String: Date]()
 
-    public init() {}
+    public init(continueFeature: CodexContinueFeatureController = CodexContinueFeatureController()) {
+        self.continueFeature = continueFeature
+    }
 
     public func snapshot(revision: UInt64) async throws -> DashboardSnapshot {
         let now = Date()
@@ -292,8 +340,51 @@ public actor CodexHistoryTaskSource: TaskSource {
             revision: revision,
             generatedAt: now,
             tasks: threads.prefix(6).map(CodexHistoryMapper.task),
+            codexContinueEnabled: continueFeature.isEnabled,
             xNewsEnabled: xNewsStatus.isEnabled,
             newsFeed: xNewsStatus.isEnabled ? XNewsWireMapper.cachedSnapshot(now: now) : nil
         )
+    }
+
+    public func continueTask(id: String, requestID: String) async -> CodexContinueOutcome {
+        guard continueFeature.isEnabled else {
+            actionLog.notice("Rejected fixed continuation because Mac consent is off")
+            return .unavailable
+        }
+        let now = Date()
+        usedContinuationRequests = usedContinuationRequests.filter {
+            now.timeIntervalSince($0.value) < 120
+        }
+        guard CodexContinuationPolicy.validRequestID(requestID),
+              usedContinuationRequests[requestID] == nil
+        else {
+            actionLog.warning("Rejected malformed or replayed fixed continuation request")
+            return .rejected
+        }
+        usedContinuationRequests[requestID] = now
+
+        do {
+            let current = try await client.listThreads(limit: 6)
+            guard let thread = current.first(where: { $0.id == id }),
+                  CodexContinuationPolicy.allows(thread)
+            else {
+                actionLog.notice("Rejected fixed continuation because current task state is ineligible")
+                return .rejected
+            }
+            try await client.continueThread(id: id, requestID: requestID)
+            cachedThreads = []
+            cachedAt = .distantPast
+            actionLog.notice("Accepted hold-confirmed fixed Codex continuation")
+            return .accepted
+        } catch CodexSourceError.requestAlreadyRunning {
+            actionLog.notice("Deferred fixed continuation because the App Server is busy")
+            return .busy
+        } catch CodexSourceError.executableNotFound {
+            actionLog.error("Fixed continuation unavailable because Codex was not found")
+            return .unavailable
+        } catch {
+            actionLog.error("Fixed continuation failed in the Codex App Server")
+            return .failed
+        }
     }
 }

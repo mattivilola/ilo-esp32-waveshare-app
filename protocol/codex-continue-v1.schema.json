@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ILO Board fixed Codex continue messages v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "taskID", "action"],
+      "properties": {
+        "type": { "const": "codexContinueRequest" },
+        "version": { "const": 1 },
+        "requestID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,64}$" },
+        "taskID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,80}$" },
+        "action": { "const": "continue" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "status", "message"],
+      "properties": {
+        "type": { "const": "codexContinueStatus" },
+        "version": { "const": 1 },
+        "requestID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,64}$" },
+        "status": { "enum": ["accepted", "unavailable", "busy", "rejected", "failed"] },
+        "message": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    }
+  ]
+}
