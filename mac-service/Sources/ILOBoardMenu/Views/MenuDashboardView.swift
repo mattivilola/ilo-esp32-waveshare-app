@@ -5,11 +5,13 @@ import SwiftUI
 
 struct MenuDashboardView: View {
     @ObservedObject var store: HostStatusStore
+    @ObservedObject var weatherLocation: MacWeatherLocationController
     @ObservedObject var launchAtLogin: LaunchAtLoginController
     @ObservedObject var updater: SparkleUpdaterController
     @State private var diagnosticNotice: String?
     @State private var showingXNewsConsent = false
     @State private var showingCodexContinueConsent = false
+    @State private var showingLocationConsent = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -21,6 +23,7 @@ struct MenuDashboardView: View {
                 details
                 companionControls
                 codexContinueControls
+                weatherLocationControls
                 xNewsControls
                 recentActivity
             }
@@ -53,6 +56,16 @@ struct MenuDashboardView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This runs your authenticated Grok CLI with X search and may use paid model or tool capacity. Credentials remain on this Mac.")
+        }
+        .confirmationDialog(
+            "Share Mac location for weather?",
+            isPresented: $showingLocationConsent,
+            titleVisibility: .visible
+        ) {
+            Button("Enable Coarse Location") { weatherLocation.enable() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("ILO Board rounds your location to about 1 km, sends it only over the encrypted paired connection, and stores it on the board so weather works without this Mac.")
         }
     }
 
@@ -286,6 +299,35 @@ struct MenuDashboardView: View {
                 Button("Disable") { store.disableCodexContinue() }
             } else {
                 Button("Enable Fixed Continue…") { showingCodexContinueConsent = true }
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+    }
+
+    private var weatherLocationControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Weather location", systemImage: "location")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text(weatherLocation.state.title)
+                    .font(.caption)
+                    .foregroundStyle(weatherLocation.state == .ready ? .green : .secondary)
+            }
+            Text(weatherLocation.detail)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if weatherLocation.state == .off {
+                Button("Use This Mac’s Location…") { showingLocationConsent = true }
+            } else {
+                HStack {
+                    if weatherLocation.state == .denied || weatherLocation.state == .unavailable {
+                        Button("Try Again") { weatherLocation.enable() }
+                    }
+                    Button("Stop Sharing") { weatherLocation.disable() }
+                }
             }
         }
         .padding(12)

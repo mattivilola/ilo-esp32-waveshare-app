@@ -52,6 +52,16 @@
         "timezoneAbbreviation": { "type": "string", "pattern": "^[A-Za-z0-9+:-]{1,7}$" }
       }
     },
+    "weatherLocation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["name", "latitude", "longitude"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+        "longitude": { "type": "number", "minimum": -180, "maximum": 180 }
+      }
+    },
     "newsFeed": {
       "type": ["object", "null"],
       "additionalProperties": false,

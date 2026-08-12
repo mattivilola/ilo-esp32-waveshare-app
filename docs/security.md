@@ -4,13 +4,13 @@ This model covers the firmware built for the Waveshare ESP32-S3-Touch-LCD-5B (SK
 
 ## Phase-1 capability
 
-Codex and Mac-control capabilities are read-only: `tasks.read`, `macPower.read`, plus an explicitly requested diagnostic display capture. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, short summary, and optional Mac battery percentage/state. Mac power data excludes the computer name, battery serial, hardware identifiers, health/capacity history, adapter details, and time estimates. Capture returns only the pixels already visible on the paired physical display. The separate `xNews.refresh.request` capability can start only the already-opted-in bounded news adapter; all other mutating requests fail closed.
+Codex task data and Mac-control capabilities remain read-only: `tasks.read`, `macPower.read`, plus an explicitly requested diagnostic display capture. One narrow `tasks.continue.fixed` action can resume an eligible idle/unloaded task with exactly `Please continue.` after hold-to-arm and a separate confirmation. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, short summary, and optional Mac battery percentage/state. Mac power data excludes the computer name, battery serial, hardware identifiers, health/capacity history, adapter details, and time estimates. Capture returns only the pixels already visible on the paired physical display. The separate `xNews.refresh.request` capability can start only the already-opted-in bounded news adapter; all other mutating requests fail closed.
 
 ## Codex privacy boundary
 
 The host obtains recent task metadata through a one-shot local Codex App Server `thread/list` request. Its decoder accepts only `id`, optional `name`, `updatedAt`, and `status`. Prompt previews, full turns, working-directory paths, task source metadata, Git information, file contents, environment variables, and credentials are neither decoded nor placed in the board protocol.
 
-Results are capped at six tasks and cached for 15 seconds. A child App Server is closed after each refresh; the companion never reads or writes Codex SQLite databases, session logs, or internal state files directly.
+Results are capped at six tasks and cached for 15 seconds. The companion owns one App Server child for its lifetime so a confirmed fixed continuation can resume a selected task; it never reads or writes Codex SQLite databases, session logs, or internal state files directly.
 
 A task reported as `notLoaded` is presented as recent history with live Desktop status unavailable. It is not presented as active, waiting for approval, or waiting for an answer. This prevents the separate companion process from overstating what it can observe.
 
@@ -30,11 +30,17 @@ OTA delivery is disabled. The compiled foundation has two equal application slot
 
 Direct weather is the only current board-originated Internet request. It sends configured latitude/longitude and ordinary HTTP metadata to `api.open-meteo.com`; it sends no board ID, pairing secret, Wi-Fi password, Codex data, or Mac data. The response is bounded to 8 KiB and HTTPS uses ESP-IDF's CA certificate bundle after SNTP clock synchronization. Weather is optional public-data access, not a general proxy or arbitrary URL feature.
 
+Mac location sharing is off by default. The signed companion first explains the data flow, then requests macOS location permission only after an explicit action. It rounds latitude and longitude to two decimals before adding them to an authenticated snapshot; no precise location history is retained. Firmware validates the bounds, stores the coarse location in NVS, and uses it only for direct Open-Meteo requests. Disabling sharing stops future Mac updates; clearing an already stored board location remains an explicit board/USB reset action so standalone weather does not disappear unexpectedly.
+
+The on-board Wi-Fi editor masks password input and writes credentials directly to board NVS. Wi-Fi passwords are not included in companion snapshots, Bonjour records, screenshots, or serial logs. USB provisioning remains the recovery path if touch entry or the selected network fails.
+
 The authenticated companion snapshot may include only the Mac's current bounded UTC offset and timezone abbreviation for local clock display. It does not transmit the IANA timezone identifier, locale, location, system clock history, or other regional settings. The board obtains absolute time independently through SNTP.
 
 Optional X News remains Mac-mediated and disabled by default. Enabling it requires either explicit CLI consent or the companion’s confirmation dialog because the authenticated Grok process uses `--yolo` for X search and may consume paid capacity. Missing Grok or an Off schedule sends a false visibility flag and hides the complete board page; the ESP32 cannot enable it. The process runs from an isolated temporary directory with memory/subagents disabled, a three-minute deadline, and a 1 MB output cap. Output is rejected unless bounded stories contain matching direct X status URLs whose Snowflake timestamps independently fall inside the requested 24-hour window. Invalid output never replaces the previous cache. Only the visibility flag and verified bounded cache cross TLS to the board; Grok/X credentials, reasoning, sessions, prompts, usage, stderr, and raw output stay off the wire.
 
 Pull-to-refresh is a narrow authenticated request, not a general command channel. It is accepted only after TLS hello/subscription, carries a random bounded request ID and no prompt, and cannot enable Grok consent. The Mac independently enforces opt-in, a 15-minute cost cooldown, one process at a time, the same three-minute timeout/validator, and last-good-cache preservation. The board receives only one of six coarse result states and never sees raw process errors.
+
+Codex continuation is also a narrow authenticated request, not a general prompt channel. It is off by default and requires explicit opt-in in the Mac companion, where it can be revoked immediately. The board sends only a random one-time request ID, a currently displayed task ID, and the fixed `continue` action token. The Mac rechecks consent, rejects malformed or recently replayed IDs, re-lists current tasks, and accepts only idle or unloaded tasks among the six visible records. It then uses the supported App Server to resume the task and constructs exactly `Please continue.` locally. The board cannot choose or alter that text. Active tasks, attention requests, failures, and stale/unknown IDs fail closed.
 
 The Mac companion update channel is separate from firmware OTA. Public releases are Developer-ID signed, notarized, stapled, and additionally signed with Sparkle EdDSA. The private update key remains in the login Keychain; only its public key is embedded in the app. The HTTPS appcast contains bounded changelog text and an immutable versioned GCS URL. Distribution validates the stapled DMG and byte-identical latest alias before signing, then uploads the appcast last. A compromised public bucket cannot produce an accepted replacement DMG without the Apple and EdDSA signing identities.
 
@@ -48,7 +54,7 @@ The device cannot currently:
 - grant additional permissions;
 - use `acceptForSession` or policy amendments;
 - answer free-form or structured Codex questions;
-- start, steer, or interrupt Codex turns;
+- steer or interrupt active Codex turns, or start turns with anything except the fixed eligible-task continuation;
 - run shell commands or AppleScript;
 - read or write Codex SQLite/session files.
 

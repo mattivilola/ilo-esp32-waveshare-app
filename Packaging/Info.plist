@@ -26,6 +26,8 @@
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>ILOSupportsPromptFreeScreenCapture</key>
+    <true/>
     <key>NSBonjourServices</key>
     <array>
         <string>_iloboard._tcp</string>
@@ -36,6 +38,8 @@
     <string>Copyright © 2026 ILO Applications SL</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>ILO Board uses your local network to exchange encrypted status updates with your paired display.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>ILO Board can share a coarse Mac location with your paired display so it can fetch local weather independently.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>SUFeedURL</key>

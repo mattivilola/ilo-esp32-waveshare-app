@@ -30,6 +30,7 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("ImageIO"),
                 .linkedFramework("IOKit"),
+                .linkedFramework("CoreLocation"),
                 .linkedFramework("Network"),
                 .linkedFramework("Security"),
             ]

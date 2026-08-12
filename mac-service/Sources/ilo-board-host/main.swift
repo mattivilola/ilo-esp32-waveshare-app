@@ -86,29 +86,12 @@ struct ILOBoardHostCommand {
 
             let configuration = try HostConfiguration.load()
             let secret = try KeychainPSKStore().load(boardID: configuration.boardID)
-            let (events, continuation) = AsyncStream.makeStream(
-                of: Result<CapturedScreen, ScreenCaptureError>.self,
-                bufferingPolicy: .bufferingNewest(1)
-            )
-            let server = BoardServer(
-                boardID: configuration.boardID,
-                secret: secret,
-                source: MockTaskSource(),
-                screenCaptureHandler: { result in
-                    continuation.yield(result)
-                    continuation.finish()
-                },
-                eventHandler: { event in
-                    if case let .listenerFailed(message) = event {
-                        continuation.yield(.failure(.hostUnavailable(message)))
-                        continuation.finish()
-                    }
-                }
-            )
-            try server.start(port: configuration.port)
             print("Waiting up to \(timeout) seconds for the paired board. Stop ILOBoardMenu first if it owns the service port.")
-            defer { server.stop() }
-            let capture = try await waitForCapture(events: events, timeoutSeconds: timeout)
+            let capture = try await AuthenticatedScreenCapture.capture(
+                configuration: configuration,
+                secret: secret,
+                timeoutSeconds: timeout
+            )
             let png = try ScreenCapturePNGEncoder.encode(capture)
             let options: Data.WritingOptions = force ? .atomic : .withoutOverwriting
             try png.write(to: outputURL, options: options)
@@ -214,26 +197,6 @@ struct ILOBoardHostCommand {
             print("Disabled automatic X News refresh. The last verified cache was preserved.")
         default:
             throw XNewsCommandError.invalidAction
-        }
-    }
-
-    private static func waitForCapture(
-        events: AsyncStream<Result<CapturedScreen, ScreenCaptureError>>,
-        timeoutSeconds: Int
-    ) async throws -> CapturedScreen {
-        try await withThrowingTaskGroup(of: CapturedScreen.self) { group in
-            group.addTask {
-                var iterator = events.makeAsyncIterator()
-                guard let result = await iterator.next() else { throw ScreenCaptureError.connectionClosed }
-                return try result.get()
-            }
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeoutSeconds))
-                throw ScreenCaptureError.timedOut
-            }
-            guard let capture = try await group.next() else { throw ScreenCaptureError.connectionClosed }
-            group.cancelAll()
-            return capture
         }
     }
 

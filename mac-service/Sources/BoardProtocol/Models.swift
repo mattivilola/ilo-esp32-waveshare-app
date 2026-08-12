@@ -62,6 +62,18 @@ public struct HostTimeStatus: Codable, Equatable, Sendable {
     }
 }
 
+public struct WeatherLocation: Codable, Equatable, Sendable {
+    public let name: String
+    public let latitude: Double
+    public let longitude: Double
+
+    public init(name: String, latitude: Double, longitude: Double) {
+        self.name = String(name.prefix(40))
+        self.latitude = min(max((latitude * 100).rounded() / 100, -90), 90)
+        self.longitude = min(max((longitude * 100).rounded() / 100, -180), 180)
+    }
+}
+
 public struct TaskCard: Codable, Equatable, Sendable, Identifiable {
     public let id: String
     public let title: String
@@ -145,6 +157,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let newsFeed: NewsFeedSnapshot?
     public let macPower: MacPowerStatus?
     public let hostTime: HostTimeStatus?
+    public let weatherLocation: WeatherLocation?
     public let companionVersion: String?
 
     private enum CodingKeys: String, CodingKey {
@@ -158,6 +171,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         case newsFeed
         case macPower
         case hostTime
+        case weatherLocation
         case companionVersion
     }
 
@@ -171,6 +185,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         newsFeed: NewsFeedSnapshot? = nil,
         macPower: MacPowerStatus? = nil,
         hostTime: HostTimeStatus? = nil,
+        weatherLocation: WeatherLocation? = nil,
         companionVersion: String? = nil
     ) {
         self.protocolVersion = boardProtocolVersion
@@ -187,6 +202,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         self.newsFeed = newsFeed
         self.macPower = macPower
         self.hostTime = hostTime
+        self.weatherLocation = weatherLocation
         self.companionVersion = companionVersion
     }
 
@@ -203,6 +219,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
             ?? (newsFeed != nil)
         macPower = try container.decodeIfPresent(MacPowerStatus.self, forKey: .macPower)
         hostTime = try container.decodeIfPresent(HostTimeStatus.self, forKey: .hostTime)
+        weatherLocation = try container.decodeIfPresent(WeatherLocation.self, forKey: .weatherLocation)
         companionVersion = try container.decodeIfPresent(String.self, forKey: .companionVersion)
     }
 }

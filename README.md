@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 keeps Codex and Mac control read-only. The only board-originated action is a narrowly bounded, rate-limited X News refresh request that still requires prior Mac-side opt-in. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion now reads real recent task history through the supported local Codex App Server and shares only a bounded MacBook battery percentage/charging state; deterministic mock task data remains available for demos and tests. Delivering those new sources to the board has not yet been rechecked on hardware. The adaptive four/five-page LVGL navigation, shared icon, persistent Settings, Work Pulse timer/clock, screensaver/backlight sleep, direct HTTPS weather, optional Mac-verified X News feed/pull-to-refresh, and Mac power card are firmware-compiled but also await the next physical hardware session. The board cannot yet approve commands, apply file changes, answer Codex questions, or steer a task; those actions need a separate security and informed-consent design.
+Phase 1 keeps Codex access narrow. Recent task metadata remains read-only, while one fixed board-originated action can resume an eligible idle task with exactly `Please continue.` after a hold and separate confirmation. A second narrowly bounded, rate-limited action can refresh X News after prior Mac-side opt-in. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion reads real recent task history through the supported local Codex App Server and shares only bounded board-facing data: MacBook power state, local timezone, and—only after explicit permission—coarse weather coordinates. Deterministic mock task data remains available for demos and tests. The board still cannot approve commands, apply file changes, answer questions, send arbitrary text, or grant permissions.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -80,7 +80,7 @@ make firmware-build
 ./tools/host menu
 ```
 
-`board provision` prompts for Wi-Fi details, a recovery Mac address, and weather location/coordinates; it hides the Wi-Fi password, generates a unique 32-byte pairing key, stores the host copy in macOS Keychain, and writes only the ESP NVS data partition over the physical USB connection. Secrets are never passed as command-line arguments or written into the repository. At runtime the board first discovers the paired host's compatible Bonjour service and uses its current address and advertised port. If multicast DNS is unavailable, incompatible, or does not return that host, it safely falls back to the provisioned address and port.
+`board provision` is the complete USB recovery/bootstrap route: it prompts for Wi-Fi details, a recovery Mac address, and an optional weather location; hides the Wi-Fi password; generates a unique 32-byte pairing key; stores the host copy in macOS Keychain; and writes only the ESP NVS data partition over USB. Secrets are never passed as command-line arguments or written into the repository. After that first setup, Wi-Fi can also be changed directly on the board from **Settings → Wi-Fi** with a masked touch keyboard; it saves only to board NVS and reconnects without the Mac. USB provisioning remains the recovery route and the only way to create/reset the Mac pairing identity.
 
 `host menu` starts a menu-bar-only macOS companion with connection state, last sync, board identity, firmware and companion versions, service port, security mode, and safe start/stop diagnostics. The board Settings page shows the same two versions after an authenticated sync. Use `./tools/host serve` for the headless development service.
 
@@ -167,12 +167,12 @@ make board-screenshot
 make board-screenshot BOARD_SCREENSHOT_OUTPUT=/tmp/ilo-board-live.png BOARD_SCREENSHOT_TIMEOUT=45
 ```
 
-The Make target stores timestamped files under `artifacts/board-screenshots/` by default and waits up to 120 seconds so the board has time to reconnect. When the installed menu companion owns the service port, the target pauses it cleanly, captures the unchanged framebuffer, and reopens it afterward—including when capture fails. It requests exactly one 1024×600 RGB565-LE frame over the existing TLS-PSK connection, verifies 100 strictly ordered bounded chunks and the final SHA-256 digest, then writes a PNG atomically. It refuses to replace an existing file; use a new `BOARD_SCREENSHOT_OUTPUT` path when needed. The lower-level `./tools/host screenshot --output FILE.png [--timeout 1..120] [--force]` command remains available. There is no HTTP screenshot endpoint and an unpaired LAN client cannot request a capture. Firmware, protocol validation, worst-case frame sizing, RGB565 conversion, and PNG dimensions are hardware-independently verified. Actual panel color order, buffer freshness, tearing, capture latency, and peak PSRAM still require the physical board.
+The Make target stores timestamped files under `artifacts/board-screenshots/` by default and waits up to 120 seconds so the board has time to reconnect. It requires the current signed app in `/Applications`, pauses its normal listener cleanly, and runs the one-shot capture through that same stable Developer ID identity and app-owned Keychain credential. This avoids recurring macOS password prompts when a development CLI binary is rebuilt. The app reopens afterward—including when capture fails. The target requests exactly one 1024×600 RGB565-LE frame over the existing TLS-PSK connection, verifies 100 strictly ordered bounded chunks and the final SHA-256 digest, then writes a PNG atomically. It refuses to replace an existing file; use a new `BOARD_SCREENSHOT_OUTPUT` path when needed. The lower-level `./tools/host screenshot --output FILE.png [--timeout 1..120] [--force]` command remains available for headless development, but because it uses the separately owned CLI Keychain item, macOS can ask again after that executable is rebuilt. There is no HTTP screenshot endpoint and an unpaired LAN client cannot request a capture.
 
 ### Four- or five-screen information architecture
 
 1. **Dashboard** — the glanceable work pulse: attention count, active work, connection state, and current focus.
-2. **Codex** — recent sanitized task status and a visible read-only safety boundary.
+2. **Codex** — recent sanitized task status plus a hold-confirmed, fixed “Please continue.” action for eligible idle tasks.
 3. **X News** — an optional rolling 24-hour AI/robotics brief containing only locally validated direct X citations. Vertically scroll up to five stories; horizontal swipes still move between screens.
 4. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
 5. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
@@ -193,7 +193,7 @@ These are deterministic desktop renders with sample data, not photographs of the
   <img src="docs/images/ui-preview/settings.png" alt="ILO Board Settings simulator screen" width="49%">
 </p>
 
-The Settings screen now cycles and persists the clock format (12/24 hour), temperature units, focus duration (25/45/60 minutes), Pulse screensaver timeout (`Never`, 2, or 5 minutes), display-off timeout (`Never`, 5, 10, or 30 minutes), and whether task summaries are visible. It also offers **Turn display off now** and reports whether X News is Mac-enabled; the board cannot grant Grok consent itself. Settings live in their own NVS namespace and survive normal reboot/firmware updates; full USB reprovisioning replaces the NVS partition and returns them to defaults. Wi-Fi password editing remains in secure USB provisioning until an equally safe on-device flow exists.
+The Settings screen now cycles and persists the clock format (12/24 hour), temperature units, focus duration (25/45/60 minutes), Pulse screensaver timeout (`Never`, 2, or 5 minutes), display-off timeout (`Never`, 5, 10, or 30 minutes), and whether task summaries are visible. It also offers **Turn display off now**, reports whether X News is Mac-enabled, and opens a board-local Wi-Fi editor with masked password entry. The password stays in board NVS and is never sent to the Mac, Bonjour, screenshots, or logs. Settings survive normal reboot/firmware updates; full USB reprovisioning replaces NVS and returns them to defaults.
 
 The companion also shares the Mac's configured timezone as a bounded current UTC offset and abbreviation. The board continues synchronizing the absolute clock over SNTP, but displays local time using the Mac offset whenever a current companion is connected. The offset is refreshed with every dashboard snapshot for daylight-saving changes and persisted for reboot; weather-location timezone data remains the fallback for older or unavailable companions.
 
@@ -218,7 +218,7 @@ codex login status
 
 The packaged menu app searches `PATH`, `/opt/homebrew/bin/codex`, and `/usr/local/bin/codex`. If Codex lives elsewhere, launch it with `ILO_BOARD_CODEX_PATH=/absolute/path/to/codex`. The adapter has been integration-tested with `codex-cli 0.146.0`; its decoder is deliberately narrow, but a materially changed future App Server schema may require an update.
 
-The first real adapter is intentionally read-only:
+The first real adapter keeps task data read-only and exposes one fixed continuation action:
 
 - `thread/list` supplies at most six recent task names, timestamps, and coarse status through the installed Codex CLI.
 - Board-visible strings are bounded and sanitized before transport.
@@ -226,7 +226,8 @@ The first real adapter is intentionally read-only:
 - A separately launched App Server can truthfully list recent stored tasks, including tasks created in Codex Desktop.
 - Codex Desktop-owned tasks currently appear as `notLoaded` to that separate server, so it cannot truthfully claim their live running, approval, or question state.
 - Authoritative live status is available only for tasks loaded/owned by the companion's App Server until OpenAI exposes a supported Desktop attachment.
-- Remote answers, approvals, command execution, and task steering remain disabled in Phase 1.
+- After explicit opt-in in the Mac companion, an idle or unloaded visible task can be resumed only with the Mac-constructed message `Please continue.` after hold-to-arm plus separate confirmation. Disabling the Mac control revokes it on the next snapshot.
+- Remote answers, approvals, arbitrary text, command execution, active-turn steering, and permission changes remain disabled in Phase 1.
 
 Do not copy Codex credentials into firmware or NVS. Any future write/control capability must be separately paired, narrowly scoped, visibly confirmed, replay-protected, and auditable.
 
@@ -263,7 +264,11 @@ The local Grok 1.0.0 tests proved why this gate is necessary: the schema-based a
 
 ## Internet access without the Mac
 
-Yes. Once the updated firmware has been flashed and `./tools/board provision` has stored a weather name/latitude/longitude, the board reconnects to known Wi-Fi after reboot and fetches weather without the Mac. It synchronizes time before TLS, validates HTTPS with the ESP-IDF certificate bundle, requests current conditions plus a three-day forecast, refreshes every 30 minutes, retries failures after one minute, and labels retained data `STALE` instead of silently presenting it as current. This logic is compile-verified and its exact JSON contract has been checked against the live API, but it still needs a physical-board network test.
+Yes. Once Wi-Fi and a weather location are stored, the board reconnects after reboot and fetches weather without the Mac. Location can come from USB provisioning or from the companion's explicit **Use This Mac's Location** flow. The latter asks permission only after an in-app explanation, rounds coordinates to two decimals (roughly neighbourhood precision), sends them only over the authenticated TLS-PSK connection, and persists them on the board. The board independently synchronizes time through SNTP even when weather is not configured, validates Open-Meteo through ESP-IDF's certificate bundle, refreshes every 30 minutes, retries after one minute, and labels retained data `STALE` rather than silently presenting it as current.
+
+### Is the board connected by USB or Wi-Fi?
+
+Normal companion traffic is **Wi-Fi**, discovered through Bonjour and encrypted with TLS 1.2 PSK. USB is used for flashing, serial logs, factory backup/recovery, and complete first pairing. Plugging in USB does not silently switch dashboard traffic to a USB protocol. The board can use Wi-Fi, SNTP, and direct weather without the Mac; Codex status, X News, screenshots, and Mac power still require the paired companion on the same reachable network.
 
 The development endpoint is the keyless Open-Meteo free API. The Weather screen includes the required attribution. Open-Meteo says its free endpoint is for non-commercial use; a commercial release must use an appropriate subscription/customer endpoint or another licensed provider. See the [forecast API](https://open-meteo.com/en/docs), [licence/attribution](https://open-meteo.com/en/license), and [terms](https://open-meteo.com/en/terms).
 
