@@ -45,7 +45,7 @@ export PATH="$tmp/bin:$PATH"
 "$ILO_BOARD_ROOT/scripts/render_appcast.sh" "$release_dmg" "$tmp/artifacts/appcast.xml" >/dev/null
 grep -Fq 'sparkle:edSignature="TEST_ED_SIGNATURE"' "$tmp/artifacts/appcast.xml" || fail "Appcast signature is missing."
 grep -Fq "Version ${ILO_BOARD_MARKETING_VERSION}" "$tmp/artifacts/appcast.xml" || fail "Appcast version is missing."
-grep -Fq 'Secure pairing access is explained' "$tmp/artifacts/appcast.xml" || fail "Appcast release history is missing."
+grep -Fq '<description sparkle:format="plain-text">' "$tmp/artifacts/appcast.xml" || fail "Appcast release history is missing."
 
 "$ILO_BOARD_ROOT/scripts/release_distribute.sh" >/dev/null
 [[ "$(wc -l < "$FAKE_GCLOUD_LOG" | tr -d ' ')" == 3 ]] || fail "Expected DMG, latest alias, and appcast uploads."
