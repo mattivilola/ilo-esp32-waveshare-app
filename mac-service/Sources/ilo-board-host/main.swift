@@ -62,13 +62,41 @@ struct ILOBoardHostCommand {
                 boardID: boardID,
                 secret: secret,
                 source: source,
-                powerStatusSource: powerSource
+                powerStatusSource: powerSource,
+                eventHandler: { event in
+                    switch event {
+                    case let .boardConnected(transport):
+                        print("Authenticated board connected over \(transport.rawValue.uppercased()).")
+                    case let .boardDisconnected(transport):
+                        print("Board disconnected from \(transport.rawValue.uppercased()).")
+                    case let .listenerFailed(message):
+                        fputs("Listener failed: \(message)\n", stderr)
+                    default:
+                        break
+                    }
+                }
             )
-            try server.start(port: port)
+            let usbOnly = arguments.contains("--usb-only")
+            if !usbOnly { try server.start(port: port) }
+            let usbDiscovery = IOKitUSBBoardDiscovery()
+            let usbMonitorTask = Task {
+                while !Task.isCancelled {
+                    let presence = USBBoardMatcher.presence(
+                        devices: usbDiscovery.connectedDevices(),
+                        configuredSerialNumber: configuration.usbSerialNumber
+                    )
+                    server.updateUSBFallback(path: presence.path)
+                    try? await Task.sleep(for: .seconds(2))
+                }
+            }
             print(arguments.contains("--mock") ? "Serving sanitized mock task status." : "Serving sanitized Codex recent-task history.")
+            if usbOnly { print("USB-only diagnostic mode; no Wi-Fi listener was opened.") }
             print("Only hold-confirmed fixed Codex continuation is enabled; other remote actions are disabled.")
             let xNewsScheduleTask = Task { await XNewsRefreshCoordinator.shared.run() }
-            defer { xNewsScheduleTask.cancel() }
+            defer {
+                usbMonitorTask.cancel()
+                xNewsScheduleTask.cancel()
+            }
             await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
         case "screenshot":
             guard let outputPath = value(after: "--output", in: arguments) else {
@@ -86,7 +114,7 @@ struct ILOBoardHostCommand {
 
             let configuration = try HostConfiguration.load()
             let secret = try KeychainPSKStore().load(boardID: configuration.boardID)
-            print("Waiting up to \(timeout) seconds for the paired board. Stop ILOBoardMenu first if it owns the service port.")
+            print("Waiting up to \(timeout) seconds for the paired board. Stop ILOBoardMenu first if it owns the Wi-Fi service or USB serial port.")
             let capture = try await AuthenticatedScreenCapture.capture(
                 configuration: configuration,
                 secret: secret,
@@ -105,7 +133,7 @@ struct ILOBoardHostCommand {
             print("ILO Board Host")
             print("  protocol: v\(boardProtocolVersion), tasks.read/continue.fixed + macPower.read + xNews.read/refresh.request + display.capture.rgb565")
             print("  service: _iloboard._tcp")
-            print("  transport: TLS 1.2 PSK")
+            print("  transport: Wi-Fi TLS 1.2 PSK with authenticated encrypted USB fallback")
             print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")
             print("  Desktop task status: recent history only unless owned by this App Server")
             print("  Optional Grok adapter: \(GrokExecutableResolver.resolve()?.path ?? "CLI not found")")
@@ -212,7 +240,7 @@ struct ILOBoardHostCommand {
           ilo-board-host doctor
           ilo-board-host snapshot [--mock]
           ilo-board-host pair --board-id ID --secret-stdin
-          ilo-board-host serve [--mock] [--board-id ID] [--port PORT]
+          ilo-board-host serve [--mock] [--usb-only] [--board-id ID] [--port PORT]
           ilo-board-host screenshot --output FILE.png [--timeout SECONDS] [--force]
           ilo-board-host x-news status
           ilo-board-host x-news refresh --allow-grok-tools

@@ -273,7 +273,11 @@ Yes. Once Wi-Fi and a weather location are stored, the board reconnects after re
 
 ### Is the board connected by USB or Wi-Fi?
 
-Normal companion traffic is **Wi-Fi**, discovered through Bonjour and encrypted with TLS 1.2 PSK. USB is used for flashing, serial logs, factory backup/recovery, and complete first pairing. Plugging in USB does not silently switch dashboard traffic to a USB protocol. The board can use Wi-Fi, SNTP, and direct weather without the Mac; Codex status, X News, screenshots, and Mac power still require the paired companion on the same reachable network.
+The companion reports USB attachment independently from the active data connection. A provisioned board is matched by the native ESP32-S3 USB Serial/JTAG serial number recorded during pairing; an unpaired compatible device is shown as compatible but is never trusted as the paired board.
+
+Normal companion traffic remains **Wi-Fi**, discovered through Bonjour and encrypted with TLS 1.2 PSK. If no authenticated Wi-Fi session exists, the companion automatically tries the physically attached paired board over an authenticated, ChaCha20-Poly1305-encrypted USB serial channel. The same bounded protocol and capabilities run on either transport, and a valid Wi-Fi connection preempts USB as soon as it becomes available. USB fallback therefore keeps Codex status, X News, screenshots, and Mac power available when local peer networking is unavailable; it does not replace the board's own Wi-Fi requirement for SNTP and direct weather.
+
+The serial device is exclusive while fallback is active. Stop the companion service before flashing, provisioning, or opening a serial monitor. For a deliberate no-Wi-Fi diagnostic run, use `./tools/host serve --mock --usb-only`.
 
 The development endpoint is the keyless Open-Meteo free API. The Weather screen includes the required attribution. Open-Meteo says its free endpoint is for non-commercial use; a commercial release must use an appropriate subscription/customer endpoint or another licensed provider. See the [forecast API](https://open-meteo.com/en/docs), [licence/attribution](https://open-meteo.com/en/license), and [terms](https://open-meteo.com/en/terms).
 

@@ -16,11 +16,16 @@ public enum BoardServerError: Error, LocalizedError, Sendable {
 public enum BoardServerEvent: Equatable, Sendable {
     case listenerReady(port: UInt16)
     case listenerFailed(message: String)
-    case boardConnected
+    case boardConnected(transport: BoardTransport)
     case boardVersionReceived(String)
     case firmwareUpdateStatus(FirmwareUpdateStatusMessage)
-    case boardDisconnected
+    case boardDisconnected(transport: BoardTransport)
     case snapshotSent(at: Date)
+}
+
+public enum BoardTransport: String, Equatable, Sendable {
+    case wifi
+    case usb
 }
 
 public final class BoardServer: @unchecked Sendable {
@@ -35,7 +40,9 @@ public final class BoardServer: @unchecked Sendable {
     private let screenCaptureHandler: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let queue = DispatchQueue(label: "com.iloapps.iloboard.host.network")
     private var listener: NWListener?
-    private var connections: [ObjectIdentifier: BoardConnection] = [:]
+    private var connections: [ObjectIdentifier: (connection: BoardConnection, transport: BoardTransport)] = [:]
+    private var activeConnectionID: ObjectIdentifier?
+    private var nextUSBRetry = Date.distantPast
 
     public init(
         boardID: String,
@@ -147,26 +154,58 @@ public final class BoardServer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             self.listener?.cancel()
-            self.connections.values.forEach { $0.cancel() }
+            self.connections.values.forEach { $0.connection.cancel() }
             self.connections.removeAll()
+            self.activeConnectionID = nil
+        }
+    }
+
+    public func updateUSBFallback(path fallbackPath: String?) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let usbEntries = self.connections.filter { $0.value.transport == .usb }
+            guard let fallbackPath else {
+                usbEntries.values.forEach { $0.connection.cancel() }
+                return
+            }
+            if self.activeTransport == .wifi || !usbEntries.isEmpty || Date() < self.nextUSBRetry { return }
+            self.accept(
+                USBSerialBoardConnectionChannel(
+                    path: fallbackPath,
+                    boardID: self.boardID,
+                    secret: self.secret
+                ),
+                transport: .usb
+            )
         }
     }
 
     public func requestFirmwareUpdate(_ action: FirmwareUpdateAction) {
         queue.async { [weak self] in
-            self?.connections.values.forEach { $0.sendFirmwareUpdateCommand(action) }
+            guard let self, let activeConnectionID = self.activeConnectionID else { return }
+            self.connections[activeConnectionID]?.connection.sendFirmwareUpdateCommand(action)
         }
     }
 
     private func accept(_ connection: NWConnection) {
         let connectionLimit = screenCaptureHandler == nil ? 4 : 1
-        guard connections.count < connectionLimit else {
+        let wifiConnectionCount = connections.values.filter { $0.transport == .wifi }.count
+        guard wifiConnectionCount < connectionLimit else {
             connection.cancel()
             return
         }
+        accept(NetworkBoardConnectionChannel(connection: connection), transport: .wifi)
+    }
+
+    private var activeTransport: BoardTransport? {
+        guard let activeConnectionID else { return nil }
+        return connections[activeConnectionID]?.transport
+    }
+
+    private func accept(_ channel: any BoardConnectionChannel, transport: BoardTransport) {
         let captureRequest = screenCaptureHandler.map { _ in ScreenCaptureRequest() }
         let client = BoardConnection(
-            connection: connection,
+            channel: channel,
             expectedBoardID: boardID,
             source: source,
             powerStatusSource: powerStatusSource,
@@ -175,22 +214,44 @@ public final class BoardServer: @unchecked Sendable {
             companionVersion: companionVersion,
             captureRequest: captureRequest,
             onScreenCapture: screenCaptureHandler,
-            onReady: { [eventHandler] in eventHandler(.boardConnected) },
+            onReady: { [weak self] id in self?.connectionReady(id: id, transport: transport) },
             onBoardVersion: { [eventHandler] version in eventHandler(.boardVersionReceived(version)) },
             onFirmwareUpdateStatus: { [eventHandler] status in eventHandler(.firmwareUpdateStatus(status)) },
             onSnapshot: { [eventHandler] date in eventHandler(.snapshotSent(at: date)) },
-            onClose: { [weak self, eventHandler] id in
-                self?.connections.removeValue(forKey: id)
-                eventHandler(.boardDisconnected)
-            }
+            onClose: { [weak self] id in self?.connectionClosed(id: id, transport: transport) }
         )
-        connections[ObjectIdentifier(client)] = client
+        connections[ObjectIdentifier(client)] = (client, transport)
         client.start(queue: queue)
+    }
+
+    private func connectionReady(id: ObjectIdentifier, transport: BoardTransport) {
+        guard connections[id] != nil else { return }
+        if transport == .usb, activeTransport == .wifi {
+            connections[id]?.connection.cancel()
+            return
+        }
+        activeConnectionID = id
+        if transport == .usb { nextUSBRetry = .distantPast }
+        if transport == .wifi {
+            connections
+                .filter { $0.key != id && $0.value.transport == .usb }
+                .values
+                .forEach { $0.connection.cancel() }
+        }
+        eventHandler(.boardConnected(transport: transport))
+    }
+
+    private func connectionClosed(id: ObjectIdentifier, transport: BoardTransport) {
+        connections.removeValue(forKey: id)
+        if transport == .usb { nextUSBRetry = Date().addingTimeInterval(10) }
+        guard activeConnectionID == id else { return }
+        activeConnectionID = nil
+        eventHandler(.boardDisconnected(transport: transport))
     }
 }
 
 private final class BoardConnection: @unchecked Sendable {
-    private let connection: NWConnection
+    private let channel: any BoardConnectionChannel
     private let expectedBoardID: String
     private let source: any TaskSource
     private let powerStatusSource: any MacPowerStatusProviding
@@ -199,7 +260,7 @@ private final class BoardConnection: @unchecked Sendable {
     private let companionVersion: String?
     private let captureRequest: ScreenCaptureRequest?
     private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
-    private let onReady: @Sendable () -> Void
+    private let onReady: @Sendable (ObjectIdentifier) -> Void
     private let onBoardVersion: @Sendable (String) -> Void
     private let onFirmwareUpdateStatus: @Sendable (FirmwareUpdateStatusMessage) -> Void
     private let onSnapshot: @Sendable (Date) -> Void
@@ -212,7 +273,7 @@ private final class BoardConnection: @unchecked Sendable {
     private var captureFinished = false
 
     init(
-        connection: NWConnection,
+        channel: any BoardConnectionChannel,
         expectedBoardID: String,
         source: any TaskSource,
         powerStatusSource: any MacPowerStatusProviding,
@@ -221,13 +282,13 @@ private final class BoardConnection: @unchecked Sendable {
         companionVersion: String?,
         captureRequest: ScreenCaptureRequest?,
         onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
-        onReady: @escaping @Sendable () -> Void,
+        onReady: @escaping @Sendable (ObjectIdentifier) -> Void,
         onBoardVersion: @escaping @Sendable (String) -> Void,
         onFirmwareUpdateStatus: @escaping @Sendable (FirmwareUpdateStatusMessage) -> Void,
         onSnapshot: @escaping @Sendable (Date) -> Void,
         onClose: @escaping @Sendable (ObjectIdentifier) -> Void
     ) {
-        self.connection = connection
+        self.channel = channel
         self.expectedBoardID = expectedBoardID
         self.source = source
         self.powerStatusSource = powerStatusSource
@@ -245,53 +306,36 @@ private final class BoardConnection: @unchecked Sendable {
     }
 
     func start(queue: DispatchQueue) {
-        connection.stateUpdateHandler = { [weak self] state in
+        channel.start(queue: queue) { [weak self] event in
             guard let self else { return }
-            switch state {
+            switch event {
             case .ready:
-                self.captureLog("TLS connection ready")
-                self.onReady()
-                self.receive()
-            case let .failed(error):
-                self.captureLog("Connection failed: \(error.localizedDescription)")
-                self.finishCapture(.failure(.connectionClosed))
-                self.onClose(ObjectIdentifier(self))
-            case .cancelled:
+                self.captureLog("Authenticated connection ready")
+                self.onReady(ObjectIdentifier(self))
+            case let .data(data):
+                self.receive(data)
+            case let .closed(message):
                 self.captureLog("Connection closed")
+                if let message { self.captureLog(message) }
                 self.finishCapture(.failure(.connectionClosed))
                 self.onClose(ObjectIdentifier(self))
-            default:
-                break
             }
         }
-        connection.start(queue: queue)
     }
 
     func cancel() {
         subscribed = false
-        connection.cancel()
+        channel.cancel()
     }
 
-    private func receive() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: boardProtocolMaximumFrameBytes + 4) { [weak self] data, _, complete, error in
-            guard let self else { return }
-            if let data, !data.isEmpty {
-                do {
-                    for payload in try self.decoder.append(data) {
-                        self.handle(payload)
-                    }
-                } catch {
-                    self.send(ErrorMessage(code: "invalidFrame", message: "Frame is empty or too large."))
-                    self.connection.cancel()
-                    return
-                }
+    private func receive(_ data: Data) {
+        do {
+            for payload in try decoder.append(data) {
+                handle(payload)
             }
-            if complete || error != nil {
-                self.captureLog("Peer ended the capture stream\(error.map { ": \($0.localizedDescription)" } ?? "")")
-                self.connection.cancel()
-            } else {
-                self.receive()
-            }
+        } catch {
+            send(ErrorMessage(code: "invalidFrame", message: "Frame is empty or too large."))
+            channel.cancel()
         }
     }
 
@@ -312,7 +356,7 @@ private final class BoardConnection: @unchecked Sendable {
             }
             guard message.boardID == expectedBoardID else {
                 send(ErrorMessage(code: "boardIdentityMismatch", message: "Board identity does not match the TLS pairing."))
-                connection.cancel()
+                channel.cancel()
                 return
             }
             helloAccepted = true
@@ -553,7 +597,7 @@ private final class BoardConnection: @unchecked Sendable {
               let message = try? ProtocolJSON.decoder().decode(type, from: payload)
         else {
             send(ErrorMessage(code: "unexpectedCaptureData", message: "No authenticated screen capture is pending."))
-            connection.cancel()
+            channel.cancel()
             return
         }
         do {
@@ -564,10 +608,10 @@ private final class BoardConnection: @unchecked Sendable {
             }
         } catch let error as ScreenCaptureError {
             finishCapture(.failure(error))
-            connection.cancel()
+            channel.cancel()
         } catch {
             finishCapture(.failure(.invalidMetadata))
-            connection.cancel()
+            channel.cancel()
         }
     }
 
@@ -609,11 +653,9 @@ private final class BoardConnection: @unchecked Sendable {
         do {
             let payload = try ProtocolJSON.encoder().encode(message)
             let frame = try FrameEncoder.encode(payload)
-            connection.send(content: frame, completion: .contentProcessed { error in
-                if error != nil { self.connection.cancel() }
-            })
+            channel.send(frame)
         } catch {
-            connection.cancel()
+            channel.cancel()
         }
     }
 }

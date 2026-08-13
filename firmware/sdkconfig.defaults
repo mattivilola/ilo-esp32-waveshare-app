@@ -26,12 +26,19 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 # TLS-PSK is the only wireless application transport in protocol v1
 CONFIG_ESP_TLS_PSK_VERIFICATION=y
 
+# Authenticated USB fallback uses HKDF-SHA256 and ChaCha20-Poly1305.
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+CONFIG_MBEDTLS_HKDF_C=y
+
 # UI assets used by the compact operations console
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_USE_LOG=y
+CONFIG_LV_MEM_SIZE_KILOBYTES=128
 
 # Dual OTA slots and first-boot validation provide rollback safety. Signed OTA
 # verification is intentionally enabled only in the separate release profile;

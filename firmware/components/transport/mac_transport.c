@@ -9,6 +9,7 @@
 #include "esp_check.h"
 #include "esp_app_desc.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_random.h"
@@ -22,6 +23,7 @@
 #include "mdns.h"
 #include "nvs.h"
 #include "dashboard_ui.h"
+#include "usb_secure_channel.h"
 
 #define WIFI_READY_BIT BIT0
 #define FRAME_MAX 65536
@@ -54,6 +56,19 @@ typedef struct {
     uint8_t psk[PSK_SIZE];
 } mac_transport_config_t;
 
+typedef enum {
+    MAC_CHANNEL_WIFI,
+    MAC_CHANNEL_USB,
+} mac_channel_kind_t;
+
+typedef struct {
+    void *context;
+    bool (*send_json)(void *context, cJSON *json);
+    cJSON *(*read_json)(void *context);
+    int (*wait_data)(void *context, uint32_t timeout_ms);
+    mac_channel_kind_t kind;
+} mac_channel_t;
+
 static const char *TAG = "mac_transport";
 static EventGroupHandle_t wifi_events;
 static mac_transport_model_callback_t model_callback;
@@ -80,6 +95,9 @@ static char wifi_scan_ssids[4][33];
 static TaskHandle_t wifi_scan_task_handle;
 static ota_updater_status_t ota_status_pending;
 static bool ota_status_dirty;
+static mac_channel_kind_t active_channel_kind;
+static uint32_t active_channel_generation;
+static bool active_channel_present;
 
 static bool json_number_equals(cJSON *item, int expected);
 static void copy_json_string(cJSON *object, const char *name, char *destination, size_t size);
@@ -441,6 +459,57 @@ static bool send_json(esp_tls_t *tls, cJSON *json)
     return ok;
 }
 
+static bool tls_channel_send_json(void *context, cJSON *json)
+{
+    return send_json((esp_tls_t *)context, json);
+}
+
+static cJSON *read_json(esp_tls_t *tls);
+
+static cJSON *tls_channel_read_json(void *context)
+{
+    return read_json((esp_tls_t *)context);
+}
+
+static int wait_for_tls_data(esp_tls_t *tls, uint32_t timeout_ms);
+
+static int tls_channel_wait_data(void *context, uint32_t timeout_ms)
+{
+    return wait_for_tls_data((esp_tls_t *)context, timeout_ms);
+}
+
+static bool usb_channel_send_json(void *context, cJSON *json)
+{
+    return usb_secure_channel_send_json((usb_secure_channel_t *)context, json);
+}
+
+static cJSON *usb_channel_read_json(void *context)
+{
+    usb_secure_channel_t *channel = context;
+    if (!channel->pending_data && usb_secure_channel_wait_data(channel, 10000) != 1) return NULL;
+    return usb_secure_channel_read_json(channel);
+}
+
+static int usb_channel_wait_data(void *context, uint32_t timeout_ms)
+{
+    return usb_secure_channel_wait_data((usb_secure_channel_t *)context, timeout_ms);
+}
+
+static bool channel_send_json(mac_channel_t *channel, cJSON *json)
+{
+    return channel->send_json(channel->context, json);
+}
+
+static cJSON *channel_read_json(mac_channel_t *channel)
+{
+    return channel->read_json(channel->context);
+}
+
+static int channel_wait_data(mac_channel_t *channel, uint32_t timeout_ms)
+{
+    return channel->wait_data(channel->context, timeout_ms);
+}
+
 static const char *ota_state_name(ota_updater_state_t state)
 {
     switch (state) {
@@ -457,7 +526,7 @@ static const char *ota_state_name(ota_updater_state_t state)
     }
 }
 
-static bool send_pending_ota_status(esp_tls_t *tls)
+static bool send_pending_ota_status(mac_channel_t *channel)
 {
     portENTER_CRITICAL(&refresh_lock);
     bool dirty = ota_status_dirty;
@@ -474,7 +543,7 @@ static bool send_pending_ota_status(esp_tls_t *tls)
     if (status.available_version[0] != 0) cJSON_AddStringToObject(message, "availableVersion", status.available_version);
     cJSON_AddNumberToObject(message, "progressPercent", status.progress_percent);
     cJSON_AddStringToObject(message, "message", status.detail);
-    bool sent = send_json(tls, message);
+    bool sent = channel_send_json(channel, message);
     cJSON_Delete(message);
     return sent;
 }
@@ -526,7 +595,7 @@ static bool take_codex_chat_request(char *task_id, size_t task_id_size, char *re
     return requested;
 }
 
-static bool send_codex_chat_request(esp_tls_t *tls, const char *task_id, const char *request_id)
+static bool send_codex_chat_request(mac_channel_t *channel, const char *task_id, const char *request_id)
 {
     cJSON *request = cJSON_CreateObject();
     if (request == NULL) return false;
@@ -534,7 +603,7 @@ static bool send_codex_chat_request(esp_tls_t *tls, const char *task_id, const c
     cJSON_AddNumberToObject(request, "version", 1);
     cJSON_AddStringToObject(request, "requestID", request_id);
     cJSON_AddStringToObject(request, "taskID", task_id);
-    bool ok = send_json(tls, request);
+    bool ok = channel_send_json(channel, request);
     cJSON_Delete(request);
     ESP_LOGI(TAG, "Codex chat detail request %s", ok ? "sent" : "failed");
     return ok;
@@ -603,7 +672,7 @@ static void handle_codex_chat_detail(cJSON *message)
     free(detail);
 }
 
-static bool send_codex_continue_request(esp_tls_t *tls, const char *task_id, const char *request_id)
+static bool send_codex_continue_request(mac_channel_t *channel, const char *task_id, const char *request_id)
 {
     cJSON *request = cJSON_CreateObject();
     if (request == NULL) return false;
@@ -612,7 +681,7 @@ static bool send_codex_continue_request(esp_tls_t *tls, const char *task_id, con
     cJSON_AddStringToObject(request, "requestID", request_id);
     cJSON_AddStringToObject(request, "taskID", task_id);
     cJSON_AddStringToObject(request, "action", "continue");
-    bool ok = send_json(tls, request);
+    bool ok = channel_send_json(channel, request);
     cJSON_Delete(request);
     if (ok) {
         ESP_LOGI(TAG, "Fixed Codex continue request sent to paired Mac");
@@ -652,7 +721,7 @@ static void handle_codex_continue_status(cJSON *message)
     dashboard_ui_set_codex_continue_state(state);
 }
 
-static bool send_x_news_refresh_request(esp_tls_t *tls)
+static bool send_x_news_refresh_request(mac_channel_t *channel)
 {
     char request_id[25];
     snprintf(
@@ -666,7 +735,7 @@ static bool send_x_news_refresh_request(esp_tls_t *tls)
     if (request == NULL) return false;
     cJSON_AddStringToObject(request, "type", "xNewsRefreshRequest");
     cJSON_AddStringToObject(request, "requestID", request_id);
-    bool ok = send_json(tls, request);
+    bool ok = channel_send_json(channel, request);
     cJSON_Delete(request);
     if (ok) {
         ESP_LOGI(TAG, "X News refresh request sent to paired Mac");
@@ -723,7 +792,7 @@ static bool json_number_equals(cJSON *item, int expected)
 }
 
 static bool send_capture_result(
-    esp_tls_t *tls,
+    mac_channel_t *channel,
     const char *request_id,
     const char *status,
     const char *error_code,
@@ -747,12 +816,12 @@ static bool send_capture_result(
         cJSON_AddStringToObject(result, "errorCode", error_code);
         cJSON_AddStringToObject(result, "message", message);
     }
-    bool sent = send_json(tls, result);
+    bool sent = channel_send_json(channel, result);
     cJSON_Delete(result);
     return sent;
 }
 
-static bool send_capture_begin(esp_tls_t *tls, const char *request_id, size_t total_bytes)
+static bool send_capture_begin(mac_channel_t *channel, const char *request_id, size_t total_bytes)
 {
     cJSON *begin = cJSON_CreateObject();
     if (begin == NULL) {
@@ -771,13 +840,13 @@ static bool send_capture_begin(esp_tls_t *tls, const char *request_id, size_t to
         "chunkCount",
         (total_bytes + SCREEN_CAPTURE_CHUNK_BYTES - 1) / SCREEN_CAPTURE_CHUNK_BYTES
     );
-    bool sent = send_json(tls, begin);
+    bool sent = channel_send_json(channel, begin);
     cJSON_Delete(begin);
     return sent;
 }
 
 static bool send_capture_chunk(
-    esp_tls_t *tls,
+    mac_channel_t *channel,
     const char *request_id,
     size_t sequence,
     size_t offset,
@@ -815,13 +884,13 @@ static bool send_capture_chunk(
     cJSON_AddNumberToObject(chunk, "sequence", sequence);
     cJSON_AddNumberToObject(chunk, "offset", offset);
     cJSON_AddStringToObject(chunk, "data", encoded);
-    bool sent = send_json(tls, chunk);
+    bool sent = channel_send_json(channel, chunk);
     cJSON_Delete(chunk);
     free(encoded);
     return sent;
 }
 
-static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
+static bool handle_capture_request(mac_channel_t *channel, cJSON *message)
 {
     cJSON *version = cJSON_GetObjectItemCaseSensitive(message, "version");
     cJSON *request_id = cJSON_GetObjectItemCaseSensitive(message, "requestID");
@@ -839,7 +908,7 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
         || !json_number_equals(width, SCREEN_CAPTURE_WIDTH)
         || !json_number_equals(height, SCREEN_CAPTURE_HEIGHT)) {
         return send_capture_result(
-            tls,
+            channel,
             request_id_value,
             "error",
             "unsupportedCapture",
@@ -858,7 +927,7 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
             free(pixels);
         }
         return send_capture_result(
-            tls,
+            channel,
             request_id_value,
             "error",
             "captureUnavailable",
@@ -870,7 +939,7 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
 
     uint8_t digest[32] = {0};
     bool ok = mbedtls_sha256(pixels, total_bytes, digest, 0) == 0
-        && send_capture_begin(tls, request_id_value, total_bytes);
+        && send_capture_begin(channel, request_id_value, total_bytes);
     const size_t chunk_count = (total_bytes + SCREEN_CAPTURE_CHUNK_BYTES - 1) / SCREEN_CAPTURE_CHUNK_BYTES;
     ESP_LOGI(TAG, "Sending %u capture bytes in %u chunks", (unsigned)total_bytes, (unsigned)chunk_count);
     size_t sequence = 0;
@@ -879,7 +948,7 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
         if (chunk_size > SCREEN_CAPTURE_CHUNK_BYTES) {
             chunk_size = SCREEN_CAPTURE_CHUNK_BYTES;
         }
-        ok = send_capture_chunk(tls, request_id_value, sequence, offset, pixels + offset, chunk_size);
+        ok = send_capture_chunk(channel, request_id_value, sequence, offset, pixels + offset, chunk_size);
         offset += chunk_size;
     }
 
@@ -889,7 +958,7 @@ static bool handle_capture_request(esp_tls_t *tls, cJSON *message)
     }
     digest_hex[64] = 0;
     if (ok) {
-        ok = send_capture_result(tls, request_id_value, "ok", NULL, NULL, total_bytes, digest_hex);
+        ok = send_capture_result(channel, request_id_value, "ok", NULL, NULL, total_bytes, digest_hex);
     }
     if (ok) {
         ESP_LOGI(TAG, "Capture request %s completed", request_id_value);
@@ -1183,6 +1252,196 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
     return true;
 }
 
+static bool channel_is_active(mac_channel_kind_t kind, uint32_t generation)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool active = active_channel_present
+        && active_channel_kind == kind
+        && active_channel_generation == generation;
+    portEXIT_CRITICAL(&refresh_lock);
+    return active;
+}
+
+static bool claim_channel(mac_channel_kind_t kind, uint32_t *generation)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool accepted = kind == MAC_CHANNEL_WIFI || !active_channel_present;
+    if (accepted) {
+        active_channel_kind = kind;
+        active_channel_present = true;
+        active_channel_generation += 1;
+        transport_online = false;
+        *generation = active_channel_generation;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    if (accepted) dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_CONNECTING);
+    return accepted;
+}
+
+static bool usb_channel_can_start(void)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool allowed = !active_channel_present;
+    portEXIT_CRITICAL(&refresh_lock);
+    return allowed;
+}
+
+static void release_channel(mac_channel_kind_t kind, uint32_t generation)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool releasing_active = active_channel_present
+        && active_channel_kind == kind
+        && active_channel_generation == generation;
+    bool chat_was_pending = false;
+    bool continue_was_pending = false;
+    if (releasing_active) {
+        active_channel_present = false;
+        transport_online = false;
+        x_news_refresh_requested = false;
+        codex_chat_supported = false;
+        chat_was_pending = codex_chat_requested || codex_chat_in_flight;
+        codex_chat_requested = false;
+        codex_chat_in_flight = false;
+        continue_was_pending = codex_continue_requested || codex_continue_in_flight;
+        codex_continue_requested = false;
+        codex_continue_in_flight = false;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    if (!releasing_active) return;
+    if (continue_was_pending) dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
+    if (chat_was_pending) dashboard_ui_set_codex_chat_detail(NULL);
+    dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
+}
+
+static void run_protocol_session(
+    mac_channel_t *channel,
+    const mac_transport_config_t *config,
+    uint32_t generation
+)
+{
+    cJSON *hello = cJSON_CreateObject();
+    cJSON_AddStringToObject(hello, "type", "hello");
+    cJSON_AddNumberToObject(hello, "protocolVersion", 1);
+    cJSON_AddStringToObject(hello, "boardID", config->board_id);
+    cJSON_AddStringToObject(hello, "firmwareVersion", esp_app_get_description()->version);
+    cJSON *capabilities = cJSON_AddArrayToObject(hello, "capabilities");
+    if (capabilities != NULL) {
+        cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.read"));
+        cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.chat.read"));
+        cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.continue.fixed"));
+        cJSON_AddItemToArray(capabilities, cJSON_CreateString("display.capture.rgb565"));
+        cJSON_AddItemToArray(capabilities, cJSON_CreateString("xNews.refresh.request"));
+#if CONFIG_ILO_OTA_DELIVERY
+        cJSON_AddItemToArray(capabilities, cJSON_CreateString("firmware.update.signed"));
+#endif
+    }
+    bool ok = channel_is_active(channel->kind, generation) && channel_send_json(channel, hello);
+    cJSON_Delete(hello);
+    cJSON *reply = ok ? channel_read_json(channel) : NULL;
+    cJSON *reply_type = reply != NULL ? cJSON_GetObjectItemCaseSensitive(reply, "type") : NULL;
+    ok = channel_is_active(channel->kind, generation)
+        && cJSON_IsString(reply_type)
+        && strcmp(reply_type->valuestring, "helloAck") == 0;
+    cJSON *reply_capabilities = reply != NULL
+        ? cJSON_GetObjectItemCaseSensitive(reply, "capabilities") : NULL;
+    bool supports_chat = ok && json_array_contains_string(reply_capabilities, "tasks.chat.read");
+    cJSON_Delete(reply);
+    if (ok) {
+        cJSON *subscribe = cJSON_CreateObject();
+        cJSON_AddStringToObject(subscribe, "type", "subscribe");
+        ok = channel_send_json(channel, subscribe);
+        cJSON_Delete(subscribe);
+    }
+    if (!ok || !channel_is_active(channel->kind, generation)) return;
+
+    portENTER_CRITICAL(&refresh_lock);
+    codex_chat_supported = supports_chat;
+    transport_online = true;
+    if (ota_status_pending.current_version[0] != 0) ota_status_dirty = true;
+    portEXIT_CRITICAL(&refresh_lock);
+    dashboard_ui_set_connection_state(
+        channel->kind == MAC_CHANNEL_USB ? DASHBOARD_CONNECTION_USB : DASHBOARD_CONNECTION_ONLINE
+    );
+    ESP_LOGI(TAG, "Paired Mac connected over %s", channel->kind == MAC_CHANNEL_USB ? "USB" : "Wi-Fi");
+
+    for (;;) {
+        if (!channel_is_active(channel->kind, generation)) break;
+        if (!send_pending_ota_status(channel)) break;
+        if (take_x_news_refresh_request() && !send_x_news_refresh_request(channel)) break;
+        char chat_task_id[CODEX_TASK_ID_MAX + 1];
+        char chat_request_id[sizeof(codex_chat_request_id)];
+        if (take_codex_chat_request(
+                chat_task_id,
+                sizeof(chat_task_id),
+                chat_request_id,
+                sizeof(chat_request_id)
+            ) && !send_codex_chat_request(channel, chat_task_id, chat_request_id)) {
+            dashboard_ui_set_codex_chat_detail(NULL);
+            break;
+        }
+        char continue_task_id[CODEX_TASK_ID_MAX + 1];
+        char continue_request_id[sizeof(codex_continue_request_id)];
+        if (take_codex_continue_request(
+                continue_task_id,
+                sizeof(continue_task_id),
+                continue_request_id,
+                sizeof(continue_request_id)
+            ) && !send_codex_continue_request(channel, continue_task_id, continue_request_id)) {
+            dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
+            break;
+        }
+        int data_ready = channel_wait_data(channel, 250);
+        if (data_ready < 0) break;
+        if (data_ready == 0) continue;
+        cJSON *message = channel_read_json(channel);
+        if (message == NULL) break;
+        cJSON *message_type = cJSON_GetObjectItemCaseSensitive(message, "type");
+        if (cJSON_IsString(message_type)
+            && strcmp(message_type->valuestring, "screenCaptureRequest") == 0) {
+            bool capture_ok = handle_capture_request(channel, message);
+            cJSON_Delete(message);
+            if (!capture_ok) break;
+            continue;
+        }
+        if (cJSON_IsString(message_type)
+            && strcmp(message_type->valuestring, "xNewsRefreshStatus") == 0) {
+            handle_x_news_refresh_status(message);
+            cJSON_Delete(message);
+            continue;
+        }
+        if (cJSON_IsString(message_type)
+            && strcmp(message_type->valuestring, "codexChatDetail") == 0) {
+            handle_codex_chat_detail(message);
+            cJSON_Delete(message);
+            continue;
+        }
+        if (cJSON_IsString(message_type)
+            && strcmp(message_type->valuestring, "codexContinueStatus") == 0) {
+            handle_codex_continue_status(message);
+            cJSON_Delete(message);
+            continue;
+        }
+        if (cJSON_IsString(message_type)
+            && strcmp(message_type->valuestring, "firmwareUpdateCommand") == 0) {
+            (void)handle_firmware_update_command(message);
+            cJSON_Delete(message);
+            continue;
+        }
+        dashboard_model_t *model = heap_caps_malloc(
+            sizeof(*model),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+        );
+        if (model == NULL) {
+            ESP_LOGE(TAG, "Dashboard snapshot allocation failed");
+            cJSON_Delete(message);
+            break;
+        }
+        if (parse_snapshot(message, model) && model_callback != NULL) model_callback(model);
+        free(model);
+        cJSON_Delete(message);
+    }
+}
+
 static void transport_task(void *argument)
 {
     mac_transport_config_t *config = argument;
@@ -1195,7 +1454,6 @@ static void transport_task(void *argument)
 
     for (;;) {
         xEventGroupWaitBits(wifi_events, WIFI_READY_BIT, pdFALSE, pdTRUE, portMAX_DELAY);
-        dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_CONNECTING);
         mac_endpoint_t endpoint = endpoint_for_connection(config);
         esp_tls_t *tls = esp_tls_init();
         if (tls == NULL) {
@@ -1210,136 +1468,52 @@ static void transport_task(void *argument)
             tls
         );
         if (connected == 1) {
-            cJSON *hello = cJSON_CreateObject();
-            cJSON_AddStringToObject(hello, "type", "hello");
-            cJSON_AddNumberToObject(hello, "protocolVersion", 1);
-            cJSON_AddStringToObject(hello, "boardID", config->board_id);
-            cJSON_AddStringToObject(hello, "firmwareVersion", esp_app_get_description()->version);
-            cJSON *capabilities = cJSON_AddArrayToObject(hello, "capabilities");
-            if (capabilities != NULL) {
-                cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.read"));
-                cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.chat.read"));
-                cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.continue.fixed"));
-                cJSON_AddItemToArray(capabilities, cJSON_CreateString("display.capture.rgb565"));
-                cJSON_AddItemToArray(capabilities, cJSON_CreateString("xNews.refresh.request"));
-#if CONFIG_ILO_OTA_DELIVERY
-                cJSON_AddItemToArray(capabilities, cJSON_CreateString("firmware.update.signed"));
-#endif
-            }
-            bool ok = send_json(tls, hello);
-            cJSON_Delete(hello);
-            cJSON *reply = ok ? read_json(tls) : NULL;
-            cJSON *reply_type = reply != NULL ? cJSON_GetObjectItemCaseSensitive(reply, "type") : NULL;
-            ok = cJSON_IsString(reply_type) && strcmp(reply_type->valuestring, "helloAck") == 0;
-            cJSON *reply_capabilities = reply != NULL
-                ? cJSON_GetObjectItemCaseSensitive(reply, "capabilities") : NULL;
-            portENTER_CRITICAL(&refresh_lock);
-            codex_chat_supported = ok
-                && json_array_contains_string(reply_capabilities, "tasks.chat.read");
-            portEXIT_CRITICAL(&refresh_lock);
-            cJSON_Delete(reply);
-            if (ok) {
-                cJSON *subscribe = cJSON_CreateObject();
-                cJSON_AddStringToObject(subscribe, "type", "subscribe");
-                ok = send_json(tls, subscribe);
-                cJSON_Delete(subscribe);
-            }
-            if (ok) {
-                dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_ONLINE);
-                portENTER_CRITICAL(&refresh_lock);
-                transport_online = true;
-                if (ota_status_pending.current_version[0] != 0) ota_status_dirty = true;
-                portEXIT_CRITICAL(&refresh_lock);
-                for (;;) {
-                    if (!send_pending_ota_status(tls)) break;
-                    if (take_x_news_refresh_request() && !send_x_news_refresh_request(tls)) break;
-                    char chat_task_id[CODEX_TASK_ID_MAX + 1];
-                    char chat_request_id[sizeof(codex_chat_request_id)];
-                    if (take_codex_chat_request(
-                            chat_task_id,
-                            sizeof(chat_task_id),
-                            chat_request_id,
-                            sizeof(chat_request_id)
-                        ) && !send_codex_chat_request(tls, chat_task_id, chat_request_id)) {
-                        dashboard_ui_set_codex_chat_detail(NULL);
-                        break;
-                    }
-                    char continue_task_id[CODEX_TASK_ID_MAX + 1];
-                    char continue_request_id[sizeof(codex_continue_request_id)];
-                    if (take_codex_continue_request(
-                            continue_task_id,
-                            sizeof(continue_task_id),
-                            continue_request_id,
-                            sizeof(continue_request_id)
-                        ) && !send_codex_continue_request(tls, continue_task_id, continue_request_id)) {
-                        dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
-                        break;
-                    }
-                    int data_ready = wait_for_tls_data(tls, 250);
-                    if (data_ready < 0) break;
-                    if (data_ready == 0) continue;
-                    cJSON *message = read_json(tls);
-                    if (message == NULL) break;
-                    cJSON *message_type = cJSON_GetObjectItemCaseSensitive(message, "type");
-                    if (cJSON_IsString(message_type)
-                        && strcmp(message_type->valuestring, "screenCaptureRequest") == 0) {
-                        bool capture_ok = handle_capture_request(tls, message);
-                        cJSON_Delete(message);
-                        if (!capture_ok) break;
-                        continue;
-                    }
-                    if (cJSON_IsString(message_type)
-                        && strcmp(message_type->valuestring, "xNewsRefreshStatus") == 0) {
-                        handle_x_news_refresh_status(message);
-                        cJSON_Delete(message);
-                        continue;
-                    }
-                    if (cJSON_IsString(message_type)
-                        && strcmp(message_type->valuestring, "codexChatDetail") == 0) {
-                        handle_codex_chat_detail(message);
-                        cJSON_Delete(message);
-                        continue;
-                    }
-                    if (cJSON_IsString(message_type)
-                        && strcmp(message_type->valuestring, "codexContinueStatus") == 0) {
-                        handle_codex_continue_status(message);
-                        cJSON_Delete(message);
-                        continue;
-                    }
-                    if (cJSON_IsString(message_type)
-                        && strcmp(message_type->valuestring, "firmwareUpdateCommand") == 0) {
-                        (void)handle_firmware_update_command(message);
-                        cJSON_Delete(message);
-                        continue;
-                    }
-                    dashboard_model_t model;
-                    if (parse_snapshot(message, &model) && model_callback != NULL) {
-                        model_callback(&model);
-                    }
-                    cJSON_Delete(message);
-                }
+            uint32_t generation = 0;
+            if (claim_channel(MAC_CHANNEL_WIFI, &generation)) {
+                mac_channel_t channel = {
+                    .context = tls,
+                    .send_json = tls_channel_send_json,
+                    .read_json = tls_channel_read_json,
+                    .wait_data = tls_channel_wait_data,
+                    .kind = MAC_CHANNEL_WIFI,
+                };
+                run_protocol_session(&channel, config, generation);
+                release_channel(MAC_CHANNEL_WIFI, generation);
             }
         }
-        portENTER_CRITICAL(&refresh_lock);
-        transport_online = false;
-        x_news_refresh_requested = false;
-        codex_chat_supported = false;
-        bool chat_was_pending = codex_chat_requested || codex_chat_in_flight;
-        codex_chat_requested = false;
-        codex_chat_in_flight = false;
-        bool continue_was_pending = codex_continue_requested || codex_continue_in_flight;
-        codex_continue_requested = false;
-        codex_continue_in_flight = false;
-        portEXIT_CRITICAL(&refresh_lock);
-        if (continue_was_pending) {
-            dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
-        }
-        if (chat_was_pending) {
-            dashboard_ui_set_codex_chat_detail(NULL);
-        }
-        dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
         esp_tls_conn_destroy(tls);
         vTaskDelay(pdMS_TO_TICKS(5000));
+    }
+}
+
+static void usb_transport_task(void *argument)
+{
+    mac_transport_config_t *config = argument;
+    for (;;) {
+        if (!usb_channel_can_start()) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            continue;
+        }
+        usb_secure_channel_t usb = { 0 };
+        if (!usb_secure_channel_accept(&usb, config->board_id, config->psk)) {
+            usb_secure_channel_close(&usb);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+        uint32_t generation = 0;
+        if (claim_channel(MAC_CHANNEL_USB, &generation)) {
+            mac_channel_t channel = {
+                .context = &usb,
+                .send_json = usb_channel_send_json,
+                .read_json = usb_channel_read_json,
+                .wait_data = usb_channel_wait_data,
+                .kind = MAC_CHANNEL_USB,
+            };
+            run_protocol_session(&channel, config, generation);
+            release_channel(MAC_CHANNEL_USB, generation);
+        }
+        usb_secure_channel_close(&usb);
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
 
@@ -1446,6 +1620,10 @@ bool mac_transport_start(mac_transport_model_callback_t callback)
         free(config);
         return false;
     }
+    esp_err_t usb_status = usb_secure_channel_initialize();
+    if (usb_status != ESP_OK) {
+        ESP_LOGW(TAG, "USB fallback unavailable: %s", esp_err_to_name(usb_status));
+    }
     esp_err_t mdns_status = mdns_init();
     mdns_available = mdns_status == ESP_OK;
     if (!mdns_available) {
@@ -1455,6 +1633,10 @@ bool mac_transport_start(mac_transport_model_callback_t callback)
     if (xTaskCreatePinnedToCore(transport_task, "mac_transport", 8192, config, 5, NULL, 0) != pdPASS) {
         free(config);
         return false;
+    }
+    if (usb_status == ESP_OK
+        && xTaskCreatePinnedToCore(usb_transport_task, "usb_transport", 6144, config, 5, NULL, 0) != pdPASS) {
+        ESP_LOGW(TAG, "USB fallback task could not start; Wi-Fi transport remains active");
     }
     return true;
 }

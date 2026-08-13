@@ -45,6 +45,8 @@ def serve(arguments: argparse.Namespace) -> None:
     command = ["run", "ilo-board-host", "serve"]
     if arguments.mock:
         command.append("--mock")
+    if arguments.usb_only:
+        command.append("--usb-only")
     run(command)
 
 
@@ -86,6 +88,8 @@ def parser() -> argparse.ArgumentParser:
         command = commands.add_parser(name, help=help_text)
         if name in ("snapshot", "serve"):
             command.add_argument("--mock", action="store_true", help="use deterministic sample tasks instead of Codex history")
+        if name == "serve":
+            command.add_argument("--usb-only", action="store_true", help="open only the authenticated USB fallback for diagnostics")
         if name == "screenshot":
             command.add_argument("--output", required=True, help="destination PNG path")
             command.add_argument("--timeout", type=int, help="seconds to wait for the paired board (default: 45)")

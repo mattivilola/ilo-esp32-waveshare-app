@@ -4,11 +4,12 @@
 Waveshare ESP32-S3-Touch-LCD-5B (SKU 28151, 1024x600)
   LVGL UI
   board state reducer
-  framed JSON over TLS-PSK
-        │ local network
+  bounded framed JSON
+        │ Wi-Fi: TLS-PSK (primary)
+        │ USB: authenticated encrypted serial (fallback)
         ▼
 macOS user service
-  board protocol + pairing
+  board protocol + pairing + transport arbitration
   sanitized TaskSource interface
   Codex recent-history source (default)
   deterministic mock source (tests/demos)
@@ -34,7 +35,7 @@ Codex app-server
 - UI components consume a view model and do not perform networking.
 - `BoardUIPrototype` mirrors the intended device information architecture for visual iteration and screenshots; LVGL remains the shipping device UI and physical hardware remains the final verification target.
 - The shared 512×512 PNG is transformed deterministically into macOS `.icns` and a 48×48 LVGL ARGB descriptor by `make assets`; generated firmware bytes contain no runtime PNG decoder dependency.
-- `BoardHostCore` owns TLS, Keychain access, task sanitization, and connection events; the menu-bar executable only presents that state and lifecycle controls.
+- `BoardHostCore` owns TLS, authenticated USB fallback, Wi-Fi-first arbitration, Keychain access, task sanitization, and connection events; the menu-bar executable only presents that state and lifecycle controls.
 - Live screenshots reuse the authenticated framed connection. A one-shot host sends a versioned capture request only after hello/subscription, firmware copies one full LVGL RGB565 buffer into temporary PSRAM, and returns bounded base64 chunks plus SHA-256. The host validates metadata, exact sequence/offset/length, and checksum before converting to PNG; neither side exposes an HTTP listener.
 - Recent Codex chat detail is fetched only when the user opens one of the currently visible task IDs. The board renders the bounded response in a full-width, read-only vertical scroller and keeps fixed continuation on the separate hold/confirm control surface.
 - Optional X News is a Mac-side adapter, not direct ESP32 Internet access. The companion detects the Grok executable and owns explicit consent plus schedule state; its snapshot boolean inserts or removes the complete LVGL page. An enabled scheduler or authenticated pull-to-refresh request runs headless `grok -p`, validates direct X citations and their ID-derived timestamps, and caches only the bounded accepted feed. The optional LVGL page never executes Grok or holds X credentials; its request cannot enable consent or bypass cooldown/validation.
@@ -49,12 +50,14 @@ The hardware layer is intentionally pinned to Waveshare SKU 28151. The similarly
 
 ## Why framed JSON
 
-The first transport is a four-byte length plus JSON over TLS/TCP. It is bidirectional, bounded, debuggable, supported by Network.framework and ESP-TLS, and avoids embedding an HTTP server dependency in the macOS service. The message model can move to WebSocket later without changing dashboard records.
+The application protocol is a four-byte length plus JSON. It is bidirectional, bounded, debuggable, and independent of the authenticated transport: TLS/TCP carries it directly, while USB encrypts the complete frame inside its serial envelope. This avoids embedding an HTTP server dependency in the macOS service and lets both transports share one parser and capability model.
 
 ## Runtime configuration
 
 Firmware never compiles Wi-Fi credentials or pairing keys into the application image. `./tools/board provision` writes them to the ESP NVS data partition through physical USB. Provisioning creates the CLI-owned PSK in the macOS login Keychain, while nonsecret board ID and service-port metadata live in `~/Library/Application Support/ILO Board Host/board.json`. The signed companion checks only its own Keychain service during automatic startup. If that item is absent, it stays stopped and presents an in-app explanation; an explicit authorization action reads the legacy item once and creates the companion-owned copy. This keeps the system password dialog contextual and gives later releases a stable signed identity for prompt-free access.
 
 Network.framework and ESP-TLS have been verified end-to-end on the physical 5B with `TLS_PSK_WITH_AES_128_GCM_SHA256`, including recurring snapshot delivery and reconnect-visible Mac status. The Mac advertises `_iloboard._tcp`; firmware now queries that service before each connection attempt, selects only the instance derived from the provisioned board identity, requires TXT `v=1` and `transport=tls-psk-tcp`, and uses the returned IPv4 address and service port. If mDNS initialization, lookup, compatibility checks, or address resolution fail, transport uses the provisioned LAN address and port unchanged. TLS-PSK plus the protocol hello still provide the authoritative board identity check after endpoint selection. Bonjour selection is compile-verified but not yet exercised on the physical board.
+
+The companion separately observes the ESP32-S3 USB Serial/JTAG device and matches the recorded USB serial number when available. If Wi-Fi has no authenticated board, `BoardHostCore` opens that serial device, completes a PSK-authenticated HMAC/HKDF handshake, and carries the same framed messages with ChaCha20-Poly1305. Firmware permits only one active application transport; an authenticated Wi-Fi channel increments the connection generation and closes USB. USB is retried with a bounded delay after failure, and unplugging it does not disturb Wi-Fi. The serial port remains exclusive, so flashing and monitoring require stopping the companion service first.
 
 Clock synchronization is a dedicated SNTP worker and runs whenever station-mode Wi-Fi is available; it is no longer gated by weather configuration. Authenticated Mac snapshots provide only the current UTC offset and short timezone abbreviation, which firmware validates and persists for local display. Weather uses a separate direct-board HTTPS path so it survives a Mac reboot or absence. Its location can be USB-provisioned or explicitly shared as two-decimal coarse coordinates by the companion. The client validates the server through ESP-IDF's certificate bundle, bounds the body to 8 KiB, parses only selected current/daily fields, and refreshes every 30 minutes. LIVE/STALE/OFFLINE/SETUP NEEDED are distinct UI states.

@@ -26,6 +26,7 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var xNewsNotice: String?
     @Published private(set) var pairingAuthorizationNotice: String?
     @Published private(set) var usbPresence: USBBoardPresence = .disconnected
+    @Published private(set) var activeTransport: BoardTransport?
 
     private var server: BoardServer?
     private var historyLog: ConnectionHistoryLog
@@ -96,10 +97,12 @@ final class HostStatusStore: ObservableObject {
             while !Task.isCancelled {
                 let devices = usbDiscovery.connectedDevices()
                 guard let self else { return }
-                self.usbPresence = USBBoardMatcher.presence(
+                let presence = USBBoardMatcher.presence(
                     devices: devices,
                     configuredSerialNumber: self.configuredUSBSerialNumber
                 )
+                self.usbPresence = presence
+                self.server?.updateUSBFallback(path: presence.path)
                 try? await Task.sleep(for: .seconds(2))
             }
         }
@@ -175,6 +178,7 @@ final class HostStatusStore: ObservableObject {
         server?.stop()
         server = nil
         transition(to: .stopped, recording: .serviceStopped)
+        activeTransport = nil
     }
 
     func copyBoardID() {
@@ -275,13 +279,15 @@ final class HostStatusStore: ObservableObject {
         case let .listenerFailed(message):
             transition(to: .failed(message), recording: .serviceIssue)
             server = nil
-        case .boardConnected:
+        case let .boardConnected(transport):
+            activeTransport = transport
             transition(to: .connected, recording: .boardConnected)
         case let .boardVersionReceived(version):
             firmwareVersion = version
         case let .firmwareUpdateStatus(status):
             firmwareUpdateStatus = status
-        case .boardDisconnected:
+        case let .boardDisconnected(transport):
+            if activeTransport == transport { activeTransport = nil }
             if server != nil {
                 transition(to: .listening, recording: .boardDisconnected)
             }
@@ -308,6 +314,7 @@ final class HostStatusStore: ObservableObject {
         self.server = server
         do {
             try server.start(port: configuration.port)
+            server.updateUSBFallback(path: usbPresence.path)
         } catch {
             self.server = nil
             throw error
@@ -321,5 +328,25 @@ final class HostStatusStore: ObservableObject {
         if let data = try? historyLog.encoded() {
             defaults.set(data, forKey: Self.historyDefaultsKey)
         }
+    }
+
+    var connectionDetail: String {
+        guard state == .connected else { return state.detail }
+        return switch activeTransport {
+        case .wifi: "Encrypted status sync is active over Wi-Fi"
+        case .usb: "Encrypted USB fallback is active; Wi-Fi is unavailable"
+        case nil: "Authenticated status sync is active"
+        }
+    }
+
+    var securityDescription: String {
+        switch activeTransport {
+        case .usb: "ChaCha20-Poly1305 · Paired USB"
+        case .wifi, nil: codexContinueEnabled ? "TLS 1.2 · Fixed continue on" : "TLS 1.2 · Actions off"
+        }
+    }
+
+    var usbDescription: String {
+        activeTransport == .usb ? "Paired board connected" : usbPresence.displayText
     }
 }

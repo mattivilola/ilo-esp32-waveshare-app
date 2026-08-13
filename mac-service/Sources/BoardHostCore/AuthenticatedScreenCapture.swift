@@ -27,7 +27,21 @@ public enum AuthenticatedScreenCapture {
             }
         )
         try server.start(port: configuration.port)
-        defer { server.stop() }
+        let usbDiscovery = IOKitUSBBoardDiscovery()
+        let usbMonitorTask = Task {
+            while !Task.isCancelled {
+                let presence = USBBoardMatcher.presence(
+                    devices: usbDiscovery.connectedDevices(),
+                    configuredSerialNumber: configuration.usbSerialNumber
+                )
+                server.updateUSBFallback(path: presence.path)
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+        defer {
+            usbMonitorTask.cancel()
+            server.stop()
+        }
 
         return try await withThrowingTaskGroup(of: CapturedScreen.self) { group in
             group.addTask {

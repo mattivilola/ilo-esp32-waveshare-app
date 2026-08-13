@@ -118,8 +118,8 @@ The compact surface shows:
 
 - one clear connection-state chip;
 - board model and shortened opaque identity;
-- listening port and most recent successful sync;
-- the active security/capability boundary (`TLS 1.2 · Read only`);
+- listening port, independent USB attachment state, and most recent successful sync;
+- the active transport and security/capability boundary (`TLS 1.2` over Wi-Fi or `ChaCha20-Poly1305` over paired USB);
 - start/stop service, copy identity, and quit actions.
 
-Green is reserved for an authenticated board connection, orange means the service is ready but waiting, red means action is required, and neutral means stopped or not provisioned. Longer diagnostics stay in the status card rather than expanding menu labels.
+Green is reserved for an authenticated board connection, orange means the service is ready but waiting, red means action is required, and neutral means stopped or not provisioned. USB attachment alone does not turn the service green: the connected device must complete paired authentication. The status detail names Wi-Fi or USB when sync is active, while the separate USB row continues to show physical attachment. Longer diagnostics stay in the status card rather than expanding menu labels.

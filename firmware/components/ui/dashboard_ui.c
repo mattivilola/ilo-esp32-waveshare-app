@@ -2247,6 +2247,10 @@ void dashboard_ui_set_connection_state(dashboard_connection_state_t state)
         text = "Mac online";
         color = COLOR_SIGNAL;
         break;
+    case DASHBOARD_CONNECTION_USB:
+        text = "Mac via USB";
+        color = COLOR_SIGNAL;
+        break;
     case DASHBOARD_CONNECTION_CONNECTING:
         text = "Connecting to Mac";
         break;
