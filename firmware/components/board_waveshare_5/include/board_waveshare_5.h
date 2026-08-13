@@ -20,6 +20,8 @@ esp_lcd_panel_handle_t board_waveshare_5_lcd(void);
 bool board_waveshare_5_read_touch(uint16_t *x, uint16_t *y);
 esp_err_t board_waveshare_5_set_backlight(bool enabled);
 bool board_waveshare_5_backlight_enabled(void);
+esp_err_t board_waveshare_5_rtc_read_epoch(int64_t *epoch_seconds);
+esp_err_t board_waveshare_5_rtc_write_epoch(int64_t epoch_seconds);
 
 #ifdef __cplusplus
 }

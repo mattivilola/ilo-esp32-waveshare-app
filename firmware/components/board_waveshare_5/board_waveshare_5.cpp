@@ -1,5 +1,7 @@
 #include "board_waveshare_5.h"
 
+#include <string.h>
+
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_check.h"
@@ -10,6 +12,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "rtc_time_codec.h"
 
 static const char *TAG = "board_waveshare_5";
 static constexpr int I2C_PORT = 0;
@@ -22,10 +25,18 @@ static constexpr uint32_t I2C_SPEED_HZ = 400000;
 static constexpr uint16_t CH422G_WRITE_SET_ADDRESS = 0x24;
 static constexpr uint16_t CH422G_WRITE_IO_ADDRESS = 0x38;
 static constexpr uint8_t CH422G_BACKLIGHT_MASK = 1U << 2;
+static constexpr uint16_t PCF85063_ADDRESS = 0x51;
+static constexpr uint8_t PCF85063_CONTROL_1_REGISTER = 0x00;
+static constexpr uint8_t PCF85063_SECONDS_REGISTER = 0x04;
+static constexpr uint8_t PCF85063_CONTROL_1_STOP = 1U << 5;
+static constexpr uint8_t PCF85063_CONTROL_1_12_24 = 1U << 1;
+static constexpr uint8_t PCF85063_CONTROL_1_CIE = 1U << 2;
+static constexpr uint8_t PCF85063_CONTROL_1_CAP_SEL = 1U << 0;
 
 static i2c_master_bus_handle_t i2c_bus;
 static i2c_master_dev_handle_t ch422g_set_device;
 static i2c_master_dev_handle_t ch422g_io_device;
+static i2c_master_dev_handle_t rtc_device;
 static esp_lcd_panel_handle_t lcd_panel;
 static esp_lcd_panel_io_handle_t touch_io;
 static esp_lcd_touch_handle_t touch_panel;
@@ -68,6 +79,8 @@ static esp_err_t init_i2c_and_expander(void)
                         "CH422G mode device initialization failed");
     ESP_RETURN_ON_ERROR(add_i2c_device(CH422G_WRITE_IO_ADDRESS, &ch422g_io_device), TAG,
                         "CH422G output device initialization failed");
+    ESP_RETURN_ON_ERROR(add_i2c_device(PCF85063_ADDRESS, &rtc_device), TAG,
+                        "PCF85063 RTC device initialization failed");
 
     // Exact command used by Waveshare to enable the CH422G push-pull outputs.
     return ch422g_write(ch422g_set_device, 0x01);
@@ -217,4 +230,71 @@ extern "C" esp_err_t board_waveshare_5_set_backlight(bool enabled)
 extern "C" bool board_waveshare_5_backlight_enabled(void)
 {
     return backlight_enabled;
+}
+
+extern "C" esp_err_t board_waveshare_5_rtc_read_epoch(int64_t *epoch_seconds)
+{
+    if (!initialized || rtc_device == nullptr || epoch_seconds == nullptr) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint8_t first_register = PCF85063_CONTROL_1_REGISTER;
+    uint8_t registers[11] = {};
+    ESP_RETURN_ON_ERROR(
+        i2c_master_transmit_receive(
+            rtc_device,
+            &first_register,
+            sizeof(first_register),
+            registers,
+            sizeof(registers),
+            1000
+        ),
+        TAG,
+        "RTC read failed"
+    );
+    if ((registers[0] & (PCF85063_CONTROL_1_STOP | PCF85063_CONTROL_1_12_24)) != 0) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!pcf85063_decode_epoch(&registers[PCF85063_SECONDS_REGISTER], epoch_seconds)) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+    return ESP_OK;
+}
+
+extern "C" esp_err_t board_waveshare_5_rtc_write_epoch(int64_t epoch_seconds)
+{
+    if (!initialized || rtc_device == nullptr) return ESP_ERR_INVALID_STATE;
+
+    uint8_t time_registers[PCF85063_TIME_REGISTER_COUNT] = {};
+    if (!pcf85063_encode_epoch(epoch_seconds, time_registers)) return ESP_ERR_INVALID_ARG;
+
+    uint8_t control_1 = 0;
+    uint8_t control_register = PCF85063_CONTROL_1_REGISTER;
+    ESP_RETURN_ON_ERROR(
+        i2c_master_transmit_receive(
+            rtc_device,
+            &control_register,
+            sizeof(control_register),
+            &control_1,
+            sizeof(control_1),
+            1000
+        ),
+        TAG,
+        "RTC control read failed"
+    );
+    // Preserve clock-output/correction configuration while guaranteeing a
+    // running 24-hour clock before installing UTC calendar fields.
+    uint8_t control_write[] = {
+        PCF85063_CONTROL_1_REGISTER,
+        (uint8_t)(control_1 & (PCF85063_CONTROL_1_CIE | PCF85063_CONTROL_1_CAP_SEL)),
+    };
+    ESP_RETURN_ON_ERROR(
+        i2c_master_transmit(rtc_device, control_write, sizeof(control_write), 1000),
+        TAG,
+        "RTC control write failed"
+    );
+
+    uint8_t payload[PCF85063_TIME_REGISTER_COUNT + 1] = { PCF85063_SECONDS_REGISTER };
+    memcpy(&payload[1], time_registers, sizeof(time_registers));
+    return i2c_master_transmit(rtc_device, payload, sizeof(payload), 1000);
 }
