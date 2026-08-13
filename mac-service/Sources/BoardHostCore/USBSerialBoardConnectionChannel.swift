@@ -99,7 +99,8 @@ enum USBSerialChannelError: Error, LocalizedError {
     case cannotConfigure
     case handshakeTimedOut
     case invalidHandshake
-    case authenticationFailed
+    case challengeAuthenticationFailed
+    case authenticationResponseRejected
     case invalidEncryptedFrame
     case inputTooLarge
     case disconnected
@@ -110,7 +111,8 @@ enum USBSerialChannelError: Error, LocalizedError {
         case .cannotConfigure: "The USB serial port could not be configured."
         case .handshakeTimedOut: "The connected firmware did not offer ILO Board USB fallback."
         case .invalidHandshake: "The USB fallback handshake was malformed."
-        case .authenticationFailed: "The USB device did not authenticate as the paired board."
+        case .challengeAuthenticationFailed: "The USB challenge did not match the paired board credential."
+        case .authenticationResponseRejected: "The board rejected the Mac USB authentication response."
         case .invalidEncryptedFrame: "The USB fallback frame failed authenticated decryption."
         case .inputTooLarge: "The USB fallback frame exceeded the protocol limit."
         case .disconnected: "The USB serial connection closed."
@@ -120,6 +122,12 @@ enum USBSerialChannelError: Error, LocalizedError {
 
 final class USBSerialBoardConnectionChannel: BoardConnectionChannel, @unchecked Sendable {
     private static let maximumLineBytes = 90_000
+    // Protocol v1 waits up to five seconds for AUTH after issuing a challenge.
+    // Never place a second HELLO inside that window: older installed firmware
+    // would correctly reject it as a malformed AUTH. Spaced attempts also span
+    // native USB re-enumeration during a board boot.
+    static let challengeAttemptMilliseconds: Int32 = 6_000
+    static let challengeAttemptCount = 3
     private let path: String
     private let boardID: String
     private let secret: Data
@@ -190,7 +198,7 @@ final class USBSerialBoardConnectionChannel: BoardConnectionChannel, @unchecked 
             while isRunning {
                 try sendPendingFrames(fileDescriptor)
                 if let line = try readLine(fileDescriptor, timeoutMilliseconds: 100) {
-                    if line.hasPrefix(USBSessionCryptography.prefix) {
+                    if line.hasPrefix("\(USBSessionCryptography.prefix) DATA B ") {
                         try handleEncryptedLine(line)
                     }
                 }
@@ -235,28 +243,45 @@ final class USBSerialBoardConnectionChannel: BoardConnectionChannel, @unchecked 
             SecRandomCopyBytes(kSecRandomDefault, bytes.count, bytes.baseAddress!)
         }
         guard randomStatus == errSecSuccess else {
-            throw USBSerialChannelError.authenticationFailed
+            throw USBSerialChannelError.challengeAuthenticationFailed
         }
-        try writeLine(fileDescriptor, "\(USBSessionCryptography.prefix) HELLO \(USBSessionCryptography.hex(clientNonce))")
-        guard let challenge = try nextProtocolLine(fileDescriptor, timeoutMilliseconds: 5_000) else {
-            throw USBSerialChannelError.handshakeTimedOut
+        let hello = "\(USBSessionCryptography.prefix) HELLO \(USBSessionCryptography.hex(clientNonce))"
+        var boardNonce: Data?
+        var sawAuthenticatedMismatch = false
+        for _ in 0..<Self.challengeAttemptCount where boardNonce == nil && isRunning {
+            try writeLine(fileDescriptor, hello)
+            let deadline = Date().addingTimeInterval(Double(Self.challengeAttemptMilliseconds) / 1_000)
+            while boardNonce == nil && isRunning && Date() < deadline {
+                let remaining = max(1, Int32(deadline.timeIntervalSinceNow * 1_000))
+                guard let challenge = try nextProtocolLine(
+                    fileDescriptor,
+                    timeoutMilliseconds: remaining
+                ) else { break }
+                let parts = challenge.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+                guard parts.count == 5, parts[0] == USBSessionCryptography.prefix,
+                      parts[1] == "CHALLENGE", parts[2] == boardID,
+                      let candidateNonce = USBSessionCryptography.data(hex: parts[3]), candidateNonce.count == 32,
+                      let receivedCode = USBSessionCryptography.data(hex: parts[4]), receivedCode.count == 32
+                else { continue }
+                if HMAC<SHA256>.isValidAuthenticationCode(
+                    receivedCode,
+                    authenticating: authenticationPayload(
+                        label: "challenge",
+                        clientNonce: clientNonce,
+                        boardNonce: candidateNonce
+                    ),
+                    using: SymmetricKey(data: secret)
+                ) {
+                    boardNonce = candidateNonce
+                } else {
+                    sawAuthenticatedMismatch = true
+                }
+            }
         }
-        let parts = challenge.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard parts.count == 5, parts[0] == USBSessionCryptography.prefix, parts[1] == "CHALLENGE",
-              parts[2] == boardID,
-              let boardNonce = USBSessionCryptography.data(hex: parts[3]), boardNonce.count == 32,
-              let receivedCode = USBSessionCryptography.data(hex: parts[4]), receivedCode.count == 32
-        else { throw USBSerialChannelError.invalidHandshake }
-        guard HMAC<SHA256>.isValidAuthenticationCode(
-            receivedCode,
-            authenticating: authenticationPayload(
-                label: "challenge",
-                clientNonce: clientNonce,
-                boardNonce: boardNonce
-            ),
-            using: SymmetricKey(data: secret)
-        ) else {
-            throw USBSerialChannelError.authenticationFailed
+        guard let boardNonce else {
+            throw sawAuthenticatedMismatch
+                ? USBSerialChannelError.challengeAuthenticationFailed
+                : USBSerialChannelError.handshakeTimedOut
         }
         let responseCode = USBSessionCryptography.authenticationCode(
             label: "auth",
@@ -265,10 +290,17 @@ final class USBSerialBoardConnectionChannel: BoardConnectionChannel, @unchecked 
             boardNonce: boardNonce,
             boardID: boardID
         )
-        try writeLine(fileDescriptor, "\(USBSessionCryptography.prefix) AUTH \(USBSessionCryptography.hex(responseCode))")
-        guard let ready = try nextProtocolLine(fileDescriptor, timeoutMilliseconds: 5_000),
-              ready == "\(USBSessionCryptography.prefix) READY"
-        else { throw USBSerialChannelError.authenticationFailed }
+        let auth = "\(USBSessionCryptography.prefix) AUTH \(USBSessionCryptography.hex(responseCode))"
+        try writeLine(fileDescriptor, auth)
+        let authDeadline = Date().addingTimeInterval(5)
+        var ready = false
+        repeat {
+            if let line = try nextProtocolLine(fileDescriptor, timeoutMilliseconds: 1_000),
+               line == "\(USBSessionCryptography.prefix) READY" {
+                ready = true
+            }
+        } while !ready && isRunning && Date() < authDeadline
+        guard ready else { throw USBSerialChannelError.authenticationResponseRejected }
         key = USBSessionCryptography.sessionKey(
             secret: secret,
             clientNonce: clientNonce,
@@ -331,8 +363,10 @@ final class USBSerialBoardConnectionChannel: BoardConnectionChannel, @unchecked 
         let deadline = Date().addingTimeInterval(Double(timeoutMilliseconds) / 1_000)
         while Date() < deadline {
             let remaining = max(1, Int32(deadline.timeIntervalSinceNow * 1_000))
-            guard let line = try readLine(fileDescriptor, timeoutMilliseconds: remaining) else { return nil }
-            if line.hasPrefix(USBSessionCryptography.prefix) { return line }
+            if let line = try readLine(fileDescriptor, timeoutMilliseconds: remaining),
+               line.hasPrefix(USBSessionCryptography.prefix) {
+                return line
+            }
         }
         return nil
     }
@@ -347,7 +381,10 @@ final class USBSerialBoardConnectionChannel: BoardConnectionChannel, @unchecked 
         }
         guard result > 0 else { return nil }
         var bytes = [UInt8](repeating: 0, count: 4_096)
-        let count = Darwin.read(fileDescriptor, &bytes, bytes.count)
+        let count = bytes.withUnsafeMutableBytes { buffer in
+            guard let baseAddress = buffer.baseAddress else { return 0 }
+            return Darwin.read(fileDescriptor, baseAddress, buffer.count)
+        }
         guard count > 0 else { throw USBSerialChannelError.disconnected }
         incomingBuffer.append(contentsOf: bytes.prefix(count))
         guard incomingBuffer.count <= Self.maximumLineBytes else { throw USBSerialChannelError.inputTooLarge }

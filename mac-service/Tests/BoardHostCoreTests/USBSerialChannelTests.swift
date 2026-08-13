@@ -49,3 +49,8 @@ import Testing
     #expect(USBSessionCryptography.data(hex: "abc") == nil)
     #expect(USBSessionCryptography.data(hex: "zz") == nil)
 }
+
+@Test func usbFallbackRetriesOutsideInstalledFirmwareAuthenticationWindow() {
+    #expect(USBSerialBoardConnectionChannel.challengeAttemptMilliseconds > 5_000)
+    #expect(USBSerialBoardConnectionChannel.challengeAttemptCount >= 2)
+}

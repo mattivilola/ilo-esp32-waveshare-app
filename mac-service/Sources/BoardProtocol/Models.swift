@@ -321,9 +321,17 @@ public struct HelloAcknowledgement: Encodable, Equatable, Sendable {
         "xNews.refresh.request",
     ]
     public let serverTime: Date
+    public let hostAddress: String?
+    public let hostPort: UInt16?
 
-    public init(serverTime: Date = Date()) {
+    public init(
+        serverTime: Date = Date(),
+        hostAddress: String? = nil,
+        hostPort: UInt16? = nil
+    ) {
         self.serverTime = serverTime
+        self.hostAddress = hostAddress
+        self.hostPort = hostPort
     }
 }
 

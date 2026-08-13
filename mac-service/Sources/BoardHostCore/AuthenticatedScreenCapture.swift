@@ -5,7 +5,8 @@ public enum AuthenticatedScreenCapture {
     public static func capture(
         configuration: HostConfiguration,
         secret: Data,
-        timeoutSeconds: Int
+        timeoutSeconds: Int,
+        wifiEnabled: Bool = true
     ) async throws -> CapturedScreen {
         let (events, continuation) = AsyncStream.makeStream(
             of: Result<CapturedScreen, ScreenCaptureError>.self,
@@ -26,7 +27,7 @@ public enum AuthenticatedScreenCapture {
                 }
             }
         )
-        try server.start(port: configuration.port)
+        if wifiEnabled { try server.start(port: configuration.port) }
         let usbDiscovery = IOKitUSBBoardDiscovery()
         let usbMonitorTask = Task {
             while !Task.isCancelled {

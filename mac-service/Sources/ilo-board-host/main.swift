@@ -72,6 +72,8 @@ struct ILOBoardHostCommand {
                         print("Board disconnected from \(transport.rawValue.uppercased()).")
                     case let .listenerFailed(message):
                         fputs("Listener failed: \(message)\n", stderr)
+                    case let .transportIssue(transport, message):
+                        print("\(transport.rawValue.uppercased()) transport issue: \(message)")
                     default:
                         break
                     }
@@ -106,6 +108,7 @@ struct ILOBoardHostCommand {
             let timeout = try captureTimeout(value(after: "--timeout", in: arguments))
             let outputURL = URL(fileURLWithPath: NSString(string: outputPath).expandingTildeInPath).standardizedFileURL
             let force = arguments.contains("--force")
+            let usbOnly = arguments.contains("--usb-only")
             if !force && FileManager.default.fileExists(atPath: outputURL.path) {
                 throw ScreenCaptureCommandError.outputExists(outputURL.path)
             }
@@ -119,7 +122,8 @@ struct ILOBoardHostCommand {
             let capture = try await AuthenticatedScreenCapture.capture(
                 configuration: configuration,
                 secret: secret,
-                timeoutSeconds: timeout
+                timeoutSeconds: timeout,
+                wifiEnabled: !usbOnly
             )
             let png = try ScreenCapturePNGEncoder.encode(capture)
             let options: Data.WritingOptions = force ? .atomic : .withoutOverwriting

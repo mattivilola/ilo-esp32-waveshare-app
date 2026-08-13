@@ -25,11 +25,16 @@
 
 static bool write_line(const char *line)
 {
-    if (line == NULL || strlen(line) > USB_LINE_MAX) return false;
-    flockfile(stdout);
-    bool ok = fputs(line, stdout) >= 0 && fputc('\n', stdout) >= 0 && fflush(stdout) == 0;
-    funlockfile(stdout);
-    return ok;
+    if (line == NULL) return false;
+    size_t line_size = strlen(line);
+    if (line_size > USB_LINE_MAX) return false;
+    uint8_t *wire = malloc(line_size + 1);
+    if (wire == NULL) return false;
+    memcpy(wire, line, line_size);
+    wire[line_size] = '\n';
+    int written = usb_serial_jtag_write_bytes(wire, line_size + 1, portMAX_DELAY);
+    free(wire);
+    return written == (int)(line_size + 1);
 }
 
 static bool bytes_to_hex(const uint8_t *bytes, size_t size, char *hex, size_t capacity)
@@ -244,19 +249,16 @@ bool usb_secure_channel_accept(
         || !bytes_to_hex(challenge_code, sizeof(challenge_code), challenge_hex, sizeof(challenge_hex))) {
         goto fail;
     }
-    size_t challenge_line_size = strlen(board_id) + sizeof(board_nonce_hex) + sizeof(challenge_hex) + 32;
-    char *challenge_line = malloc(challenge_line_size);
-    if (challenge_line == NULL) goto fail;
+    char challenge_line[256];
     snprintf(
         challenge_line,
-        challenge_line_size,
+        sizeof(challenge_line),
         USB_PREFIX " CHALLENGE %s %s %s",
         board_id,
         board_nonce_hex,
         challenge_hex
     );
     bool sent = write_line(challenge_line);
-    free(challenge_line);
     if (!sent) goto fail;
 
     TickType_t auth_started = xTaskGetTickCount();
@@ -276,13 +278,13 @@ bool usb_secure_channel_accept(
                 USB_PREFIX " HELLO %64s %1s",
                 duplicate_nonce_hex,
                 duplicate_extra
-            ) == 1
-            && strcmp(duplicate_nonce_hex, client_nonce_hex) == 0) {
+            ) == 1) {
+            if (strcmp(duplicate_nonce_hex, client_nonce_hex) == 0
+                && !write_line(challenge_line)) goto fail;
             continue;
         }
         break;
     }
-
     char received_auth_hex[USB_KEY_SIZE * 2 + 1];
     char extra[2];
     uint8_t received_auth[USB_KEY_SIZE];

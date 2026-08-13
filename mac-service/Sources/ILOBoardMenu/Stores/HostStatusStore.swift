@@ -27,6 +27,7 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var pairingAuthorizationNotice: String?
     @Published private(set) var usbPresence: USBBoardPresence = .disconnected
     @Published private(set) var activeTransport: BoardTransport?
+    @Published private(set) var lastTransportIssue: String?
 
     private var server: BoardServer?
     private var historyLog: ConnectionHistoryLog
@@ -73,6 +74,7 @@ final class HostStatusStore: ObservableObject {
         xNewsStatus = xNewsFeatureController.status()
         xNewsNotice = nil
         pairingAuthorizationNotice = nil
+        lastTransportIssue = nil
         guard autoStart else { return }
         start()
         powerMonitorTask = Task { [weak self, powerStatusSource] in
@@ -291,6 +293,8 @@ final class HostStatusStore: ObservableObject {
             if server != nil {
                 transition(to: .listening, recording: .boardDisconnected)
             }
+        case let .transportIssue(transport, message):
+            lastTransportIssue = "\(transport.rawValue.uppercased()): \(message)"
         case let .snapshotSent(date):
             lastSync = date
             state = .connected

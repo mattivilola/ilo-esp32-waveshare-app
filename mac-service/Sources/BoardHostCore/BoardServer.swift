@@ -1,4 +1,5 @@
 import BoardProtocol
+import Darwin
 import Foundation
 import Network
 import Security
@@ -20,6 +21,7 @@ public enum BoardServerEvent: Equatable, Sendable {
     case boardVersionReceived(String)
     case firmwareUpdateStatus(FirmwareUpdateStatusMessage)
     case boardDisconnected(transport: BoardTransport)
+    case transportIssue(transport: BoardTransport, message: String)
     case snapshotSent(at: Date)
 }
 
@@ -43,6 +45,8 @@ public final class BoardServer: @unchecked Sendable {
     private var connections: [ObjectIdentifier: (connection: BoardConnection, transport: BoardTransport)] = [:]
     private var activeConnectionID: ObjectIdentifier?
     private var nextUSBRetry = Date.distantPast
+    private var usbFallbackPath: String?
+    private var listenerPort: UInt16?
 
     public init(
         boardID: String,
@@ -132,6 +136,7 @@ public final class BoardServer: @unchecked Sendable {
                 print("ILO Board host ready on \(listener?.port?.debugDescription ?? "dynamic port")")
                 print("Bonjour: _iloboard._tcp (TLS-PSK, protocol v1)")
                 if let port = listener?.port?.rawValue {
+                    self.listenerPort = port
                     self.eventHandler(.listenerReady(port: port))
                 }
             case let .failed(error):
@@ -163,21 +168,27 @@ public final class BoardServer: @unchecked Sendable {
     public func updateUSBFallback(path fallbackPath: String?) {
         queue.async { [weak self] in
             guard let self else { return }
-            let usbEntries = self.connections.filter { $0.value.transport == .usb }
-            guard let fallbackPath else {
-                usbEntries.values.forEach { $0.connection.cancel() }
-                return
-            }
-            if self.activeTransport == .wifi || !usbEntries.isEmpty || Date() < self.nextUSBRetry { return }
-            self.accept(
-                USBSerialBoardConnectionChannel(
-                    path: fallbackPath,
-                    boardID: self.boardID,
-                    secret: self.secret
-                ),
-                transport: .usb
-            )
+            self.usbFallbackPath = fallbackPath
+            self.startUSBFallbackIfNeeded()
         }
+    }
+
+    private func startUSBFallbackIfNeeded() {
+        let fallbackPath = usbFallbackPath
+        let usbEntries = connections.filter { $0.value.transport == .usb }
+        guard let fallbackPath else {
+            usbEntries.values.forEach { $0.connection.cancel() }
+            return
+        }
+        if activeTransport == .wifi || !usbEntries.isEmpty || Date() < nextUSBRetry { return }
+        accept(
+            USBSerialBoardConnectionChannel(
+                path: fallbackPath,
+                boardID: boardID,
+                secret: secret
+            ),
+            transport: .usb
+        )
     }
 
     public func requestFirmwareUpdate(_ action: FirmwareUpdateAction) {
@@ -212,12 +223,17 @@ public final class BoardServer: @unchecked Sendable {
             xNewsRefreshCoordinator: xNewsRefreshCoordinator,
             weatherLocationSource: weatherLocationSource,
             companionVersion: companionVersion,
+            hostAddress: transport == .usb ? LocalIPv4Address.current() : nil,
+            hostPort: transport == .usb ? listenerPort : nil,
             captureRequest: captureRequest,
             onScreenCapture: screenCaptureHandler,
             onReady: { [weak self] id in self?.connectionReady(id: id, transport: transport) },
             onBoardVersion: { [eventHandler] version in eventHandler(.boardVersionReceived(version)) },
             onFirmwareUpdateStatus: { [eventHandler] status in eventHandler(.firmwareUpdateStatus(status)) },
             onSnapshot: { [eventHandler] date in eventHandler(.snapshotSent(at: date)) },
+            onTransportIssue: { [eventHandler] transport, message in
+                eventHandler(.transportIssue(transport: transport, message: message))
+            },
             onClose: { [weak self] id in self?.connectionClosed(id: id, transport: transport) }
         )
         connections[ObjectIdentifier(client)] = (client, transport)
@@ -243,7 +259,12 @@ public final class BoardServer: @unchecked Sendable {
 
     private func connectionClosed(id: ObjectIdentifier, transport: BoardTransport) {
         connections.removeValue(forKey: id)
-        if transport == .usb { nextUSBRetry = Date().addingTimeInterval(10) }
+        if transport == .usb {
+            nextUSBRetry = Date().addingTimeInterval(6)
+            queue.asyncAfter(deadline: .now() + 6) { [weak self] in
+                self?.startUSBFallbackIfNeeded()
+            }
+        }
         guard activeConnectionID == id else { return }
         activeConnectionID = nil
         eventHandler(.boardDisconnected(transport: transport))
@@ -258,13 +279,17 @@ private final class BoardConnection: @unchecked Sendable {
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
     private let weatherLocationSource: any WeatherLocationProviding
     private let companionVersion: String?
+    private let hostAddress: String?
+    private let hostPort: UInt16?
     private let captureRequest: ScreenCaptureRequest?
     private let onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?
     private let onReady: @Sendable (ObjectIdentifier) -> Void
     private let onBoardVersion: @Sendable (String) -> Void
     private let onFirmwareUpdateStatus: @Sendable (FirmwareUpdateStatusMessage) -> Void
     private let onSnapshot: @Sendable (Date) -> Void
+    private let onTransportIssue: @Sendable (BoardTransport, String) -> Void
     private let onClose: @Sendable (ObjectIdentifier) -> Void
+    private let transport: BoardTransport
     private var decoder = FrameDecoder()
     private var helloAccepted = false
     private var subscribed = false
@@ -280,12 +305,15 @@ private final class BoardConnection: @unchecked Sendable {
         xNewsRefreshCoordinator: XNewsRefreshCoordinator,
         weatherLocationSource: any WeatherLocationProviding,
         companionVersion: String?,
+        hostAddress: String?,
+        hostPort: UInt16?,
         captureRequest: ScreenCaptureRequest?,
         onScreenCapture: (@Sendable (Result<CapturedScreen, ScreenCaptureError>) -> Void)?,
         onReady: @escaping @Sendable (ObjectIdentifier) -> Void,
         onBoardVersion: @escaping @Sendable (String) -> Void,
         onFirmwareUpdateStatus: @escaping @Sendable (FirmwareUpdateStatusMessage) -> Void,
         onSnapshot: @escaping @Sendable (Date) -> Void,
+        onTransportIssue: @escaping @Sendable (BoardTransport, String) -> Void,
         onClose: @escaping @Sendable (ObjectIdentifier) -> Void
     ) {
         self.channel = channel
@@ -295,6 +323,8 @@ private final class BoardConnection: @unchecked Sendable {
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.weatherLocationSource = weatherLocationSource
         self.companionVersion = companionVersion
+        self.hostAddress = hostAddress
+        self.hostPort = hostPort
         self.captureRequest = captureRequest
         self.onScreenCapture = onScreenCapture
         self.captureAssembler = captureRequest.map { ScreenCaptureAssembler(requestID: $0.requestID) }
@@ -302,7 +332,9 @@ private final class BoardConnection: @unchecked Sendable {
         self.onBoardVersion = onBoardVersion
         self.onFirmwareUpdateStatus = onFirmwareUpdateStatus
         self.onSnapshot = onSnapshot
+        self.onTransportIssue = onTransportIssue
         self.onClose = onClose
+        self.transport = channel is USBSerialBoardConnectionChannel ? .usb : .wifi
     }
 
     func start(queue: DispatchQueue) {
@@ -317,7 +349,7 @@ private final class BoardConnection: @unchecked Sendable {
             case let .closed(message):
                 self.captureLog("Connection closed")
                 if let message { self.captureLog(message) }
-                self.finishCapture(.failure(.connectionClosed))
+                if let message { self.onTransportIssue(self.transport, message) }
                 self.onClose(ObjectIdentifier(self))
             }
         }
@@ -365,7 +397,10 @@ private final class BoardConnection: @unchecked Sendable {
                 onBoardVersion(firmwareVersion)
             }
             captureLog("Board hello accepted")
-            send(HelloAcknowledgement())
+            send(HelloAcknowledgement(
+                hostAddress: hostAddress,
+                hostPort: hostPort
+            ))
         case "subscribe":
             guard helloAccepted else {
                 send(ErrorMessage(code: "helloRequired", message: "Send hello before subscribing."))

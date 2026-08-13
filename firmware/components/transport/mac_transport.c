@@ -419,6 +419,26 @@ static mac_endpoint_t endpoint_for_connection(const mac_transport_config_t *conf
     return endpoint;
 }
 
+static bool save_host_endpoint(mac_transport_config_t *config, const char *address, uint16_t port)
+{
+    if (config == NULL || address == NULL || address[0] == 0 || port == 0
+        || strlen(address) >= sizeof(config->host_address)) return false;
+    nvs_handle_t handle = 0;
+    esp_err_t status = nvs_open("ilo_board", NVS_READWRITE, &handle);
+    if (status == ESP_OK) status = nvs_set_str(handle, "host_address", address);
+    if (status == ESP_OK) status = nvs_set_u16(handle, "host_port", port);
+    if (status == ESP_OK) status = nvs_commit(handle);
+    if (handle != 0) nvs_close(handle);
+    if (status != ESP_OK) {
+        ESP_LOGW(TAG, "Could not save Mac endpoint learned over USB: %s", esp_err_to_name(status));
+        return false;
+    }
+    strlcpy(config->host_address, address, sizeof(config->host_address));
+    config->host_port = port;
+    ESP_LOGI(TAG, "Updated provisioned Mac endpoint from authenticated USB session");
+    return true;
+}
+
 static bool tls_write_all(esp_tls_t *tls, const uint8_t *data, size_t size)
 {
     size_t sent = 0;
@@ -1351,7 +1371,7 @@ static void release_channel(mac_channel_kind_t kind, uint32_t generation)
 
 static void run_protocol_session(
     mac_channel_t *channel,
-    const mac_transport_config_t *config,
+    mac_transport_config_t *config,
     uint32_t generation
 )
 {
@@ -1381,6 +1401,14 @@ static void run_protocol_session(
     cJSON *reply_capabilities = reply != NULL
         ? cJSON_GetObjectItemCaseSensitive(reply, "capabilities") : NULL;
     bool supports_chat = ok && json_array_contains_string(reply_capabilities, "tasks.chat.read");
+    if (ok && channel->kind == MAC_CHANNEL_USB) {
+        cJSON *host_address = cJSON_GetObjectItemCaseSensitive(reply, "hostAddress");
+        cJSON *host_port = cJSON_GetObjectItemCaseSensitive(reply, "hostPort");
+        if (cJSON_IsString(host_address) && cJSON_IsNumber(host_port)
+            && host_port->valuedouble >= 1 && host_port->valuedouble <= 65535) {
+            (void)save_host_endpoint(config, host_address->valuestring, (uint16_t)host_port->valuedouble);
+        }
+    }
     cJSON_Delete(reply);
     if (ok) {
         cJSON *subscribe = cJSON_CreateObject();
