@@ -2,6 +2,27 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.7 - 2026-08-13
+
+### Added
+- Show when the provisioned ESP32-S3 board is physically attached by USB, independently from its active data connection.
+- Fall back to an authenticated, encrypted USB connection when Wi-Fi sync is unavailable, while keeping Wi-Fi primary when it recovers.
+- Let the board open a bounded, read-only excerpt of recent Codex chat without exposing commands, tool output, reasoning, paths, or approvals.
+- Add signed firmware update and rollback foundations with verified manifests and explicit install controls.
+
+### Changed
+- Improve the Mac location-permission flow with clear permission, retry, timeout, and System Settings actions.
+- Report the active Wi-Fi or USB transport in both the Mac companion and board UI.
+- Update the bundled board firmware to 0.2.5 with USB transport support and display/runtime stability improvements.
+
+### Fixed
+- Preserve task identity while reading related Codex chat.
+- Prevent Pulse/display rendering stalls and improve on-board Wi-Fi setup recovery.
+
+### Security
+- Authenticate USB peers with the provisioned board key and protect each ordered frame with a fresh ChaCha20-Poly1305 session.
+
+
 ## 0.1.6 - 2026-08-12
 
 ### Changed
