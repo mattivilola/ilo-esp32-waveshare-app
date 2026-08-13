@@ -2,6 +2,24 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.6 - 2026-08-12
+
+### Changed
+- Redesign Mac companion dashboard
+
+
+## 0.1.5 - 2026-08-12
+
+### Added
+- Add consent-gated Codex continue action
+- Add consent-gated Codex continue firmware
+- Add standalone networking and companion handoffs
+
+### Changed
+- Polish dashboard weather and board glyphs
+- Align Pulse screensaver content
+
+
 ## 0.1.4 - 2026-08-12
 
 ### Added
@@ -12,6 +30,7 @@ Notable ILO Board macOS companion changes are documented here.
 - Polish physical X News refresh experience
 - Make board screenshot reconnect automatic
 - Track firmware and companion versions
+- Use the paired Mac's configured timezone for the board clock, including automatic DST updates and weather fallback
 
 ### Fixed
 - Fix authenticated board screenshot transfer

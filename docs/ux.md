@@ -122,4 +122,6 @@ The compact surface shows:
 - the active transport and security/capability boundary (`TLS 1.2` over Wi-Fi or `ChaCha20-Poly1305` over paired USB);
 - start/stop service, copy identity, and quit actions.
 
+Weather location never leaves the companion on an unbounded “Locating…” state. The menu refreshes macOS authorization whenever it opens, distinguishes permission-needed and permission-denied states, links directly to Location Services when access is off or macOS does not answer, and changes an unanswered location request to a retryable unavailable state after 20 seconds.
+
 Green is reserved for an authenticated board connection, orange means the service is ready but waiting, red means action is required, and neutral means stopped or not provisioned. USB attachment alone does not turn the service green: the connected device must complete paired authentication. The status detail names Wi-Fi or USB when sync is active, while the separate USB row continues to show physical attachment. Longer diagnostics stay in the status card rather than expanding menu labels.
