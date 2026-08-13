@@ -17,6 +17,7 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mbedtls/base64.h"
 #include "mbedtls/sha256.h"
@@ -93,6 +94,7 @@ static TickType_t wifi_scan_last_started;
 static size_t wifi_scan_count;
 static char wifi_scan_ssids[4][33];
 static TaskHandle_t wifi_scan_task_handle;
+static SemaphoreHandle_t wifi_control_mutex;
 static ota_updater_status_t ota_status_pending;
 static bool ota_status_dirty;
 static mac_channel_kind_t active_channel_kind;
@@ -124,24 +126,30 @@ static void wifi_scan_task(void *argument)
     (void)argument;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        wifi_scan_config_t scan = { .show_hidden = false };
-        esp_err_t scan_status = esp_wifi_scan_start(&scan, true);
-        bool paused_reconnect = false;
-        if (scan_status == ESP_ERR_WIFI_STATE) {
+        if (wifi_control_mutex == NULL
+            || xSemaphoreTake(wifi_control_mutex, portMAX_DELAY) != pdTRUE) {
             portENTER_CRITICAL(&refresh_lock);
-            wifi_reconnect_suspended = true;
-            paused_reconnect = true;
+            wifi_scan_in_progress = false;
             portEXIT_CRITICAL(&refresh_lock);
-            (void)esp_wifi_disconnect();
-            vTaskDelay(pdMS_TO_TICKS(100));
-            scan_status = esp_wifi_scan_start(&scan, true);
+            continue;
         }
+
+        portENTER_CRITICAL(&refresh_lock);
+        wifi_reconnect_suspended = true;
+        portEXIT_CRITICAL(&refresh_lock);
+
+        wifi_scan_config_t scan = { .show_hidden = false };
+        esp_err_t scan_status = esp_wifi_stop();
+        if (scan_status == ESP_OK) scan_status = esp_wifi_start();
+        if (scan_status == ESP_OK) vTaskDelay(pdMS_TO_TICKS(250));
+        if (scan_status == ESP_OK) scan_status = esp_wifi_scan_start(&scan, true);
 
         uint16_t count = 20;
         wifi_ap_record_t *records = calloc(count, sizeof(*records));
         size_t accepted = 0;
+        esp_err_t records_status = ESP_OK;
         if (scan_status == ESP_OK && records != NULL
-            && esp_wifi_scan_get_ap_records(&count, records) == ESP_OK) {
+            && (records_status = esp_wifi_scan_get_ap_records(&count, records)) == ESP_OK) {
             char discovered[4][33] = { 0 };
             for (uint16_t index = 0; index < count && accepted < 4; ++index) {
                 wifi_auth_mode_t authmode = records[index].authmode;
@@ -166,24 +174,36 @@ static void wifi_scan_task(void *argument)
             memcpy(wifi_scan_ssids, discovered, sizeof(discovered));
             wifi_scan_count = accepted;
             portEXIT_CRITICAL(&refresh_lock);
+        } else if (scan_status == ESP_OK && records == NULL) {
+            records_status = ESP_ERR_NO_MEM;
+            (void)esp_wifi_clear_ap_list();
         }
         free(records);
         portENTER_CRITICAL(&refresh_lock);
         wifi_scan_in_progress = false;
-        bool should_reconnect = paused_reconnect && !wifi_update_in_progress;
+        bool should_reconnect = !wifi_update_in_progress;
         if (should_reconnect) wifi_reconnect_suspended = false;
         portEXIT_CRITICAL(&refresh_lock);
         if (scan_status != ESP_OK) {
             ESP_LOGW(TAG, "Wi-Fi scan failed: %s", esp_err_to_name(scan_status));
+        } else if (records_status != ESP_OK) {
+            ESP_LOGW(TAG, "Wi-Fi scan results failed: %s", esp_err_to_name(records_status));
+        } else {
+            ESP_LOGI(TAG, "Wi-Fi scan examined %u APs; showing %u compatible networks",
+                     (unsigned int)count, (unsigned int)accepted);
         }
         if (should_reconnect) (void)esp_wifi_connect();
+        xSemaphoreGive(wifi_control_mutex);
     }
 }
 
 static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        portENTER_CRITICAL(&refresh_lock);
+        bool connect = !wifi_reconnect_suspended;
+        portEXIT_CRITICAL(&refresh_lock);
+        if (connect) esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(wifi_events, WIFI_READY_BIT);
         portENTER_CRITICAL(&refresh_lock);
@@ -270,6 +290,13 @@ static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
     esp_netif_create_default_wifi_sta();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "Wi-Fi init failed");
+    ESP_RETURN_ON_ERROR(
+        esp_wifi_set_country_code("FI", true),
+        TAG,
+        "Wi-Fi country configuration failed"
+    );
+    wifi_control_mutex = xSemaphoreCreateMutex();
+    if (wifi_control_mutex == NULL) return ESP_ERR_NO_MEM;
     if (xTaskCreate(wifi_scan_task, "wifi_scan", 4096, NULL, 3, &wifi_scan_task_handle) != pdPASS) {
         wifi_scan_task_handle = NULL;
         return ESP_ERR_NO_MEM;
@@ -1647,6 +1674,8 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
     size_t ssid_size = strlen(ssid);
     size_t password_size = strlen(password);
     if (ssid_size == 0 || ssid_size > 32 || password_size < 8 || password_size > 63) return false;
+    if (wifi_control_mutex == NULL
+        || xSemaphoreTake(wifi_control_mutex, portMAX_DELAY) != pdTRUE) return false;
 
     wifi_config_t config = { 0 };
     memcpy(config.sta.ssid, ssid, ssid_size);
@@ -1655,7 +1684,10 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
 
     wifi_config_t previous_config = { 0 };
     esp_err_t status = esp_wifi_get_config(WIFI_IF_STA, &previous_config);
-    if (status != ESP_OK) return false;
+    if (status != ESP_OK) {
+        xSemaphoreGive(wifi_control_mutex);
+        return false;
+    }
 
     portENTER_CRITICAL(&refresh_lock);
     wifi_update_in_progress = true;
@@ -1680,6 +1712,7 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
     wifi_reconnect_suspended = false;
     portEXIT_CRITICAL(&refresh_lock);
     esp_err_t start_status = esp_wifi_start();
+    xSemaphoreGive(wifi_control_mutex);
     if (status != ESP_OK || start_status != ESP_OK) {
         ESP_LOGE(
             TAG,
