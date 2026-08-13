@@ -15,7 +15,12 @@ static bool valid_loaded_state(const focus_session_state_t *candidate)
 {
     if (candidate->status > FOCUS_SESSION_PAUSED
         || candidate->duration_minutes > FOCUS_SESSION_MAX_MINUTES) return false;
-    if (candidate->status == FOCUS_SESSION_INACTIVE) return true;
+    if (candidate->status == FOCUS_SESSION_INACTIVE) {
+        return !candidate->completion_pending
+            || (candidate->duration_minutes >= FOCUS_SESSION_MIN_MINUTES
+                && candidate->duration_minutes <= FOCUS_SESSION_MAX_MINUTES
+                && candidate->completed_epoch > 0);
+    }
     if (candidate->duration_minutes < FOCUS_SESSION_MIN_MINUTES || candidate->started_epoch <= 0) return false;
     if (candidate->status == FOCUS_SESSION_RUNNING) return candidate->deadline_epoch > candidate->started_epoch;
     return candidate->paused_remaining_seconds > 0
