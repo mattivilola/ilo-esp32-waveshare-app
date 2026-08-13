@@ -105,6 +105,7 @@ static void wifi_scan_task(void *argument)
         wifi_scan_config_t scan = { .show_hidden = false };
         esp_err_t scan_status = esp_wifi_stop();
         if (scan_status == ESP_OK) scan_status = esp_wifi_start();
+        if (scan_status == ESP_OK) vTaskDelay(pdMS_TO_TICKS(250));
         if (scan_status == ESP_OK) scan_status = esp_wifi_scan_start(&scan, true);
 
         uint16_t count = 20;
@@ -253,6 +254,11 @@ static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
     esp_netif_create_default_wifi_sta();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "Wi-Fi init failed");
+    ESP_RETURN_ON_ERROR(
+        esp_wifi_set_country_code("FI", true),
+        TAG,
+        "Wi-Fi country configuration failed"
+    );
     wifi_control_mutex = xSemaphoreCreateMutex();
     if (wifi_control_mutex == NULL) return ESP_ERR_NO_MEM;
     if (xTaskCreate(wifi_scan_task, "wifi_scan", 4096, NULL, 3, &wifi_scan_task_handle) != pdPASS) {
