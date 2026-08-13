@@ -45,7 +45,7 @@ The manifest and ESP image currently use the same controlled RSA-3072 key so the
 
 ## Device and companion behavior
 
-The release build checks automatically after Wi-Fi becomes available; it never installs automatically. Settings shows `CHECK`, `CHECKING`, `UP TO DATE`, `INSTALL VERSION`, progress, verification, reboot, or a retry state. The Mac companion mirrors those bounded states and offers the same explicit actions while connected. Its request contains no URL or artifact metadata. The board always refetches and verifies its compiled manifest origin itself, so the board also works independently when the Mac is absent.
+The release build checks only after an explicit request and never installs automatically. This prevents the updater from competing with weather, time, and Mac synchronization during startup. Settings shows `CHECK`, `CHECKING`, `UP TO DATE`, `INSTALL VERSION`, progress, verification, reboot, or a retry state. The Mac companion mirrors those bounded states and offers the same explicit actions while connected. Its request contains no URL or artifact metadata. The board always refetches and verifies its compiled manifest origin itself, so the board also works independently when the Mac is absent.
 
 Download writes only the inactive OTA slot. The active boot selection is changed only after the exact content length and SHA-256 match, `esp_ota_end` accepts the signed ESP image, and its embedded project/version metadata matches the signed manifest. An interruption during download therefore leaves the old slot selected. On first boot, interruption before confirmation causes ESP-IDF rollback to the last valid slot.
 

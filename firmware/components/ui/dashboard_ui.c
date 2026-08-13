@@ -2259,6 +2259,14 @@ static void advance_screensaver_position(void)
     );
 }
 
+static bool ota_update_is_active(void)
+{
+    return settings_ota_state == DASHBOARD_OTA_CHECKING
+        || settings_ota_state == DASHBOARD_OTA_DOWNLOADING
+        || settings_ota_state == DASHBOARD_OTA_VERIFYING
+        || settings_ota_state == DASHBOARD_OTA_REBOOTING;
+}
+
 static void screensaver_timer(lv_timer_t *timer)
 {
     (void)timer;
@@ -2266,6 +2274,17 @@ static void screensaver_timer(lv_timer_t *timer)
     focus_timer_tick();
     if (focus_overlay != NULL && !lv_obj_has_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN)) {
         lando_screensaver_set_active(false);
+        return;
+    }
+    if (ota_update_is_active()) {
+        screensaver_forced_visible = false;
+        lando_screensaver_set_active(false);
+        lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+        reset_screensaver_position();
+        lv_display_trigger_activity(ui_display);
+        if (display_asleep && board_waveshare_5_set_backlight(true) == ESP_OK) {
+            display_asleep = false;
+        }
         return;
     }
     uint32_t inactive = lv_display_get_inactive_time(ui_display);
@@ -2970,6 +2989,18 @@ void dashboard_ui_set_ota_status(dashboard_ota_state_t state, const char *versio
     settings_ota_state = state;
     strlcpy(settings_ota_version, version != NULL ? version : "", sizeof(settings_ota_version));
     settings_ota_progress = progress_percent > 100 ? 100 : progress_percent;
+    if (ota_update_is_active()) {
+        screensaver_forced_visible = false;
+        if (screensaver != NULL) {
+            lando_screensaver_set_active(false);
+            lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+            reset_screensaver_position();
+        }
+        if (ui_display != NULL) lv_display_trigger_activity(ui_display);
+        if (display_asleep && board_waveshare_5_set_backlight(true) == ESP_OK) {
+            display_asleep = false;
+        }
+    }
     refresh_settings_labels();
     lvgl_port_unlock();
 }
