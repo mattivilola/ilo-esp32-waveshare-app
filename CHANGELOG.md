@@ -22,6 +22,9 @@ Notable ILO Board macOS companion changes are documented here.
 - Tolerate duplicate USB handshake hello
 - Reduce memory pressure across USB and Wi-Fi
 
+### Fixed
+- Reliably share the Mac's coarse weather location and refresh the live forecast without exhausting board memory
+
 
 ## 0.1.7 - 2026-08-13
 
