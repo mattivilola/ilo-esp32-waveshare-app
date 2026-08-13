@@ -163,6 +163,7 @@ static lv_obj_t *settings_x_news_value;
 static lv_obj_t *settings_connection_values;
 static lv_obj_t *settings_versions_value;
 static lv_obj_t *settings_ota_value;
+static lv_obj_t *settings_ota_note;
 static dashboard_ota_callback_t ota_check_callback;
 static dashboard_ota_callback_t ota_install_callback;
 static dashboard_ota_state_t settings_ota_state = DASHBOARD_OTA_DISABLED;
@@ -1399,21 +1400,51 @@ static void refresh_settings_labels(void)
     }
     if (settings_ota_value != NULL) {
         char ota_text[36];
+        const char *ota_note = "Tap to check / installs only when you choose";
         lv_color_t color = COLOR_SIGNAL;
         switch (settings_ota_state) {
-        case DASHBOARD_OTA_IDLE: snprintf(ota_text, sizeof(ota_text), "CHECK"); break;
-        case DASHBOARD_OTA_CHECKING: snprintf(ota_text, sizeof(ota_text), "CHECKING..."); break;
-        case DASHBOARD_OTA_UP_TO_DATE: snprintf(ota_text, sizeof(ota_text), "UP TO DATE"); break;
-        case DASHBOARD_OTA_AVAILABLE: snprintf(ota_text, sizeof(ota_text), "INSTALL %.12s", settings_ota_version); break;
-        case DASHBOARD_OTA_DOWNLOADING: snprintf(ota_text, sizeof(ota_text), "%u%%", (unsigned)settings_ota_progress); break;
-        case DASHBOARD_OTA_VERIFYING: snprintf(ota_text, sizeof(ota_text), "VERIFYING"); break;
-        case DASHBOARD_OTA_REBOOTING: snprintf(ota_text, sizeof(ota_text), "REBOOTING"); break;
-        case DASHBOARD_OTA_FAILED: snprintf(ota_text, sizeof(ota_text), "TRY AGAIN"); color = COLOR_AMBER; break;
+        case DASHBOARD_OTA_IDLE:
+            snprintf(ota_text, sizeof(ota_text), "CHECK");
+            break;
+        case DASHBOARD_OTA_CHECKING:
+            snprintf(ota_text, sizeof(ota_text), "CHECKING...");
+            ota_note = "Looking securely for a newer version";
+            break;
+        case DASHBOARD_OTA_UP_TO_DATE:
+            snprintf(ota_text, sizeof(ota_text), "UP TO DATE");
+            ota_note = "You have the latest available firmware";
+            break;
+        case DASHBOARD_OTA_AVAILABLE:
+            snprintf(ota_text, sizeof(ota_text), "INSTALL %.12s", settings_ota_version);
+            ota_note = "A new version is ready when you are";
+            break;
+        case DASHBOARD_OTA_DOWNLOADING:
+            snprintf(ota_text, sizeof(ota_text), "%u%%", (unsigned)settings_ota_progress);
+            ota_note = "Downloading update / keep power connected";
+            break;
+        case DASHBOARD_OTA_VERIFYING:
+            snprintf(ota_text, sizeof(ota_text), "VERIFYING");
+            ota_note = "Checking update / keep power connected";
+            break;
+        case DASHBOARD_OTA_REBOOTING:
+            snprintf(ota_text, sizeof(ota_text), "REBOOTING");
+            ota_note = "Restarting with the new firmware";
+            break;
+        case DASHBOARD_OTA_FAILED:
+            snprintf(ota_text, sizeof(ota_text), "TRY AGAIN");
+            ota_note = "Update check failed / tap to retry";
+            color = COLOR_AMBER;
+            break;
         case DASHBOARD_OTA_DISABLED:
-        default: snprintf(ota_text, sizeof(ota_text), "OTA SETUP NEEDED"); color = COLOR_FOG; break;
+        default:
+            snprintf(ota_text, sizeof(ota_text), "OTA SETUP NEEDED");
+            ota_note = "Wireless updates need one-time setup";
+            color = COLOR_FOG;
+            break;
         }
         lv_label_set_text(settings_ota_value, ota_text);
         lv_obj_set_style_text_color(settings_ota_value, color, 0);
+        if (settings_ota_note != NULL) lv_label_set_text(settings_ota_note, ota_note);
     }
 }
 
@@ -2025,8 +2056,13 @@ static void build_settings_page(lv_obj_t *page)
     create_setting_row(display, 190, "Turn display off now", sleep_now_tapped, &sleep_value);
     lv_label_set_text(sleep_value, "SLEEP");
     create_setting_row(display, 260, "Firmware update", ota_setting_tapped, &settings_ota_value);
-    lv_obj_t *power_note = create_label(display, "Signed OTA / current slot remains safe until verification", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(power_note, LV_ALIGN_BOTTOM_LEFT, 18, -12);
+    settings_ota_note = create_label(
+        display,
+        "Tap to check / installs only when you choose",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_align(settings_ota_note, LV_ALIGN_BOTTOM_LEFT, 18, -12);
 
     lv_obj_t *pulse = create_card(page, 518, 8, 478, 194, 16);
     lv_obj_t *pulse_title = create_label(pulse, "PULSE & UNITS", &lv_font_montserrat_14, COLOR_FOG);

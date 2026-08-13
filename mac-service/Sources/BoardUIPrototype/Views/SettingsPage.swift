@@ -48,7 +48,7 @@ struct SettingsPage: View {
                         firmwareUpdateState = (firmwareUpdateState + 1) % 4
                     }
                     Spacer()
-                    Text("Signed OTA keeps the current slot bootable until download, hash, image signature, and first-boot health checks pass.")
+                    Text(firmwareUpdateNote)
                         .font(.board(11))
                         .foregroundStyle(BoardPalette.fog)
                         .lineSpacing(3)
@@ -190,6 +190,15 @@ struct SettingsPage: View {
         case 2: "INSTALL 0.2.1"
         case 3: "62%"
         default: "CHECK"
+        }
+    }
+
+    private var firmwareUpdateNote: String {
+        switch firmwareUpdateState {
+        case 1: "Looking securely for a newer version"
+        case 2: "A new version is ready when you are"
+        case 3: "Downloading update / keep power connected"
+        default: "Tap to check / installs only when you choose"
         }
     }
 }
