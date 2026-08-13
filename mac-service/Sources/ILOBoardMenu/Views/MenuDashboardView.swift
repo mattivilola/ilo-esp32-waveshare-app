@@ -55,6 +55,7 @@ struct MenuDashboardView: View {
         .frame(width: 420, height: 580)
         .onAppear {
             launchAtLogin.refresh()
+            weatherLocation.refresh()
             store.refreshXNewsStatus()
         }
         .confirmationDialog(
@@ -266,7 +267,7 @@ struct MenuDashboardView: View {
                     title: "Weather location",
                     systemImage: "location",
                     status: weatherLocation.state.title,
-                    tint: weatherLocation.state == .ready ? .green : .secondary
+                    tint: weatherLocationTint
                 )
                 Divider().padding(.leading, 38)
                 navigationQuickControl(
@@ -531,24 +532,44 @@ struct MenuDashboardView: View {
                 Spacer()
                 Text(weatherLocation.state.title)
                     .font(.caption)
-                    .foregroundStyle(weatherLocation.state == .ready ? .green : .secondary)
+                    .foregroundStyle(weatherLocationTint)
             }
             Text(weatherLocation.detail)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if weatherLocation.state == .off {
+            switch weatherLocation.state {
+            case .off:
                 Button("Use This Mac’s Location…") { showingLocationConsent = true }
-            } else {
+            case .permissionRequired:
                 HStack {
-                    if weatherLocation.state == .denied || weatherLocation.state == .unavailable {
-                        Button("Try Again") { weatherLocation.enable() }
-                    }
+                    Button("Request Permission") { weatherLocation.enable() }
                     Button("Stop Sharing") { weatherLocation.disable() }
                 }
+            case .denied:
+                HStack {
+                    Button("Open Location Settings…") { weatherLocation.openLocationSettings() }
+                    Button("Stop Sharing") { weatherLocation.disable() }
+                }
+            case .unavailable:
+                HStack {
+                    Button("Open Location Settings…") { weatherLocation.openLocationSettings() }
+                    Button("Try Again") { weatherLocation.enable() }
+                    Button("Stop Sharing") { weatherLocation.disable() }
+                }
+            case .requesting, .ready:
+                Button("Stop Sharing") { weatherLocation.disable() }
             }
         }
         .padding(.vertical, 10)
+    }
+
+    private var weatherLocationTint: Color {
+        switch weatherLocation.state {
+        case .ready: .green
+        case .permissionRequired, .denied, .unavailable: .orange
+        case .off, .requesting: .secondary
+        }
     }
 
     private var launchAtLoginBinding: Binding<Bool> {

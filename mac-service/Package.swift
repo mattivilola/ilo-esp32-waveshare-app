@@ -57,5 +57,6 @@ let package = Package(
         .testTarget(name: "BoardHostCoreTests", dependencies: ["BoardHostCore", "BoardProtocol"]),
         .testTarget(name: "BoardUIPrototypeTests", dependencies: ["BoardUIPrototype"]),
         .testTarget(name: "ILOBoardMenuSupportTests", dependencies: ["ILOBoardMenuSupport"]),
+        .testTarget(name: "ILOBoardMenuTests", dependencies: ["ILOBoardMenu"]),
     ]
 )
