@@ -2,13 +2,16 @@ SHELL := /bin/zsh
 
 BOARD_SCREENSHOT_OUTPUT ?= artifacts/board-screenshots/ilo-board-$(shell date +%Y%m%d-%H%M%S).png
 BOARD_SCREENSHOT_TIMEOUT ?= 120
+LANDO_ATLAS ?= $(HOME)/.codex/pets/lando/spritesheet.webp
+LANDO_BACKGROUND ?= 3A454C
 
-.PHONY: help doctor assets versions firmware-version firmware-version-patch firmware-version-minor firmware-setup firmware-build firmware-flash firmware-flash-minor firmware-monitor ota-status firmware-key-create firmware-release-local firmware-release-flash firmware-release-distribute ui-preview ui-screenshots board-screenshot mac-version mac-version-patch mac-version-minor mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
+.PHONY: help doctor assets lando-asset versions firmware-version firmware-version-patch firmware-version-minor firmware-setup firmware-build firmware-flash firmware-flash-minor firmware-monitor ota-status firmware-key-create firmware-release-local firmware-release-flash firmware-release-distribute ui-preview ui-screenshots board-screenshot mac-version mac-version-patch mac-version-minor mac-build mac-test mac-run mac-menu app package-dmg sign-release notarize staple sparkle-generate-keys release-version version-patch version-minor version-major release-commit release-tag release-push release-local release-distribute test verify
 
 help:
 	@printf "ILO Board commands\n\n"
 	@printf "  make doctor              Check board and Mac development prerequisites\n"
 	@printf "  make assets              Regenerate macOS and firmware icon assets\n"
+	@printf "  make lando-asset         Regenerate Lando screensaver frames from the local Codex Pet\n"
 	@printf "  make versions            Show Mac companion and firmware versions\n"
 	@printf "  make firmware-version    Show the current firmware version\n"
 	@printf "  make firmware-version-patch  Bump only the firmware patch version\n"
@@ -56,6 +59,9 @@ doctor:
 assets:
 	./scripts/build_icon.sh
 	./scripts/generate_firmware_icon.sh
+
+lando-asset:
+	python3 ./scripts/generate_lando_screensaver_asset.py --source "$(LANDO_ATLAS)" --background "$(LANDO_BACKGROUND)"
 
 versions: mac-version firmware-version
 
