@@ -334,17 +334,6 @@ static void render_codex_detail(void)
     if (codex_hold_label != NULL) lv_label_set_text(codex_hold_label, "HOLD TO ARM");
 }
 
-static void codex_row_tapped(lv_event_t *event)
-{
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_continue_in_flight) return;
-    int index = (int)(intptr_t)lv_event_get_user_data(event);
-    if (!latest_model_valid || index < 0 || index >= latest_model.task_count) return;
-    strlcpy(codex_selected_task_id, latest_model.tasks[index].id, sizeof(codex_selected_task_id));
-    codex_continue_armed = false;
-    codex_result_visible = false;
-    render_codex_detail();
-}
-
 static void clear_codex_chat_rows(void)
 {
     for (int index = 0; index < DASHBOARD_CODEX_CHAT_MAX_MESSAGES; ++index) {
@@ -411,6 +400,7 @@ static void codex_row_tapped(lv_event_t *event)
     render_codex_detail();
     open_codex_chat();
 }
+
 static void codex_hold_event(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
