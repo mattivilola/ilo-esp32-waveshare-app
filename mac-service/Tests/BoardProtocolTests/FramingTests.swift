@@ -28,7 +28,9 @@ import Testing
     let encodedPower = try #require(object["macPower"] as? [String: Any])
 
     #expect(snapshot.capabilities == ["tasks.read", "tasks.chat.read", "macPower.read", "hostTime.read"])
+    #expect(snapshot.codexEnabled == true)
     #expect(snapshot.xNewsEnabled == false)
+    #expect(object["codexEnabled"] as? Bool == true)
     #expect(object["xNewsEnabled"] as? Bool == false)
     #expect(snapshot.macPower?.levelPercent == 100)
     #expect(encodedPower.keys.sorted() == ["levelPercent", "state"])
@@ -66,6 +68,29 @@ import Testing
     let enabled = DashboardSnapshot(revision: 2, tasks: [], codexContinueEnabled: true)
     #expect(!disabled.capabilities.contains("tasks.continue.fixed"))
     #expect(enabled.capabilities.contains("tasks.continue.fixed"))
+}
+
+@Test func disabledCodexScreenOmitsTaskDataAndCapabilities() throws {
+    let task = TaskCard(
+        id: "private-task",
+        title: "Should not cross the wire",
+        state: .active,
+        attentionKind: .none,
+        updatedAt: Date(),
+        shortSummary: "Hidden with the optional screen"
+    )
+    let snapshot = DashboardSnapshot(
+        revision: 3,
+        tasks: [task],
+        codexEnabled: false,
+        codexContinueEnabled: true
+    )
+
+    #expect(snapshot.codexEnabled == false)
+    #expect(snapshot.tasks.isEmpty)
+    #expect(!snapshot.capabilities.contains("tasks.read"))
+    #expect(!snapshot.capabilities.contains("tasks.chat.read"))
+    #expect(!snapshot.capabilities.contains("tasks.continue.fixed"))
 }
 
 @Test func codexContinueMessagesCarryOnlyFixedBoundedActionData() throws {
@@ -189,6 +214,16 @@ import Testing
         let decoded = try ProtocolJSON.decoder().decode(DashboardSnapshot.self, from: legacyData)
         #expect(decoded.xNewsEnabled == expected)
     }
+}
+
+@Test func legacySnapshotInfersCodexVisibilityFromTaskCapability() throws {
+    let encoded = try ProtocolJSON.encoder().encode(DashboardSnapshot(revision: 1, tasks: []))
+    var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+    object.removeValue(forKey: "codexEnabled")
+    let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+    let decoded = try ProtocolJSON.decoder().decode(DashboardSnapshot.self, from: legacyData)
+    #expect(decoded.codexEnabled == true)
 }
 
 @Test func xNewsRefreshMessagesStayBoundedAndExplicit() throws {

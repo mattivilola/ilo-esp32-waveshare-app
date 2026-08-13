@@ -210,6 +210,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
     public let hostState: HostState
     public let capabilities: [String]
     public let tasks: [TaskCard]
+    public let codexEnabled: Bool
     public let xNewsEnabled: Bool
     public let newsFeed: NewsFeedSnapshot?
     public let macPower: MacPowerStatus?
@@ -224,6 +225,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         case hostState
         case capabilities
         case tasks
+        case codexEnabled
         case xNewsEnabled
         case newsFeed
         case macPower
@@ -237,6 +239,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         generatedAt: Date = Date(),
         hostState: HostState = .online,
         tasks: [TaskCard],
+        codexEnabled: Bool = true,
         codexContinueEnabled: Bool = false,
         xNewsEnabled: Bool? = nil,
         newsFeed: NewsFeedSnapshot? = nil,
@@ -249,12 +252,16 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         self.revision = revision
         self.generatedAt = generatedAt
         self.hostState = hostState
-        var capabilities = ["tasks.read", "tasks.chat.read"]
-        if codexContinueEnabled { capabilities.append("tasks.continue.fixed") }
+        var capabilities = [String]()
+        if codexEnabled {
+            capabilities.append(contentsOf: ["tasks.read", "tasks.chat.read"])
+        }
+        if codexEnabled && codexContinueEnabled { capabilities.append("tasks.continue.fixed") }
         capabilities.append(contentsOf: ["macPower.read", "hostTime.read"])
         if newsFeed != nil { capabilities.append("xNews.read") }
         self.capabilities = capabilities
-        self.tasks = Array(tasks.prefix(12))
+        self.tasks = codexEnabled ? Array(tasks.prefix(12)) : []
+        self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled ?? (newsFeed != nil)
         self.newsFeed = newsFeed
         self.macPower = macPower
@@ -270,7 +277,10 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         generatedAt = try container.decode(Date.self, forKey: .generatedAt)
         hostState = try container.decode(HostState.self, forKey: .hostState)
         capabilities = try container.decode([String].self, forKey: .capabilities)
-        tasks = try container.decode([TaskCard].self, forKey: .tasks)
+        codexEnabled = try container.decodeIfPresent(Bool.self, forKey: .codexEnabled)
+            ?? capabilities.contains("tasks.read")
+        let decodedTasks = try container.decode([TaskCard].self, forKey: .tasks)
+        tasks = codexEnabled ? decodedTasks : []
         newsFeed = try container.decodeIfPresent(NewsFeedSnapshot.self, forKey: .newsFeed)
         xNewsEnabled = try container.decodeIfPresent(Bool.self, forKey: .xNewsEnabled)
             ?? (newsFeed != nil)

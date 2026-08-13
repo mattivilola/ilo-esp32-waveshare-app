@@ -634,6 +634,7 @@ private final class BoardConnection: @unchecked Sendable {
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: tasks,
+                codexEnabled: raw.codexEnabled,
                 codexContinueEnabled: raw.capabilities.contains("tasks.continue.fixed"),
                 xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,

@@ -177,12 +177,12 @@ The Make target stores timestamped files under `artifacts/board-screenshots/` by
 ### Four- or five-screen information architecture
 
 1. **Dashboard** — the glanceable work pulse: attention count, recent Codex work, connection state, current weather, and a latest-X-news or task-count signal. Tapping a Codex row opens that related chat already selected on the Codex screen.
-2. **Codex** — recent sanitized task status plus a hold-confirmed, fixed “Please continue.” action for eligible idle tasks.
+2. **Codex** — an optional Mac-backed screen with recent sanitized task status plus a hold-confirmed, fixed “Please continue.” action for eligible idle tasks.
 3. **X News** — an optional rolling 24-hour AI/robotics brief containing only locally validated direct X citations. Vertically scroll up to five stories; horizontal swipes still move between screens.
 4. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
 5. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
 
-The order is fixed and tested: Dashboard → Codex → Weather → Settings while X News is Off or Grok is unavailable, with X News inserted between Codex and Weather when Mac-enabled. Horizontal swipe is the primary page gesture, while the always-visible bottom navigation provides discovery and direct access. On X News, direction-aware gesture handling reserves vertical drags for the story feed and lets horizontal drags continue to Weather or Codex. A compact “more” cue appears only when the feed exceeds the first three visible stories. Pull down from the top to request a refresh; the board shows pull/release/fetching/result states rather than freezing the old content or claiming success early.
+The order is fixed and tested, with optional pages removed rather than left empty. A paired Codex companion normally gives Dashboard → Codex → Weather → Settings; X News is inserted between Codex and Weather when Mac-enabled. Without Codex or X News, the board contracts to Dashboard → Weather → Settings. In that standalone mode, Dashboard becomes a local board overview with weather, settings/device shortcuts, and a clear optional-Mac explanation. Horizontal swipe is the primary page gesture, while the always-visible bottom navigation provides discovery and direct access. On X News, direction-aware gesture handling reserves vertical drags for the story feed and lets horizontal drags continue to the next visible page. A compact “more” cue appears only when the feed exceeds the first three visible stories. Pull down from the top to request a refresh; the board shows pull/release/fetching/result states rather than freezing the old content or claiming success early.
 
 These are deterministic desktop renders with sample data, not photographs of the physical panel:
 
@@ -207,6 +207,8 @@ The matching LVGL structure is already compiled into firmware, including horizon
 An old-school screensaver does make sense here as a product feature: the static Pulse clock offers an ambient, glanceable idle view. Because this is an LCD rather than OLED, actual power savings come when the backlight is switched off. The exact 5B exposes `DISP` as a binary CH422G expander output, not a PWM brightness channel, so the UX does not promise a fake brightness slider.
 
 ## Connecting to Codex
+
+Codex is optional. A board with no configured Mac boots directly into the three-screen standalone experience and continues to provide Dashboard, direct Weather, and Settings. A temporary disconnect from an already paired companion remains an honest offline state instead of unexpectedly removing previously visible task context.
 
 The implemented supported boundary is the local Codex App Server, launched on demand by the Mac companion over its JSONL/stdio transport. The board never receives your ChatGPT authentication, API key, full prompts, transcript, working-directory paths, or file contents.
 

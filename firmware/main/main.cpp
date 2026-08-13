@@ -68,7 +68,7 @@ extern "C" void app_main()
 
     if (!mac_transport_start(handle_mac_model)) {
         bool wifi_started = mac_transport_start_wifi_only();
-        ESP_LOGW(TAG, "Mac host is not configured; keeping the offline demo snapshot");
+        ESP_LOGW(TAG, "Mac host is not configured; keeping the standalone dashboard");
         dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_NOT_CONFIGURED);
         if (wifi_started && !clock_sync_start()) {
             ESP_LOGW(TAG, "Clock synchronization could not be started");

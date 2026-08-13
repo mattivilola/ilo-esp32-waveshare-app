@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SettingsPage: View {
+    let codexEnabled: Bool
     let xNewsEnabled: Bool
     let firmwareVersion: String
     let companionVersion: String
@@ -13,10 +14,12 @@ struct SettingsPage: View {
     @State private var firmwareUpdateState = 0
 
     init(
+        codexEnabled: Bool,
         xNewsEnabled: Bool,
         firmwareVersion: String = "0.2.0",
         companionVersion: String = "0.1.3"
     ) {
+        self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled
         self.firmwareVersion = firmwareVersion
         self.companionVersion = companionVersion
@@ -65,7 +68,11 @@ struct SettingsPage: View {
                     VStack(alignment: .leading, spacing: 5) {
                         SectionLabel(title: "Connections")
                         connectionRow("Wi-Fi", "KNOWN NETWORK", BoardPalette.signal)
-                        connectionRow("Mac companion", "PAIRED", BoardPalette.signal)
+                        connectionRow(
+                            "Mac companion",
+                            codexEnabled || xNewsEnabled ? "PAIRED" : "OPTIONAL",
+                            codexEnabled || xNewsEnabled ? BoardPalette.signal : BoardPalette.fog
+                        )
                         connectionRow("Weather", "DIRECT READY", BoardPalette.cyan)
                         connectionRow(
                             "X News",

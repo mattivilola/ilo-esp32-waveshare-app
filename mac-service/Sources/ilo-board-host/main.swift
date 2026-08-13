@@ -40,6 +40,7 @@ struct ILOBoardHostCommand {
                 generatedAt: raw.generatedAt,
                 hostState: raw.hostState,
                 tasks: raw.tasks.map(TaskSanitizer.sanitize),
+                codexEnabled: raw.codexEnabled,
                 codexContinueEnabled: raw.capabilities.contains("tasks.continue.fixed"),
                 xNewsEnabled: raw.xNewsEnabled,
                 newsFeed: raw.newsFeed,

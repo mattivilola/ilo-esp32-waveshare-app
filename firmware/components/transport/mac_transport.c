@@ -1245,15 +1245,24 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
         target->attention = attention(cJSON_IsString(attention_item) ? attention_item->valuestring : NULL);
     }
     cJSON *capabilities = cJSON_GetObjectItemCaseSensitive(snapshot, "capabilities");
+    bool legacy_codex_enabled = false;
     if (cJSON_IsArray(capabilities)) {
         cJSON *capability = NULL;
         cJSON_ArrayForEach(capability, capabilities) {
-            if (cJSON_IsString(capability)
-                && strcmp(capability->valuestring, "tasks.continue.fixed") == 0) {
+            if (!cJSON_IsString(capability)) continue;
+            if (strcmp(capability->valuestring, "tasks.read") == 0) {
+                legacy_codex_enabled = true;
+            } else if (strcmp(capability->valuestring, "tasks.continue.fixed") == 0) {
                 model->codex_continue_enabled = true;
-                break;
             }
         }
+    }
+    cJSON *codex_enabled = cJSON_GetObjectItemCaseSensitive(snapshot, "codexEnabled");
+    model->codex_enabled = cJSON_IsTrue(codex_enabled)
+        || (!cJSON_IsBool(codex_enabled) && legacy_codex_enabled);
+    if (!model->codex_enabled) {
+        model->task_count = 0;
+        model->codex_continue_enabled = false;
     }
     cJSON *news_feed = cJSON_GetObjectItemCaseSensitive(snapshot, "newsFeed");
     cJSON *x_news_enabled = cJSON_GetObjectItemCaseSensitive(snapshot, "xNewsEnabled");

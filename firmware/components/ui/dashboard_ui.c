@@ -39,7 +39,9 @@
 #define MINUTE_MS 60000U
 
 static lv_obj_t *connection_label;
+static lv_obj_t *dashboard_status_title;
 static lv_obj_t *attention_count_label;
+static lv_obj_t *dashboard_mode_title;
 static lv_obj_t *mac_power_percent_label;
 static lv_obj_t *mac_power_state_label;
 static lv_obj_t *dashboard_weather_icon_box;
@@ -55,6 +57,7 @@ static lv_obj_t *task_dots[DASHBOARD_MAX_TASKS];
 static lv_obj_t *dashboard_signal_eyebrow;
 static lv_obj_t *dashboard_signal_headline;
 static lv_obj_t *dashboard_signal_action;
+static lv_obj_t *dashboard_content_title;
 static lv_obj_t *codex_rows[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_titles[CODEX_VISIBLE_TASKS];
 static lv_obj_t *codex_summaries[CODEX_VISIBLE_TASKS];
@@ -128,6 +131,7 @@ static lv_obj_t *settings_clock_value;
 static lv_obj_t *settings_temperature_value;
 static lv_obj_t *settings_focus_value;
 static lv_obj_t *settings_x_news_value;
+static lv_obj_t *settings_connection_values;
 static lv_obj_t *settings_versions_value;
 static lv_obj_t *settings_ota_value;
 static dashboard_ota_callback_t ota_check_callback;
@@ -154,6 +158,7 @@ static lv_display_t *ui_display;
 static device_settings_t current_settings;
 static dashboard_model_t latest_model;
 static bool latest_model_valid;
+static bool codex_page_enabled;
 static bool x_news_page_enabled;
 static bool navigation_configured;
 static bool display_asleep;
@@ -167,17 +172,22 @@ static bool latest_weather_valid;
 
 static void render_weather(const weather_model_t *model);
 static void x_news_scroll_event(lv_event_t *event);
-static void configure_x_news_page(bool enabled);
+static void configure_optional_pages(bool codex_enabled, bool x_news_enabled);
 static void update_page_chrome(void);
 static void finish_boot_animation(void);
 static void refresh_clock_labels(void);
 static void render_codex_detail(void);
+static void render_dashboard_signal(const dashboard_model_t *model);
 static void open_codex_chat(void);
 static void build_codex_chat_overlay(lv_obj_t *screen);
+static const char *weather_condition(int code);
+static double display_temperature(float celsius);
+static const char *temperature_unit(void);
 
 static void show_page(int index, lv_anim_enable_t animation)
 {
     if (tileview == NULL || index < 0 || index >= PAGE_COUNT) return;
+    if (index == PAGE_CODEX && !codex_page_enabled) return;
     if (index == PAGE_X_NEWS && !x_news_page_enabled) return;
     lv_tileview_set_tile(tileview, tiles[index], animation);
     lv_display_trigger_activity(ui_display);
@@ -447,8 +457,13 @@ static void codex_row_tapped(lv_event_t *event)
 
 static void dashboard_task_tapped(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_continue_in_flight) return;
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     int index = (int)(intptr_t)lv_event_get_user_data(event);
+    if (!codex_page_enabled) {
+        show_page(index == 0 ? PAGE_WEATHER : PAGE_SETTINGS, LV_ANIM_ON);
+        return;
+    }
+    if (codex_continue_in_flight) return;
     select_codex_task(index);
     show_page(PAGE_CODEX, LV_ANIM_ON);
     open_codex_chat();
@@ -458,7 +473,10 @@ static void dashboard_signal_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED || !latest_model_valid) return;
     bool has_news = latest_model.x_news_enabled && latest_model.news_count > 0;
-    show_page(has_news ? PAGE_X_NEWS : PAGE_CODEX, LV_ANIM_ON);
+    show_page(
+        has_news ? PAGE_X_NEWS : (latest_model.codex_enabled ? PAGE_CODEX : PAGE_WEATHER),
+        LV_ANIM_ON
+    );
 }
 
 static void codex_hold_event(lv_event_t *event)
@@ -1167,6 +1185,18 @@ static void refresh_settings_labels(void)
             );
         }
     }
+    if (settings_connection_values != NULL) {
+        bool mac_present = latest_model_valid
+            && (latest_model.codex_enabled
+                || latest_model.x_news_enabled
+                || latest_model.companion_version[0] != 0);
+        lv_label_set_text(
+            settings_connection_values,
+            mac_present
+                ? "WI-FI  TAP TO CHANGE     MAC  PAIRED     WEATHER  DIRECT"
+                : "WI-FI  TAP TO CHANGE     MAC  OPTIONAL     WEATHER  DIRECT"
+        );
+    }
     if (settings_versions_value != NULL) {
         const char *companion_version = latest_model_valid && latest_model.companion_version[0] != 0
             ? latest_model.companion_version
@@ -1249,6 +1279,32 @@ static void render_dashboard_signal(const dashboard_model_t *model)
         return;
     }
 
+    if (!model->codex_enabled) {
+        char pulse[128] = "Current conditions and three-day forecast";
+        if (latest_weather_valid
+            && (latest_weather_model.state == WEATHER_STATE_LIVE
+                || latest_weather_model.state == WEATHER_STATE_STALE)) {
+            snprintf(
+                pulse,
+                sizeof(pulse),
+                "%s / %.0f %s / %s",
+                latest_weather_model.location[0] != 0 ? latest_weather_model.location : "Weather",
+                display_temperature(latest_weather_model.temperature_c),
+                temperature_unit(),
+                weather_condition(latest_weather_model.weather_code)
+            );
+        } else if (latest_weather_valid && latest_weather_model.state == WEATHER_STATE_LOADING) {
+            snprintf(pulse, sizeof(pulse), "Updating the direct weather forecast");
+        } else if (latest_weather_valid && latest_weather_model.state == WEATHER_STATE_NOT_CONFIGURED) {
+            snprintf(pulse, sizeof(pulse), "Weather location setup is still needed");
+        }
+        lv_label_set_text(dashboard_signal_eyebrow, "WEATHER PULSE");
+        lv_label_set_text(dashboard_signal_headline, pulse);
+        lv_label_set_text(dashboard_signal_action, "OPEN WEATHER  " LV_SYMBOL_RIGHT);
+        lv_obj_set_style_text_color(dashboard_signal_eyebrow, COLOR_CYAN, 0);
+        return;
+    }
+
     unsigned int active_count = 0;
     for (int index = 0; index < model->task_count && index < DASHBOARD_MAX_TASKS; ++index) {
         if (model->tasks[index].state == DASHBOARD_TASK_ACTIVE) ++active_count;
@@ -1266,6 +1322,45 @@ static void render_dashboard_signal(const dashboard_model_t *model)
     lv_label_set_text(dashboard_signal_headline, pulse);
     lv_label_set_text(dashboard_signal_action, "OPEN CODEX  " LV_SYMBOL_RIGHT);
     lv_obj_set_style_text_color(dashboard_signal_eyebrow, COLOR_SIGNAL, 0);
+}
+
+static void render_dashboard_mode(const dashboard_model_t *model)
+{
+    if (model == NULL || dashboard_content_title == NULL) return;
+    if (model->codex_enabled) {
+        lv_label_set_text(dashboard_status_title, "ATTENTION");
+        lv_label_set_text(dashboard_mode_title, "MACBOOK POWER");
+        lv_label_set_text(dashboard_content_title, "Recent Codex work");
+        return;
+    }
+
+    lv_label_set_text(dashboard_status_title, "BOARD STATUS");
+    lv_label_set_text(attention_count_label, "READY");
+    lv_obj_set_style_text_color(attention_count_label, COLOR_SIGNAL, 0);
+    lv_label_set_text(dashboard_mode_title, "OPERATING MODE");
+    lv_label_set_text(mac_power_percent_label, "LOCAL");
+    lv_label_set_text(mac_power_state_label, "No Mac required");
+    lv_obj_set_style_text_color(mac_power_percent_label, COLOR_CYAN, 0);
+    lv_obj_set_style_text_color(mac_power_state_label, COLOR_FOG, 0);
+    lv_label_set_text(dashboard_content_title, "Board at a glance");
+
+    static const char *titles[DASHBOARD_VISIBLE_TASKS] = {
+        "Weather at a glance",
+        "Board settings",
+        "Mac connection optional",
+    };
+    static const char *summaries[DASHBOARD_VISIBLE_TASKS] = {
+        "Current conditions and the three-day forecast",
+        "Wi-Fi, display, clock, units, focus and firmware update",
+        "Pair later to add Codex activity and Mac power",
+    };
+    const lv_color_t dots[DASHBOARD_VISIBLE_TASKS] = { COLOR_CYAN, COLOR_SIGNAL, COLOR_FOG };
+    for (int index = 0; index < DASHBOARD_VISIBLE_TASKS; ++index) {
+        lv_obj_remove_flag(task_rows[index], LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(task_titles[index], titles[index]);
+        lv_label_set_text(task_summaries[index], summaries[index]);
+        lv_obj_set_style_bg_color(task_dots[index], dots[index], 0);
+    }
 }
 
 static void screensaver_setting_tapped(lv_event_t *event)
@@ -1585,13 +1680,13 @@ static void build_settings_page(lv_obj_t *page)
     lv_obj_t *connections = create_card(page, 518, 330, 478, 64, 16);
     lv_obj_add_flag(connections, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(connections, wifi_setup_tapped, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *connection_values = create_label(
+    settings_connection_values = create_label(
         connections,
-        "WI-FI  TAP TO CHANGE     MAC  PAIRED     WEATHER  DIRECT",
+        "WI-FI  TAP TO CHANGE     MAC  OPTIONAL     WEATHER  DIRECT",
         &lv_font_montserrat_14,
         COLOR_MIST
     );
-    lv_obj_align(connection_values, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_align(settings_connection_values, LV_ALIGN_TOP_MID, 0, 8);
     settings_x_news_value = create_label(connections, "X NEWS  WAITING FOR MAC", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(settings_x_news_value, LV_ALIGN_BOTTOM_LEFT, 16, -8);
     settings_versions_value = create_label(connections, "", &lv_font_montserrat_14, COLOR_CYAN);
@@ -1610,41 +1705,52 @@ static int active_page_index(void)
     return 0;
 }
 
-static int visible_page_index(int page)
+static bool page_is_enabled(int page)
 {
-    if (!x_news_page_enabled && page > PAGE_X_NEWS) {
-        return page - 1;
-    }
-    return page;
+    return (page != PAGE_CODEX || codex_page_enabled)
+        && (page != PAGE_X_NEWS || x_news_page_enabled);
 }
 
-static void configure_x_news_page(bool enabled)
+static int visible_page_index(int page)
 {
-    if (tileview == NULL || tiles[PAGE_X_NEWS] == NULL || nav_buttons[PAGE_X_NEWS] == NULL) {
+    int visible_index = 0;
+    for (int candidate = 0; candidate < page; ++candidate) {
+        if (page_is_enabled(candidate)) ++visible_index;
+    }
+    return visible_index;
+}
+
+static void configure_optional_pages(bool codex_enabled, bool x_news_enabled)
+{
+    if (tileview == NULL || tiles[PAGE_CODEX] == NULL || tiles[PAGE_X_NEWS] == NULL
+        || nav_buttons[PAGE_CODEX] == NULL || nav_buttons[PAGE_X_NEWS] == NULL) {
         return;
     }
-    if (navigation_configured && x_news_page_enabled == enabled) {
-        return;
-    }
+    if (navigation_configured
+        && codex_page_enabled == codex_enabled
+        && x_news_page_enabled == x_news_enabled) return;
+
     int active = active_page_index();
-    x_news_page_enabled = enabled;
+    codex_page_enabled = codex_enabled;
+    x_news_page_enabled = x_news_enabled;
     navigation_configured = true;
 
-    if (enabled) {
-        lv_obj_remove_flag(tiles[PAGE_X_NEWS], LV_OBJ_FLAG_HIDDEN);
-    } else {
-        lv_obj_add_flag(tiles[PAGE_X_NEWS], LV_OBJ_FLAG_HIDDEN);
-    }
-
+    int visible_count = 0;
     for (int page = 0; page < PAGE_COUNT; ++page) {
-        int column = page == PAGE_X_NEWS && !enabled ? PAGE_SETTINGS : visible_page_index(page);
+        bool page_enabled = page_is_enabled(page);
+        if (page_enabled) {
+            lv_obj_remove_flag(tiles[page], LV_OBJ_FLAG_HIDDEN);
+            ++visible_count;
+        } else {
+            lv_obj_add_flag(tiles[page], LV_OBJ_FLAG_HIDDEN);
+        }
+        int column = page_enabled ? visible_page_index(page) : PAGE_SETTINGS;
         lv_obj_set_x(tiles[page], lv_pct(column * 100));
     }
 
-    int visible_count = enabled ? PAGE_COUNT : PAGE_COUNT - 1;
-    int nav_width = visible_count == PAGE_COUNT ? 188 : 237;
+    int nav_width = (980 - ((visible_count - 1) * 10)) / visible_count;
     for (int page = 0; page < PAGE_COUNT; ++page) {
-        if (page == PAGE_X_NEWS && !enabled) {
+        if (!page_is_enabled(page)) {
             lv_obj_add_flag(nav_buttons[page], LV_OBJ_FLAG_HIDDEN);
             continue;
         }
@@ -1654,9 +1760,7 @@ static void configure_x_news_page(bool enabled)
         lv_obj_set_x(nav_buttons[page], 22 + (visible_index * (nav_width + 10)));
     }
 
-    if (!enabled && active == PAGE_X_NEWS) {
-        active = PAGE_WEATHER;
-    }
+    if (!page_is_enabled(active)) active = PAGE_WEATHER;
     lv_tileview_set_tile(tileview, tiles[active], LV_ANIM_OFF);
     update_page_chrome();
 }
@@ -1686,7 +1790,7 @@ static void nav_tapped(lv_event_t *event)
         return;
     }
     int index = (int)(intptr_t)lv_event_get_user_data(event);
-    if (index >= 0 && index < PAGE_COUNT && (index != PAGE_X_NEWS || x_news_page_enabled)) {
+    if (index >= 0 && index < PAGE_COUNT && page_is_enabled(index)) {
         show_page(index, LV_ANIM_ON);
     }
 }
@@ -1820,11 +1924,11 @@ static void build_ui(void)
     lv_obj_set_size(attention, 238, 410);
     lv_obj_set_pos(attention, 22, 8);
 
-    lv_obj_t *attention_title = lv_label_create(attention);
-    lv_label_set_text(attention_title, "ATTENTION");
-    lv_obj_set_style_text_color(attention_title, COLOR_FOG, 0);
-    lv_obj_set_style_text_font(attention_title, &lv_font_montserrat_14, 0);
-    lv_obj_align(attention_title, LV_ALIGN_TOP_LEFT, 20, 22);
+    dashboard_status_title = lv_label_create(attention);
+    lv_label_set_text(dashboard_status_title, "ATTENTION");
+    lv_obj_set_style_text_color(dashboard_status_title, COLOR_FOG, 0);
+    lv_obj_set_style_text_font(dashboard_status_title, &lv_font_montserrat_14, 0);
+    lv_obj_align(dashboard_status_title, LV_ALIGN_TOP_LEFT, 20, 22);
 
     attention_count_label = lv_label_create(attention);
     lv_label_set_text(attention_count_label, "0");
@@ -1832,8 +1936,8 @@ static void build_ui(void)
     lv_obj_set_style_text_font(attention_count_label, &lv_font_montserrat_28, 0);
     lv_obj_align(attention_count_label, LV_ALIGN_TOP_LEFT, 20, 60);
 
-    lv_obj_t *mac_power_title = create_label(attention, "MACBOOK POWER", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_set_pos(mac_power_title, 20, 154);
+    dashboard_mode_title = create_label(attention, "MACBOOK POWER", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(dashboard_mode_title, 20, 154);
     mac_power_percent_label = create_label(attention, "--", &lv_font_montserrat_28, COLOR_MIST);
     lv_obj_set_pos(mac_power_percent_label, 20, 186);
     mac_power_state_label = create_label(attention, "Waiting for Mac", &lv_font_montserrat_14, COLOR_FOG);
@@ -1874,11 +1978,11 @@ static void build_ui(void)
     lv_obj_set_style_text_align(dashboard_weather_state_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_pos(dashboard_weather_state_label, 160, 288);
 
-    lv_obj_t *work_title = lv_label_create(tiles[0]);
-    lv_label_set_text(work_title, "Recent Codex work");
-    lv_obj_set_style_text_color(work_title, COLOR_MIST, 0);
-    lv_obj_set_style_text_font(work_title, &lv_font_montserrat_20, 0);
-    lv_obj_set_pos(work_title, 286, 14);
+    dashboard_content_title = lv_label_create(tiles[0]);
+    lv_label_set_text(dashboard_content_title, "Recent Codex work");
+    lv_obj_set_style_text_color(dashboard_content_title, COLOR_MIST, 0);
+    lv_obj_set_style_text_font(dashboard_content_title, &lv_font_montserrat_20, 0);
+    lv_obj_set_pos(dashboard_content_title, 286, 14);
 
     for (int i = 0; i < DASHBOARD_VISIBLE_TASKS; ++i) {
         task_rows[i] = lv_obj_create(tiles[0]);
@@ -1943,7 +2047,7 @@ static void build_ui(void)
         lv_obj_center(nav_labels[i]);
     }
 
-    configure_x_news_page(false);
+    configure_optional_pages(false, false);
 
     build_screensaver(screen);
     build_codex_chat_overlay(screen);
@@ -2096,7 +2200,7 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
     if (model->host_time_available) {
         set_clock_timezone_locked(model->utc_offset_seconds, model->timezone_abbreviation);
     }
-    configure_x_news_page(model->x_news_enabled);
+    configure_optional_pages(model->codex_enabled, model->x_news_enabled);
     refresh_settings_labels();
     render_dashboard_signal(model);
     if (mac_power_percent_label != NULL && mac_power_state_label != NULL) {
@@ -2232,6 +2336,7 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
     snprintf(count, sizeof(count), "%d", attention_count);
     lv_label_set_text(attention_count_label, count);
     lv_obj_set_style_text_color(attention_count_label, attention_count > 0 ? COLOR_AMBER : COLOR_MIST, 0);
+    render_dashboard_mode(model);
     lvgl_port_unlock();
 }
 
@@ -2686,6 +2791,9 @@ void dashboard_ui_set_weather(const weather_model_t *model)
         set_clock_timezone_locked(model->utc_offset_seconds, model->timezone_abbreviation);
     }
     render_weather(model);
+    if (latest_model_valid && !latest_model.codex_enabled) {
+        render_dashboard_signal(&latest_model);
+    }
     lvgl_port_unlock();
 }
 

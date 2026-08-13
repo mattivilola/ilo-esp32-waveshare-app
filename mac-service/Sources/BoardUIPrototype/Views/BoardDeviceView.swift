@@ -6,20 +6,25 @@ public struct BoardDeviceView: View {
     private let interactive: Bool
     private let fixedPage: BoardPage?
     private let scenario: BoardPreviewScenario?
+    private let codexEnabled: Bool
     private let xNewsEnabled: Bool
     private let codexChatOpen: Bool
 
     public init(
         page: BoardPage = .dashboard,
         interactive: Bool = true,
+        codexEnabled: Bool = true,
         xNewsEnabled: Bool = true,
         codexChatOpen: Bool = false
     ) {
-        let initialPage = !xNewsEnabled && page == .xNews ? .weather : page
+        let initialPage = (!codexEnabled && page == .codex) || (!xNewsEnabled && page == .xNews)
+            ? .weather
+            : page
         _page = State(initialValue: initialPage)
         self.interactive = interactive
         fixedPage = interactive ? nil : initialPage
         scenario = nil
+        self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled
         self.codexChatOpen = codexChatOpen
     }
@@ -29,6 +34,7 @@ public struct BoardDeviceView: View {
         interactive = false
         fixedPage = scenario.page
         self.scenario = scenario
+        codexEnabled = true
         xNewsEnabled = true
         codexChatOpen = false
     }
@@ -90,15 +96,15 @@ public struct BoardDeviceView: View {
             }
             Spacer()
             HStack(spacing: 8) {
-                StatusDot(color: scenario?.connectionColor ?? BoardPalette.signal)
-                Text(scenario?.connectionLabel ?? "MAC ONLINE")
+                StatusDot(color: previewConnectionColor)
+                Text(previewConnectionLabel)
                     .font(.board(12, weight: .bold))
                     .tracking(0.7)
                     .foregroundStyle(BoardPalette.mist)
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 8)
-            .background((scenario?.connectionColor ?? BoardPalette.signal).opacity(0.12), in: Capsule())
+            .background(previewConnectionColor.opacity(0.12), in: Capsule())
             Text("09:41")
                 .font(.system(size: 14, weight: .semibold, design: .monospaced))
                 .foregroundStyle(BoardPalette.fog)
@@ -122,8 +128,17 @@ public struct BoardDeviceView: View {
                     },
                     onOpenXNews: {
                         guard interactive else { return }
-                        page = xNewsEnabled ? .xNews : .codex
+                        page = xNewsEnabled ? .xNews : (codexEnabled ? .codex : .weather)
                     },
+                    onOpenWeather: {
+                        guard interactive else { return }
+                        page = .weather
+                    },
+                    onOpenSettings: {
+                        guard interactive else { return }
+                        page = .settings
+                    },
+                    codexEnabled: codexEnabled,
                     xNewsEnabled: xNewsEnabled
                 )
             case .codex:
@@ -134,7 +149,7 @@ public struct BoardDeviceView: View {
                 )
             case .xNews: XNewsPage(interactive: interactive)
             case .weather: WeatherPage()
-            case .settings: SettingsPage(xNewsEnabled: xNewsEnabled)
+            case .settings: SettingsPage(codexEnabled: codexEnabled, xNewsEnabled: xNewsEnabled)
             }
         }
     }
@@ -183,6 +198,14 @@ public struct BoardDeviceView: View {
     }
 
     private var visiblePages: [BoardPage] {
-        BoardPage.visiblePages(xNewsEnabled: xNewsEnabled)
+        BoardPage.visiblePages(codexEnabled: codexEnabled, xNewsEnabled: xNewsEnabled)
+    }
+
+    private var previewConnectionLabel: String {
+        scenario?.connectionLabel ?? (!codexEnabled && !xNewsEnabled ? "MAC OPTIONAL" : "MAC ONLINE")
+    }
+
+    private var previewConnectionColor: Color {
+        scenario?.connectionColor ?? (!codexEnabled && !xNewsEnabled ? BoardPalette.fog : BoardPalette.signal)
     }
 }

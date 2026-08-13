@@ -17,7 +17,13 @@ enum ILOBoardPreviewCommand {
             case "screenshot":
                 let page = try pageArgument(arguments)
                 let output = value(after: "--output", in: arguments) ?? "artifacts/ui-previews/\(page.rawValue).png"
-                try render(page, codexChatOpen: arguments.contains("--chat"), to: output)
+                try render(
+                    page,
+                    codexEnabled: !arguments.contains("--without-codex"),
+                    xNewsEnabled: !arguments.contains("--without-x-news"),
+                    codexChatOpen: arguments.contains("--chat"),
+                    to: output
+                )
             case "screenshots":
                 let outputDirectory = value(after: "--output-dir", in: arguments) ?? "artifacts/ui-previews"
                 for page in BoardPage.allCases {
@@ -47,6 +53,7 @@ enum ILOBoardPreviewCommand {
         application.setActivationPolicy(.regular)
         let view = BoardDeviceView(
             page: arguments.contains("--chat") ? .codex : .dashboard,
+            codexEnabled: !arguments.contains("--without-codex"),
             xNewsEnabled: !arguments.contains("--without-x-news"),
             codexChatOpen: arguments.contains("--chat")
         )
@@ -68,9 +75,21 @@ enum ILOBoardPreviewCommand {
     }
 
     @MainActor
-    private static func render(_ page: BoardPage, codexChatOpen: Bool = false, to path: String) throws {
+    private static func render(
+        _ page: BoardPage,
+        codexEnabled: Bool = true,
+        xNewsEnabled: Bool = true,
+        codexChatOpen: Bool = false,
+        to path: String
+    ) throws {
         try render(
-            BoardDeviceView(page: page, interactive: false, codexChatOpen: codexChatOpen),
+            BoardDeviceView(
+                page: page,
+                interactive: false,
+                codexEnabled: codexEnabled,
+                xNewsEnabled: xNewsEnabled,
+                codexChatOpen: codexChatOpen
+            ),
             label: codexChatOpen ? "Codex chat" : page.title,
             to: path
         )

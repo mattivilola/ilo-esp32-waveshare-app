@@ -8,6 +8,8 @@ Codex task data and Mac-control capabilities are bounded: `tasks.read`, on-deman
 
 ## Codex privacy boundary
 
+Codex display is optional. With no configured Mac, firmware starts with Codex disabled, exposes no task page or task-backed Dashboard controls, and retains Dashboard, direct Weather, and Settings. A snapshot that explicitly disables Codex carries no task records or task capabilities. Older companions remain compatible because firmware infers Codex visibility only from their existing authenticated `tasks.read` capability.
+
 The host obtains recent task metadata through a local Codex App Server `thread/list` request. Its list decoder accepts only `id`, optional `name`, `updatedAt`, and `status`; prompt previews, working-directory paths, source metadata, Git information, file contents, environment variables, and credentials are ignored.
 
 Opening a visible task can make one on-demand `thread/turns/list` request for at most four recent turns. A separate narrow decoder keeps only the newest six `userMessage` and `agentMessage` text items, sanitizes each to 360 board-safe characters, and drops commands, command output, tools, reasoning, plans, diffs, paths, attachments, approvals, and all unrecognized items. This recent-chat excerpt is read-only, is not included in recurring snapshots, and is not requested when the board's summary privacy setting is enabled. The board labels the surface `READ ONLY`, `RECENT`, and directs the user to the Mac for the complete thread.

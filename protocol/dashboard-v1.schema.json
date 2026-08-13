@@ -10,6 +10,7 @@
     "revision": { "type": "integer", "minimum": 0 },
     "generatedAt": { "type": "string", "format": "date-time" },
     "hostState": { "enum": ["online", "sleeping", "degraded"] },
+    "codexEnabled": { "type": "boolean" },
     "xNewsEnabled": { "type": "boolean" },
     "companionVersion": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9.()+ -]{1,32}$" },
     "capabilities": {
