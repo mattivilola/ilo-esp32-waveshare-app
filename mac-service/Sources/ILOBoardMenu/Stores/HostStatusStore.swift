@@ -6,6 +6,16 @@ import ILOBoardMenuSupport
 
 @MainActor
 final class HostStatusStore: ObservableObject {
+    static func firmwareUpdatePresentation(for state: FirmwareUpdateState) -> (title: String, detail: String) {
+        if state == .disabled {
+            return (
+                "OTA firmware not installed",
+                "USB and Wi-Fi can be connected normally. A separate one-time signed firmware installation enables future wireless updates."
+            )
+        }
+        return ("", "")
+    }
+
     @Published private(set) var state: HostServiceState = .starting
     @Published private(set) var boardID = "—"
     @Published private(set) var servicePort: UInt16?
@@ -14,7 +24,7 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var firmwareUpdateStatus = FirmwareUpdateStatusMessage(
         state: .disabled,
         currentVersion: "0.0.0",
-        message: "Signed OTA requires the v0.2.0 USB bridge"
+        message: "Waiting for the board's firmware update capability"
     )
     @Published private(set) var connectionHistory: [ConnectionHistoryEntry]
     @Published private(set) var macPowerStatus: MacPowerStatus?

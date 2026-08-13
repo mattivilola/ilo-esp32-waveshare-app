@@ -1410,7 +1410,7 @@ static void refresh_settings_labels(void)
         case DASHBOARD_OTA_REBOOTING: snprintf(ota_text, sizeof(ota_text), "REBOOTING"); break;
         case DASHBOARD_OTA_FAILED: snprintf(ota_text, sizeof(ota_text), "TRY AGAIN"); color = COLOR_AMBER; break;
         case DASHBOARD_OTA_DISABLED:
-        default: snprintf(ota_text, sizeof(ota_text), "USB BRIDGE NEEDED"); color = COLOR_FOG; break;
+        default: snprintf(ota_text, sizeof(ota_text), "OTA SETUP NEEDED"); color = COLOR_FOG; break;
         }
         lv_label_set_text(settings_ota_value, ota_text);
         lv_obj_set_style_text_color(settings_ota_value, color, 0);

@@ -443,12 +443,13 @@ struct MenuDashboardView: View {
 
     private var firmwareUpdateControls: some View {
         let status = store.firmwareUpdateStatus
+        let presentation = HostStatusStore.firmwareUpdatePresentation(for: status.state)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Label("Board firmware", systemImage: "arrow.triangle.2.circlepath.circle")
                     .font(.caption.weight(.semibold))
                 Spacer()
-                Text(firmwareUpdateTitle(status))
+                Text(firmwareUpdateTitle(status, disabledTitle: presentation.title))
                     .font(.caption)
                     .foregroundStyle(firmwareUpdateTint(status.state))
             }
@@ -467,7 +468,7 @@ struct MenuDashboardView: View {
                     Button("Check for Firmware Update") { store.checkForFirmwareUpdate() }
                 }
                 if status.state == .disabled {
-                    Text("One USB bridge flash enables future wireless updates.")
+                    Text(presentation.detail)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -476,9 +477,9 @@ struct MenuDashboardView: View {
         .padding(.vertical, 10)
     }
 
-    private func firmwareUpdateTitle(_ status: FirmwareUpdateStatusMessage) -> String {
+    private func firmwareUpdateTitle(_ status: FirmwareUpdateStatusMessage, disabledTitle: String) -> String {
         switch status.state {
-        case .disabled: "USB bridge needed"
+        case .disabled: disabledTitle
         case .idle: "Ready"
         case .checking: "Checking…"
         case .upToDate: "Up to date"
