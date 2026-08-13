@@ -16,10 +16,13 @@ class OTAPolicySourceTests(unittest.TestCase):
         self.assertIn("ota_policy_confirmation_required()", UPDATER)
         self.assertIn("ota_policy_confirm_pending_image()", UPDATER)
         self.assertIn("CONFIG_ILO_OTA_VALIDATION_SECONDS * 1000U", UPDATER)
+        self.assertIn("OTA_UPDATER_VERIFYING", UPDATER)
+        self.assertIn("Completing first-boot health check", UPDATER)
 
-    def test_confirmation_keeps_heap_state_and_persistent_validity_gates(self):
+    def test_confirmation_logs_heap_and_keeps_persistent_validity_gates(self):
         self.assertIn("heap_caps_get_free_size", POLICY)
-        self.assertIn("CONFIG_ILO_OTA_MIN_INTERNAL_HEAP", POLICY)
+        self.assertNotIn("CONFIG_ILO_OTA_MIN_INTERNAL_HEAP", POLICY)
+        self.assertNotIn("free_internal <", POLICY)
         self.assertIn("ESP_OTA_IMG_PENDING_VERIFY", POLICY)
         self.assertIn("esp_ota_mark_app_valid_cancel_rollback", POLICY)
         self.assertIn("esp_ota_mark_app_invalid_rollback_and_reboot", POLICY)

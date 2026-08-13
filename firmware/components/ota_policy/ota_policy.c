@@ -66,10 +66,6 @@ esp_err_t ota_policy_confirm_pending_image(void)
         return ESP_ERR_INVALID_STATE;
     }
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (free_internal < CONFIG_ILO_OTA_MIN_INTERNAL_HEAP) {
-        reject_pending_image("internal heap is below the confirmation threshold");
-        return ESP_ERR_NO_MEM;
-    }
     esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
     if (esp_ota_get_state_partition(boot_partition, &state) != ESP_OK || state != ESP_OTA_IMG_PENDING_VERIFY) {
         reject_pending_image("running image is no longer pending verification");
@@ -83,7 +79,7 @@ esp_err_t ota_policy_confirm_pending_image(void)
     pending_validation = false;
     ESP_LOGI(
         TAG,
-        "OTA image confirmed after %d seconds; free internal heap %lu bytes",
+        "OTA image confirmed after %d stable seconds; free internal heap %lu bytes",
         CONFIG_ILO_OTA_VALIDATION_SECONDS,
         (unsigned long)free_internal
     );

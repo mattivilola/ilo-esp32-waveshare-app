@@ -6,7 +6,7 @@ OTA delivery is built as a fail-closed release path. The normal developer build 
 
 - `firmware/partitions.csv` contains equal 4 MiB `ota_0` and `ota_1` slots plus `otadata`; factory/test app partitions are forbidden by the CLI policy check.
 - Clean firmware builds enable ESP-IDF application rollback.
-- A new image remains `ESP_OTA_IMG_PENDING_VERIFY` after boot. The firmware checks the slot layout, completes board/display/UI initialization, waits 30 stable seconds, checks free internal heap, rechecks its partition state, and only then marks the image valid.
+- A new image remains `ESP_OTA_IMG_PENDING_VERIFY` after boot. The firmware checks the slot layout, completes board/display/UI and worker initialization, waits 30 seconds without a crash or restart, rechecks its running partition state, and only then marks the image valid. Free internal heap is logged for diagnosis but is not treated as a standalone health verdict because the display stack deliberately reserves and uses internal/DMA memory alongside PSRAM.
 - A failed health check requests rollback when a previous valid image exists. The first USB bridge has no previous OTA image, so it still runs the same health window and becomes valid only on success; on failure it remains unconfirmed and USB recovery is required.
 - `./tools/board ota-status [--sdkconfig FILE]` inspects policy without hardware.
 - `./tools/board ota-verify --image FILE.bin --public-key PUBLIC.pem --sdkconfig FILE` fail-closes unless the artifact fits a slot, is a valid ESP image, was built with rollback and signed-update enforcement, and carries a valid RSA Secure Boot v2 signature. It refuses PEM private keys and never uploads.

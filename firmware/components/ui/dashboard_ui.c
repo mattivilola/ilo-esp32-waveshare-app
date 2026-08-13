@@ -1419,12 +1419,17 @@ static void refresh_settings_labels(void)
             ota_note = "A new version is ready when you are";
             break;
         case DASHBOARD_OTA_DOWNLOADING:
-            snprintf(ota_text, sizeof(ota_text), "%u%%", (unsigned)settings_ota_progress);
-            ota_note = "Downloading update / keep power connected";
+            if (settings_ota_progress == 0) {
+                snprintf(ota_text, sizeof(ota_text), "STARTING...");
+                ota_note = "Preparing secure download / keep power connected";
+            } else {
+                snprintf(ota_text, sizeof(ota_text), "%u%%", (unsigned)settings_ota_progress);
+                ota_note = "Downloading update / keep power connected";
+            }
             break;
         case DASHBOARD_OTA_VERIFYING:
             snprintf(ota_text, sizeof(ota_text), "VERIFYING");
-            ota_note = "Checking update / keep power connected";
+            ota_note = "Checking update health / keep power connected";
             break;
         case DASHBOARD_OTA_REBOOTING:
             snprintf(ota_text, sizeof(ota_text), "REBOOTING");

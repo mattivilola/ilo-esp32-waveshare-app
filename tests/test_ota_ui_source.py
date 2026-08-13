@@ -29,6 +29,11 @@ class OTAUISourceTests(unittest.TestCase):
         self.assertIn("lv_display_trigger_activity(ui_display)", setter)
         self.assertIn("board_waveshare_5_set_backlight(true)", setter)
 
+    def test_install_transition_has_an_explicit_starting_state(self):
+        labels = SOURCE[SOURCE.index("static void refresh_settings_labels"):SOURCE.index("static void ota_setting_tapped")]
+        self.assertIn('"STARTING..."', labels)
+        self.assertIn('"Preparing secure download / keep power connected"', labels)
+
 
 if __name__ == "__main__":
     unittest.main()

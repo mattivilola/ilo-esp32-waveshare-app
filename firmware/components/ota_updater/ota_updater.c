@@ -531,7 +531,12 @@ static void updater_task(void *argument)
 {
     (void)argument;
     if (ota_policy_confirmation_required()) {
-        publish_status(OTA_UPDATER_IDLE, NULL, 0, "Completing first-boot health check");
+        publish_status(
+            OTA_UPDATER_VERIFYING,
+            esp_app_get_description()->version,
+            100,
+            "Completing first-boot health check"
+        );
         ESP_LOGI(
             TAG,
             "Pending image will remain unconfirmed for a %d-second health window",
