@@ -4,12 +4,31 @@ struct CodexPage: View {
     @Binding var selectedTask: Int
     @State private var continueArmed = false
     @State private var continueSent = false
+    @State private var showingChat: Bool
+    private let interactive: Bool
 
-    init(selectedTask: Binding<Int> = .constant(0)) {
+    init(
+        selectedTask: Binding<Int> = .constant(0),
+        initiallyShowingChat: Bool = false,
+        interactive: Bool = true
+    ) {
         _selectedTask = selectedTask
+        _showingChat = State(initialValue: initiallyShowingChat)
+        self.interactive = interactive
     }
 
     var body: some View {
+        Group {
+            if showingChat {
+                chatReader
+            } else {
+                taskBrowser
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var taskBrowser: some View {
         VStack(spacing: 14) {
             HStack {
                 Text("Recent Codex tasks")
@@ -63,7 +82,74 @@ struct CodexPage: View {
                 .frame(width: 290)
             }
         }
-        .padding(.vertical, 4)
+    }
+
+    private var chatReader: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 16) {
+                Button {
+                    showingChat = false
+                } label: {
+                    Label("BACK", systemImage: "chevron.left")
+                        .font(.board(12, weight: .bold))
+                        .frame(width: 104)
+                        .frame(minHeight: 42)
+                }
+                .buttonStyle(.plain)
+                .background(BoardPalette.steel, in: RoundedRectangle(cornerRadius: 12))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(selectedTaskTitle)
+                        .font(.board(19, weight: .bold))
+                        .foregroundStyle(BoardPalette.mist)
+                        .lineLimit(1)
+                    Text("RECENT CONVERSATION / USER + CODEX TEXT")
+                        .font(.board(10, weight: .semibold))
+                        .foregroundStyle(BoardPalette.fog)
+                }
+                Spacer()
+                Text("READ ONLY")
+                    .font(.board(11, weight: .bold))
+                    .foregroundStyle(BoardPalette.signal)
+            }
+
+            if interactive {
+                ScrollView(.vertical) {
+                    chatMessages
+                }
+                .scrollIndicators(.visible)
+            } else {
+                chatMessages
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .clipped()
+            }
+
+            Text("SWIPE UP/DOWN  /  LATEST SIX  /  READ ONLY")
+                .font(.board(10, weight: .semibold))
+                .foregroundStyle(BoardPalette.fog)
+        }
+    }
+
+    private var chatMessages: some View {
+        VStack(spacing: 10) {
+            ForEach(Array(selectedChat.enumerated()), id: \.offset) { _, message in
+                VStack(alignment: .leading, spacing: 7) {
+                    Text(message.user ? "YOU" : "CODEX")
+                        .font(.board(10, weight: .bold))
+                        .foregroundStyle(message.user ? BoardPalette.cyan : BoardPalette.signal)
+                    Text(message.text)
+                        .font(.board(13))
+                        .foregroundStyle(BoardPalette.mist)
+                        .lineSpacing(4)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(15)
+                .background(
+                    message.user ? BoardPalette.steel : BoardPalette.slate,
+                    in: RoundedRectangle(cornerRadius: 14)
+                )
+            }
+        }
     }
 
     private func codexRow(_ index: Int, _ title: String, _ detail: String, _ tint: Color) -> some View {
@@ -71,6 +157,7 @@ struct CodexPage: View {
             selectedTask = index
             continueArmed = false
             continueSent = false
+            showingChat = true
         } label: {
             PulseCard {
             HStack(spacing: 15) {
@@ -88,11 +175,37 @@ struct CodexPage: View {
                     .font(.board(10, weight: .bold))
                     .tracking(0.7)
                     .foregroundStyle(tint)
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(BoardPalette.fog)
             }
         }
         }
         .buttonStyle(.plain)
         .frame(height: 106)
+    }
+
+    private var selectedChat: [(user: Bool, text: String)] {
+        switch selectedTask {
+        case 1:
+            [
+                (true, "Please package the latest Mac companion and verify its update path."),
+                (false, "The universal app is signed, notarized, and its public update artifact matches byte-for-byte."),
+                (true, "Great. Keep the rollout notes concise."),
+                (false, "Done. The release status and exact update path are ready."),
+            ]
+        case 2:
+            [
+                (true, "Can the board show a clearer view of ongoing work?"),
+                (false, "Yes. The work pulse now keeps task identity visible and uses a focused detail surface."),
+            ]
+        default:
+            [
+                (true, "Can we read more of the Codex chat when opening a task?"),
+                (false, "I can add an on-demand recent-chat view that transfers only visible user and assistant text."),
+                (true, "Make it simple and let me scroll up and down."),
+                (false, "The task now opens a full-width, read-only chat reader with native vertical swipe scrolling."),
+            ]
+        }
     }
 
     private var selectedTaskTitle: String {

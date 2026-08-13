@@ -22,12 +22,12 @@ Codex app-server
 
 ## Boundaries
 
-- The ESP32 never receives OpenAI credentials, Mac login credentials, full transcripts, shell access, filesystem paths, or environment variables.
+- The ESP32 never receives OpenAI credentials, Mac login credentials, full transcripts, shell access, filesystem paths, or environment variables. It may receive an explicitly opened, bounded excerpt of the newest six user/assistant text messages.
 - `BoardProtocol` contains transport-neutral status models.
 - `TaskSource` isolates Codex from the board-facing service. `CodexHistoryTaskSource` is the default; deterministic mock data remains an explicit test/demo mode.
 - The Codex source owns one local App Server for its companion lifetime, uses bounded `thread/list` requests with a 15-second cache, and keeps that supported session available for fixed continuation. It never scrapes Codex databases or session files.
 - The separately launched server can list recent Desktop-created tasks, but those tasks report `notLoaded`; the mapper labels them as recent history and never as live. Only tasks loaded by that App Server may expose authoritative active/waiting state.
-- The narrow decoder admits only thread ID, name, update time, and status. Board payloads exclude prompt preview, working directory, turns, source metadata, Git data, and file contents.
+- The list decoder admits only thread ID, name, update time, and status. An independent on-demand chat decoder accepts at most four recent turns, extracts only the newest six user/assistant text messages, and drops every tool, reasoning, command, path, diff, attachment, and approval item before board sanitization.
 - Board-specific LCD, touch, backlight, and IO-expander behavior for the 1024×600 5B stays behind `board_waveshare_5`.
 - User display/privacy settings live in the separate `ilo_settings` NVS namespace. Normal app flashes and reboots preserve them; the deliberate full-NVS USB provisioning flow resets them with the rest of provisioned state.
 - The 5B `DISP` line is a binary CH422G output. `board_waveshare_5` therefore exposes backlight on/off only; no firmware layer pretends that PWM brightness is available.
@@ -36,6 +36,7 @@ Codex app-server
 - The shared 512×512 PNG is transformed deterministically into macOS `.icns` and a 48×48 LVGL ARGB descriptor by `make assets`; generated firmware bytes contain no runtime PNG decoder dependency.
 - `BoardHostCore` owns TLS, Keychain access, task sanitization, and connection events; the menu-bar executable only presents that state and lifecycle controls.
 - Live screenshots reuse the authenticated framed connection. A one-shot host sends a versioned capture request only after hello/subscription, firmware copies one full LVGL RGB565 buffer into temporary PSRAM, and returns bounded base64 chunks plus SHA-256. The host validates metadata, exact sequence/offset/length, and checksum before converting to PNG; neither side exposes an HTTP listener.
+- Recent Codex chat detail is fetched only when the user opens one of the currently visible task IDs. The board renders the bounded response in a full-width, read-only vertical scroller and keeps fixed continuation on the separate hold/confirm control surface.
 - Optional X News is a Mac-side adapter, not direct ESP32 Internet access. The companion detects the Grok executable and owns explicit consent plus schedule state; its snapshot boolean inserts or removes the complete LVGL page. An enabled scheduler or authenticated pull-to-refresh request runs headless `grok -p`, validates direct X citations and their ID-derived timestamps, and caches only the bounded accepted feed. The optional LVGL page never executes Grok or holds X credentials; its request cannot enable consent or bypass cooldown/validation.
 - The macOS companion is intentionally menu-bar-only during development and uses accessory activation, so it does not add a Dock icon.
 - The packaged Mac companion embeds pinned Sparkle 2.9.2, displays its version/build, and reads an HTTPS appcast from public GCS. Release tooling signs the notarized DMG with a Keychain-backed EdDSA key, uploads immutable and stable DMGs first, and publishes the appcast last. Local builds, tests, and `release-local` do not write to GCS.

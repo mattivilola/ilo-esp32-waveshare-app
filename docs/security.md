@@ -4,11 +4,13 @@ This model covers the firmware built for the Waveshare ESP32-S3-Touch-LCD-5B (SK
 
 ## Phase-1 capability
 
-Codex task data and Mac-control capabilities remain read-only: `tasks.read`, `macPower.read`, plus an explicitly requested diagnostic display capture. One narrow `tasks.continue.fixed` action can resume an eligible idle/unloaded task with exactly `Please continue.` after hold-to-arm and a separate confirmation. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, short summary, and optional Mac battery percentage/state. Mac power data excludes the computer name, battery serial, hardware identifiers, health/capacity history, adapter details, and time estimates. Capture returns only the pixels already visible on the paired physical display. The separate `xNews.refresh.request` capability can start only the already-opted-in bounded news adapter; all other mutating requests fail closed.
+Codex task data and Mac-control capabilities are bounded: `tasks.read`, on-demand `tasks.chat.read`, `macPower.read`, plus an explicitly requested diagnostic display capture. One narrow `tasks.continue.fixed` action can resume an eligible idle/unloaded task with exactly `Please continue.` after hold-to-arm and a separate confirmation. The host sends a normalized task ID, short title, coarse status, attention kind, timestamp, short summary, and optional Mac battery percentage/state. Mac power data excludes the computer name, battery serial, hardware identifiers, health/capacity history, adapter details, and time estimates. Capture returns only the pixels already visible on the paired physical display. The separate `xNews.refresh.request` capability can start only the already-opted-in bounded news adapter; all other mutating requests fail closed.
 
 ## Codex privacy boundary
 
-The host obtains recent task metadata through a one-shot local Codex App Server `thread/list` request. Its decoder accepts only `id`, optional `name`, `updatedAt`, and `status`. Prompt previews, full turns, working-directory paths, task source metadata, Git information, file contents, environment variables, and credentials are neither decoded nor placed in the board protocol.
+The host obtains recent task metadata through a local Codex App Server `thread/list` request. Its list decoder accepts only `id`, optional `name`, `updatedAt`, and `status`; prompt previews, working-directory paths, source metadata, Git information, file contents, environment variables, and credentials are ignored.
+
+Opening a visible task can make one on-demand `thread/turns/list` request for at most four recent turns. A separate narrow decoder keeps only the newest six `userMessage` and `agentMessage` text items, sanitizes each to 360 board-safe characters, and drops commands, command output, tools, reasoning, plans, diffs, paths, attachments, approvals, and all unrecognized items. This recent-chat excerpt is read-only, is not included in recurring snapshots, and is not requested when the board's summary privacy setting is enabled. The board labels the surface `READ ONLY`, `RECENT`, and directs the user to the Mac for the complete thread.
 
 Results are capped at six tasks and cached for 15 seconds. The companion owns one App Server child for its lifetime so a confirmed fixed continuation can resume a selected task; it never reads or writes Codex SQLite databases, session logs, or internal state files directly.
 
@@ -56,7 +58,7 @@ The device cannot currently:
 - answer free-form or structured Codex questions;
 - steer or interrupt active Codex turns, or start turns with anything except the fixed eligible-task continuation;
 - run shell commands or AppleScript;
-- read or write Codex SQLite/session files.
+- read or write Codex SQLite/session files directly.
 
 Later decision support requires one-time request IDs, expiry, replay protection, current-state validation, complete action context, an audit trail, and a visible Mac-side revocation control. File-change approval remains Mac-only unless a device can present enough of the diff for informed consent.
 

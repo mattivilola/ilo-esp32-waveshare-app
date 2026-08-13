@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iloapps.com/schemas/ilo-board/codex-chat-v1.schema.json",
+  "title": "ILO Board bounded Codex chat detail v1",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "taskID"],
+      "properties": {
+        "type": { "const": "codexChatRequest" },
+        "version": { "const": 1 },
+        "requestID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,64}$" },
+        "taskID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,80}$" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "version", "requestID", "taskID", "status", "title", "messages"],
+      "properties": {
+        "type": { "const": "codexChatDetail" },
+        "version": { "const": 1 },
+        "requestID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,64}$" },
+        "taskID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,80}$" },
+        "status": { "enum": ["ready", "unavailable", "busy", "failed"] },
+        "title": { "type": "string", "maxLength": 80 },
+        "messages": {
+          "type": "array",
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["role", "text"],
+            "properties": {
+              "role": { "enum": ["user", "assistant"] },
+              "text": { "type": "string", "minLength": 1, "maxLength": 360 }
+            }
+          }
+        },
+        "message": { "type": ["string", "null"], "maxLength": 95 }
+      }
+    }
+  ]
+}

@@ -61,6 +61,11 @@ static bool mdns_available;
 static portMUX_TYPE refresh_lock = portMUX_INITIALIZER_UNLOCKED;
 static bool transport_online;
 static bool x_news_refresh_requested;
+static bool codex_chat_supported;
+static bool codex_chat_requested;
+static bool codex_chat_in_flight;
+static char codex_chat_task_id[CODEX_TASK_ID_MAX + 1];
+static char codex_chat_request_id[25];
 static bool codex_continue_requested;
 static bool codex_continue_in_flight;
 static char codex_continue_task_id[CODEX_TASK_ID_MAX + 1];
@@ -77,6 +82,19 @@ static ota_updater_status_t ota_status_pending;
 static bool ota_status_dirty;
 
 static bool json_number_equals(cJSON *item, int expected);
+static void copy_json_string(cJSON *object, const char *name, char *destination, size_t size);
+static void copy_json_board_text(cJSON *object, const char *name, char *destination, size_t size);
+static void make_board_text_font_safe(char *text);
+
+static bool json_array_contains_string(cJSON *array, const char *value)
+{
+    if (!cJSON_IsArray(array) || value == NULL) return false;
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, array) {
+        if (cJSON_IsString(item) && strcmp(item->valuestring, value) == 0) return true;
+    }
+    return false;
+}
 
 typedef struct {
     char address[HOST_ADDRESS_MAX];
@@ -492,6 +510,97 @@ static bool take_codex_continue_request(char *task_id, size_t task_id_size, char
     }
     portEXIT_CRITICAL(&refresh_lock);
     return requested;
+}
+
+static bool take_codex_chat_request(char *task_id, size_t task_id_size, char *request_id, size_t request_id_size)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool requested = codex_chat_requested;
+    if (requested) {
+        strlcpy(task_id, codex_chat_task_id, task_id_size);
+        strlcpy(request_id, codex_chat_request_id, request_id_size);
+        codex_chat_requested = false;
+        codex_chat_in_flight = true;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    return requested;
+}
+
+static bool send_codex_chat_request(esp_tls_t *tls, const char *task_id, const char *request_id)
+{
+    cJSON *request = cJSON_CreateObject();
+    if (request == NULL) return false;
+    cJSON_AddStringToObject(request, "type", "codexChatRequest");
+    cJSON_AddNumberToObject(request, "version", 1);
+    cJSON_AddStringToObject(request, "requestID", request_id);
+    cJSON_AddStringToObject(request, "taskID", task_id);
+    bool ok = send_json(tls, request);
+    cJSON_Delete(request);
+    ESP_LOGI(TAG, "Codex chat detail request %s", ok ? "sent" : "failed");
+    return ok;
+}
+
+static void handle_codex_chat_detail(cJSON *message)
+{
+    cJSON *version = cJSON_GetObjectItemCaseSensitive(message, "version");
+    cJSON *request_id = cJSON_GetObjectItemCaseSensitive(message, "requestID");
+    cJSON *task_id = cJSON_GetObjectItemCaseSensitive(message, "taskID");
+    cJSON *status = cJSON_GetObjectItemCaseSensitive(message, "status");
+    if (!json_number_equals(version, 1) || !cJSON_IsString(request_id)
+        || !cJSON_IsString(task_id) || !cJSON_IsString(status)) return;
+
+    bool matches = false;
+    portENTER_CRITICAL(&refresh_lock);
+    matches = codex_chat_in_flight
+        && strcmp(request_id->valuestring, codex_chat_request_id) == 0
+        && strcmp(task_id->valuestring, codex_chat_task_id) == 0;
+    if (matches) codex_chat_in_flight = false;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (!matches) {
+        ESP_LOGW(TAG, "Ignoring unmatched Codex chat detail response");
+        return;
+    }
+
+    dashboard_codex_chat_detail_t *detail = calloc(1, sizeof(*detail));
+    if (detail == NULL) {
+        dashboard_ui_set_codex_chat_detail(NULL);
+        return;
+    }
+    detail->state = DASHBOARD_CODEX_CHAT_FAILED;
+    if (strcmp(status->valuestring, "ready") == 0) {
+        detail->state = DASHBOARD_CODEX_CHAT_READY;
+    } else if (strcmp(status->valuestring, "unavailable") == 0) {
+        detail->state = DASHBOARD_CODEX_CHAT_UNAVAILABLE;
+    } else if (strcmp(status->valuestring, "busy") == 0) {
+        detail->state = DASHBOARD_CODEX_CHAT_BUSY;
+    }
+    copy_json_string(message, "taskID", detail->task_id, sizeof(detail->task_id));
+    copy_json_board_text(message, "title", detail->title, sizeof(detail->title));
+    copy_json_board_text(message, "message", detail->status_message, sizeof(detail->status_message));
+
+    cJSON *messages = cJSON_GetObjectItemCaseSensitive(message, "messages");
+    if (detail->state == DASHBOARD_CODEX_CHAT_READY && cJSON_IsArray(messages)) {
+        cJSON *item = NULL;
+        cJSON_ArrayForEach(item, messages) {
+            if (detail->message_count >= DASHBOARD_CODEX_CHAT_MAX_MESSAGES || !cJSON_IsObject(item)) break;
+            cJSON *role = cJSON_GetObjectItemCaseSensitive(item, "role");
+            cJSON *text = cJSON_GetObjectItemCaseSensitive(item, "text");
+            if (!cJSON_IsString(role) || !cJSON_IsString(text) || text->valuestring[0] == 0) continue;
+            dashboard_codex_chat_message_t *target = &detail->messages[detail->message_count];
+            if (strcmp(role->valuestring, "user") == 0) {
+                target->role = DASHBOARD_CODEX_CHAT_USER;
+            } else if (strcmp(role->valuestring, "assistant") == 0) {
+                target->role = DASHBOARD_CODEX_CHAT_ASSISTANT;
+            } else {
+                continue;
+            }
+            strlcpy(target->text, text->valuestring, sizeof(target->text));
+            make_board_text_font_safe(target->text);
+            ++detail->message_count;
+        }
+    }
+    dashboard_ui_set_codex_chat_detail(detail);
+    free(detail);
 }
 
 static bool send_codex_continue_request(esp_tls_t *tls, const char *task_id, const char *request_id)
@@ -1109,6 +1218,7 @@ static void transport_task(void *argument)
             cJSON *capabilities = cJSON_AddArrayToObject(hello, "capabilities");
             if (capabilities != NULL) {
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.read"));
+                cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.chat.read"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.continue.fixed"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("display.capture.rgb565"));
                 cJSON_AddItemToArray(capabilities, cJSON_CreateString("xNews.refresh.request"));
@@ -1121,6 +1231,12 @@ static void transport_task(void *argument)
             cJSON *reply = ok ? read_json(tls) : NULL;
             cJSON *reply_type = reply != NULL ? cJSON_GetObjectItemCaseSensitive(reply, "type") : NULL;
             ok = cJSON_IsString(reply_type) && strcmp(reply_type->valuestring, "helloAck") == 0;
+            cJSON *reply_capabilities = reply != NULL
+                ? cJSON_GetObjectItemCaseSensitive(reply, "capabilities") : NULL;
+            portENTER_CRITICAL(&refresh_lock);
+            codex_chat_supported = ok
+                && json_array_contains_string(reply_capabilities, "tasks.chat.read");
+            portEXIT_CRITICAL(&refresh_lock);
             cJSON_Delete(reply);
             if (ok) {
                 cJSON *subscribe = cJSON_CreateObject();
@@ -1137,6 +1253,17 @@ static void transport_task(void *argument)
                 for (;;) {
                     if (!send_pending_ota_status(tls)) break;
                     if (take_x_news_refresh_request() && !send_x_news_refresh_request(tls)) break;
+                    char chat_task_id[CODEX_TASK_ID_MAX + 1];
+                    char chat_request_id[sizeof(codex_chat_request_id)];
+                    if (take_codex_chat_request(
+                            chat_task_id,
+                            sizeof(chat_task_id),
+                            chat_request_id,
+                            sizeof(chat_request_id)
+                        ) && !send_codex_chat_request(tls, chat_task_id, chat_request_id)) {
+                        dashboard_ui_set_codex_chat_detail(NULL);
+                        break;
+                    }
                     char continue_task_id[CODEX_TASK_ID_MAX + 1];
                     char continue_request_id[sizeof(codex_continue_request_id)];
                     if (take_codex_continue_request(
@@ -1168,6 +1295,12 @@ static void transport_task(void *argument)
                         continue;
                     }
                     if (cJSON_IsString(message_type)
+                        && strcmp(message_type->valuestring, "codexChatDetail") == 0) {
+                        handle_codex_chat_detail(message);
+                        cJSON_Delete(message);
+                        continue;
+                    }
+                    if (cJSON_IsString(message_type)
                         && strcmp(message_type->valuestring, "codexContinueStatus") == 0) {
                         handle_codex_continue_status(message);
                         cJSON_Delete(message);
@@ -1190,12 +1323,19 @@ static void transport_task(void *argument)
         portENTER_CRITICAL(&refresh_lock);
         transport_online = false;
         x_news_refresh_requested = false;
+        codex_chat_supported = false;
+        bool chat_was_pending = codex_chat_requested || codex_chat_in_flight;
+        codex_chat_requested = false;
+        codex_chat_in_flight = false;
         bool continue_was_pending = codex_continue_requested || codex_continue_in_flight;
         codex_continue_requested = false;
         codex_continue_in_flight = false;
         portEXIT_CRITICAL(&refresh_lock);
         if (continue_was_pending) {
             dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
+        }
+        if (chat_was_pending) {
+            dashboard_ui_set_codex_chat_detail(NULL);
         }
         dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
         esp_tls_conn_destroy(tls);
@@ -1219,6 +1359,40 @@ bool mac_transport_request_x_news_refresh(void)
     if (accepted) x_news_refresh_requested = true;
     portEXIT_CRITICAL(&refresh_lock);
     ESP_LOGI(TAG, "X News refresh gesture %s", accepted ? "queued" : "not queued");
+    return accepted;
+}
+
+bool mac_transport_request_codex_chat(const char *task_id)
+{
+    if (task_id == NULL) return false;
+    size_t task_id_size = strlen(task_id);
+    if (task_id_size == 0 || task_id_size > CODEX_TASK_ID_MAX) return false;
+    for (size_t index = 0; index < task_id_size; ++index) {
+        char character = task_id[index];
+        if (!((character >= 'a' && character <= 'z')
+            || (character >= 'A' && character <= 'Z')
+            || (character >= '0' && character <= '9')
+            || character == '-')) {
+            return false;
+        }
+    }
+
+    portENTER_CRITICAL(&refresh_lock);
+    bool accepted = transport_online && codex_chat_supported
+        && !codex_chat_requested && !codex_chat_in_flight;
+    if (accepted) {
+        strlcpy(codex_chat_task_id, task_id, sizeof(codex_chat_task_id));
+        snprintf(
+            codex_chat_request_id,
+            sizeof(codex_chat_request_id),
+            "board-%08lx-%08lx",
+            (unsigned long)esp_random(),
+            (unsigned long)esp_random()
+        );
+        codex_chat_requested = true;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    ESP_LOGI(TAG, "Codex chat detail %s", accepted ? "queued" : "not available");
     return accepted;
 }
 

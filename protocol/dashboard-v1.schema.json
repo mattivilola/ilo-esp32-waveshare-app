@@ -14,7 +14,7 @@
     "companionVersion": { "type": ["string", "null"], "pattern": "^[A-Za-z0-9.()+ -]{1,32}$" },
     "capabilities": {
       "type": "array",
-      "items": { "enum": ["tasks.read", "tasks.continue.fixed", "macPower.read", "hostTime.read", "xNews.read"] },
+      "items": { "enum": ["tasks.read", "tasks.chat.read", "tasks.continue.fixed", "macPower.read", "hostTime.read", "xNews.read"] },
       "uniqueItems": true
     },
     "tasks": {

@@ -3,7 +3,15 @@ import Foundation
 
 public protocol TaskSource: Sendable {
     func snapshot(revision: UInt64) async throws -> DashboardSnapshot
+    func chatDetail(id: String) async -> CodexChatDetailOutcome
     func continueTask(id: String, requestID: String) async -> CodexContinueOutcome
+}
+
+public enum CodexChatDetailOutcome: Sendable {
+    case ready(title: String, messages: [CodexChatMessage])
+    case unavailable
+    case busy
+    case failed
 }
 
 public enum CodexContinueOutcome: Sendable {
@@ -15,6 +23,10 @@ public enum CodexContinueOutcome: Sendable {
 }
 
 public extension TaskSource {
+    func chatDetail(id: String) async -> CodexChatDetailOutcome {
+        .unavailable
+    }
+
     func continueTask(id: String, requestID: String) async -> CodexContinueOutcome {
         .unavailable
     }
@@ -54,6 +66,30 @@ public struct MockTaskSource: TaskSource {
                 ),
             ]
         )
+    }
+
+    public func chatDetail(id: String) async -> CodexChatDetailOutcome {
+        guard id == "board-foundation" else { return .unavailable }
+        return .ready(
+            title: "Board foundation",
+            messages: [
+                CodexChatMessage(role: .user, text: "Show more useful Codex detail on the board."),
+                CodexChatMessage(role: .assistant, text: "Added a bounded, read-only recent chat view with touch scrolling."),
+            ]
+        )
+    }
+}
+
+public enum CodexChatSanitizer {
+    public static func sanitize(_ messages: [CodexChatMessage]) -> [CodexChatMessage] {
+        messages.compactMap { message in
+            let text = BoardDisplayText.sanitized(
+                message.text,
+                maximum: codexChatMaximumMessageCharacters
+            )
+            guard !text.isEmpty else { return nil }
+            return CodexChatMessage(role: message.role, text: text)
+        }.suffix(codexChatMaximumMessages).map { $0 }
     }
 }
 

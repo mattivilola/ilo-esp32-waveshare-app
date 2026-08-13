@@ -38,8 +38,22 @@ import Testing
 @Test func mockSourceExposesReadOnlyCapability() async throws {
     let snapshot = try await MockTaskSource().snapshot(revision: 7)
     #expect(snapshot.revision == 7)
-    #expect(snapshot.capabilities == ["tasks.read", "macPower.read", "hostTime.read"])
+    #expect(snapshot.capabilities == ["tasks.read", "tasks.chat.read", "macPower.read", "hostTime.read"])
     #expect(snapshot.tasks.contains { $0.attentionKind == .approval })
+}
+
+@Test func chatSanitizerBoundsNewestMessagesAndRemovesUnsupportedGlyphs() {
+    let messages = (0..<8).map { index in
+        CodexChatMessage(
+            role: index.isMultiple(of: 2) ? .user : .assistant,
+            text: "Message \(index): päätös 🤖 " + String(repeating: "x", count: 400)
+        )
+    }
+    let sanitized = CodexChatSanitizer.sanitize(messages)
+    #expect(sanitized.count == codexChatMaximumMessages)
+    #expect(sanitized.first?.text.hasPrefix("Message 2: paatos") == true)
+    #expect(sanitized.allSatisfy { $0.text.count <= codexChatMaximumMessageCharacters })
+    #expect(sanitized.allSatisfy { $0.text.unicodeScalars.allSatisfy(\.isASCII) })
 }
 
 @Test func taskSourcesRejectControlUnlessExplicitlyImplemented() async {

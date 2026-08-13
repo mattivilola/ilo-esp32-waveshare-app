@@ -9,6 +9,9 @@ public let screenCaptureMaximumChunkBytes = 2_880
 public let screenCaptureRGB565Bytes = screenCaptureWidth * screenCaptureHeight * 2
 public let screenCaptureChunkCount =
     (screenCaptureRGB565Bytes + screenCaptureMaximumChunkBytes - 1) / screenCaptureMaximumChunkBytes
+public let codexChatProtocolVersion = 1
+public let codexChatMaximumMessages = 6
+public let codexChatMaximumMessageCharacters = 360
 
 public enum BoardDisplayText {
     /// LVGL's bundled Montserrat fonts intentionally cover a compact glyph set.
@@ -131,6 +134,28 @@ public struct TaskCard: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+public enum CodexChatRole: String, Codable, Equatable, Sendable {
+    case user
+    case assistant
+}
+
+public struct CodexChatMessage: Codable, Equatable, Sendable {
+    public let role: CodexChatRole
+    public let text: String
+
+    public init(role: CodexChatRole, text: String) {
+        self.role = role
+        self.text = text
+    }
+}
+
+public enum CodexChatStatus: String, Codable, Equatable, Sendable {
+    case ready
+    case unavailable
+    case busy
+    case failed
+}
+
 public struct NewsCitation: Codable, Equatable, Sendable {
     public let handle: String
     public let postedAt: Date
@@ -224,7 +249,7 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         self.revision = revision
         self.generatedAt = generatedAt
         self.hostState = hostState
-        var capabilities = ["tasks.read"]
+        var capabilities = ["tasks.read", "tasks.chat.read"]
         if codexContinueEnabled { capabilities.append("tasks.continue.fixed") }
         capabilities.append(contentsOf: ["macPower.read", "hostTime.read"])
         if newsFeed != nil { capabilities.append("xNews.read") }
@@ -278,11 +303,60 @@ public struct ClientMessage: Codable, Equatable, Sendable {
 public struct HelloAcknowledgement: Encodable, Equatable, Sendable {
     public let type = "helloAck"
     public let protocolVersion = boardProtocolVersion
-    public let capabilities = ["tasks.read", "tasks.continue.fixed", "macPower.read", "xNews.refresh.request"]
+    public let capabilities = [
+        "tasks.read",
+        "tasks.chat.read",
+        "tasks.continue.fixed",
+        "macPower.read",
+        "xNews.refresh.request",
+    ]
     public let serverTime: Date
 
     public init(serverTime: Date = Date()) {
         self.serverTime = serverTime
+    }
+}
+
+public struct CodexChatRequest: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let requestID: String
+    public let taskID: String
+
+    public init(requestID: String, taskID: String) {
+        type = "codexChatRequest"
+        version = codexChatProtocolVersion
+        self.requestID = requestID
+        self.taskID = taskID
+    }
+}
+
+public struct CodexChatDetailMessage: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let requestID: String
+    public let taskID: String
+    public let status: CodexChatStatus
+    public let title: String
+    public let messages: [CodexChatMessage]
+    public let message: String?
+
+    public init(
+        requestID: String,
+        taskID: String,
+        status: CodexChatStatus,
+        title: String,
+        messages: [CodexChatMessage] = [],
+        message: String? = nil
+    ) {
+        type = "codexChatDetail"
+        version = codexChatProtocolVersion
+        self.requestID = requestID
+        self.taskID = taskID
+        self.status = status
+        self.title = title
+        self.messages = Array(messages.prefix(codexChatMaximumMessages))
+        self.message = message
     }
 }
 
