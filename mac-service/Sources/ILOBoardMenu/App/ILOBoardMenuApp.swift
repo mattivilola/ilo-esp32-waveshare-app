@@ -34,6 +34,7 @@ final class ILOBoardAppDelegate: NSObject, NSApplicationDelegate {
             Task { await runCapture(capture) }
             return
         }
+        FocusCompletionNotifier.prepare()
         xNewsScheduleTask = Task {
             await XNewsRefreshCoordinator.shared.run()
         }

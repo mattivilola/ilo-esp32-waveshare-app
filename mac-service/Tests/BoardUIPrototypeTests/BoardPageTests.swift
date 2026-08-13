@@ -1,6 +1,13 @@
 @testable import BoardUIPrototype
 import Testing
 
+@Test func focusPreviewMathUsesStableCountdownAndProgress() {
+    #expect(FocusPreviewMath.countdown(1_499) == "24:59")
+    #expect(FocusPreviewMath.countdown(-1) == "00:00")
+    #expect(FocusPreviewMath.progress(remainingSeconds: 750, totalSeconds: 1_500) == 0.5)
+    #expect(FocusPreviewMath.progress(remainingSeconds: 0, totalSeconds: 1_500) == 1)
+}
+
 @Test func boardPageOrderMatchesSwipeInformationArchitecture() {
     #expect(BoardPage.allCases == [.dashboard, .codex, .xNews, .weather, .settings])
     #expect(BoardPage.allCases.map(\.title) == ["Dashboard", "Codex", "X News", "Weather", "Settings"])

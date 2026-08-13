@@ -20,6 +20,7 @@ public enum BoardServerEvent: Equatable, Sendable {
     case boardConnected(transport: BoardTransport)
     case boardVersionReceived(String)
     case firmwareUpdateStatus(FirmwareUpdateStatusMessage)
+    case focusCompleted(FocusCompletionMessage)
     case boardDisconnected(transport: BoardTransport)
     case transportIssue(transport: BoardTransport, message: String)
     case snapshotSent(at: Date)
@@ -230,6 +231,7 @@ public final class BoardServer: @unchecked Sendable {
             onReady: { [weak self] id in self?.connectionReady(id: id, transport: transport) },
             onBoardVersion: { [eventHandler] version in eventHandler(.boardVersionReceived(version)) },
             onFirmwareUpdateStatus: { [eventHandler] status in eventHandler(.firmwareUpdateStatus(status)) },
+            onFocusCompletion: { [eventHandler] completion in eventHandler(.focusCompleted(completion)) },
             onSnapshot: { [eventHandler] date in eventHandler(.snapshotSent(at: date)) },
             onTransportIssue: { [eventHandler] transport, message in
                 eventHandler(.transportIssue(transport: transport, message: message))
@@ -286,6 +288,7 @@ private final class BoardConnection: @unchecked Sendable {
     private let onReady: @Sendable (ObjectIdentifier) -> Void
     private let onBoardVersion: @Sendable (String) -> Void
     private let onFirmwareUpdateStatus: @Sendable (FirmwareUpdateStatusMessage) -> Void
+    private let onFocusCompletion: @Sendable (FocusCompletionMessage) -> Void
     private let onSnapshot: @Sendable (Date) -> Void
     private let onTransportIssue: @Sendable (BoardTransport, String) -> Void
     private let onClose: @Sendable (ObjectIdentifier) -> Void
@@ -312,6 +315,7 @@ private final class BoardConnection: @unchecked Sendable {
         onReady: @escaping @Sendable (ObjectIdentifier) -> Void,
         onBoardVersion: @escaping @Sendable (String) -> Void,
         onFirmwareUpdateStatus: @escaping @Sendable (FirmwareUpdateStatusMessage) -> Void,
+        onFocusCompletion: @escaping @Sendable (FocusCompletionMessage) -> Void,
         onSnapshot: @escaping @Sendable (Date) -> Void,
         onTransportIssue: @escaping @Sendable (BoardTransport, String) -> Void,
         onClose: @escaping @Sendable (ObjectIdentifier) -> Void
@@ -331,6 +335,7 @@ private final class BoardConnection: @unchecked Sendable {
         self.onReady = onReady
         self.onBoardVersion = onBoardVersion
         self.onFirmwareUpdateStatus = onFirmwareUpdateStatus
+        self.onFocusCompletion = onFocusCompletion
         self.onSnapshot = onSnapshot
         self.onTransportIssue = onTransportIssue
         self.onClose = onClose
@@ -434,6 +439,16 @@ private final class BoardConnection: @unchecked Sendable {
             handleCodexChatRequest(payload)
         case "codexContinueRequest":
             handleCodexContinueRequest(payload)
+        case "focusCompletion":
+            guard helloAccepted, subscribed,
+                  let completion = try? ProtocolJSON.decoder().decode(FocusCompletionMessage.self, from: payload),
+                  Self.validFocusCompletion(completion)
+            else {
+                send(ErrorMessage(code: "invalidFocusCompletion", message: "Focus completion payload is invalid."))
+                return
+            }
+            send(FocusCompletionAcknowledgement(eventID: completion.eventID))
+            onFocusCompletion(completion)
         case "firmwareUpdateStatus":
             guard helloAccepted, subscribed,
                   let status = try? ProtocolJSON.decoder().decode(FirmwareUpdateStatusMessage.self, from: payload),
@@ -467,6 +482,14 @@ private final class BoardConnection: @unchecked Sendable {
             && (0...100).contains(status.progressPercent)
             && (1...95).contains(status.message.count)
             && status.message.allSatisfy { $0.isASCII && !$0.isNewline }
+    }
+
+    private static func validFocusCompletion(_ completion: FocusCompletionMessage) -> Bool {
+        completion.type == "focusCompletion"
+            && completion.version == focusCompletionProtocolVersion
+            && validRequestID(completion.eventID)
+            && (1...720).contains(completion.durationMinutes)
+            && (1_704_067_200...4_102_444_799).contains(completion.completedEpoch)
     }
 
     private func handleXNewsRefreshRequest(_ payload: Data) {

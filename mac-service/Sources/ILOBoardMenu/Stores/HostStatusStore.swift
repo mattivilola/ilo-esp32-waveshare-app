@@ -288,6 +288,10 @@ final class HostStatusStore: ObservableObject {
             firmwareVersion = version
         case let .firmwareUpdateStatus(status):
             firmwareUpdateStatus = status
+        case let .focusCompleted(completion):
+            if FocusCompletionReceipt.shouldNotify(eventID: completion.eventID, defaults: defaults) {
+                FocusCompletionNotifier.post(completion)
+            }
         case let .boardDisconnected(transport):
             if activeTransport == transport { activeTransport = nil }
             if server != nil {

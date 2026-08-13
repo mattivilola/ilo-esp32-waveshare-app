@@ -1,8 +1,14 @@
 import SwiftUI
 
+private struct FocusPreviewContext {
+    let minutes: Int
+    let title: String
+}
+
 public struct BoardDeviceView: View {
     @State private var page: BoardPage
     @State private var selectedCodexTask = 0
+    @State private var focusContext: FocusPreviewContext?
     private let interactive: Bool
     private let fixedPage: BoardPage?
     private let scenario: BoardPreviewScenario?
@@ -67,6 +73,11 @@ public struct BoardDeviceView: View {
                     .frame(height: 58)
             }
             .padding(.leading, 6)
+            if let focusContext {
+                FocusCockpitView(minutes: focusContext.minutes, title: focusContext.title) {
+                    self.focusContext = nil
+                }
+            }
         }
         .frame(width: 1024, height: 600)
         .contentShape(Rectangle())
@@ -138,6 +149,17 @@ public struct BoardDeviceView: View {
                         guard interactive else { return }
                         page = .settings
                     },
+                    onStartFocus: { index in
+                        guard interactive else { return }
+                        focusContext = FocusPreviewContext(
+                            minutes: 25,
+                            title: [
+                                "Set up ESP32 Mac controller",
+                                "Package macOS companion",
+                                "Design work pulse UX",
+                            ][min(max(index, 0), 2)]
+                        )
+                    },
                     codexEnabled: codexEnabled,
                     xNewsEnabled: xNewsEnabled
                 )
@@ -149,7 +171,11 @@ public struct BoardDeviceView: View {
                 )
             case .xNews: XNewsPage(interactive: interactive)
             case .weather: WeatherPage()
-            case .settings: SettingsPage(codexEnabled: codexEnabled, xNewsEnabled: xNewsEnabled)
+            case .settings:
+                SettingsPage(codexEnabled: codexEnabled, xNewsEnabled: xNewsEnabled) { minutes in
+                    guard interactive else { return }
+                    focusContext = FocusPreviewContext(minutes: minutes, title: "Open focus session")
+                }
             }
         }
     }
@@ -182,6 +208,7 @@ public struct BoardDeviceView: View {
         DragGesture(minimumDistance: 35)
             .onEnded { value in
                 guard interactive else { return }
+                guard focusContext == nil else { return }
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 let pages = visiblePages
                 guard let index = pages.firstIndex(of: visiblePage) else { return }

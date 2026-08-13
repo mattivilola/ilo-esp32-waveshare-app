@@ -12,6 +12,7 @@ public let screenCaptureChunkCount =
 public let codexChatProtocolVersion = 1
 public let codexChatMaximumMessages = 6
 public let codexChatMaximumMessageCharacters = 360
+public let focusCompletionProtocolVersion = 1
 
 public enum BoardDisplayText {
     /// LVGL's bundled Montserrat fonts intentionally cover a compact glyph set.
@@ -503,6 +504,34 @@ public struct FirmwareUpdateStatusMessage: Codable, Equatable, Sendable {
         self.availableVersion = availableVersion
         self.progressPercent = progressPercent
         self.message = message
+    }
+}
+
+public struct FocusCompletionMessage: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let eventID: String
+    public let durationMinutes: Int
+    public let completedEpoch: Int64
+
+    public init(eventID: String, durationMinutes: Int, completedEpoch: Int64) {
+        type = "focusCompletion"
+        version = focusCompletionProtocolVersion
+        self.eventID = eventID
+        self.durationMinutes = durationMinutes
+        self.completedEpoch = completedEpoch
+    }
+}
+
+public struct FocusCompletionAcknowledgement: Codable, Equatable, Sendable {
+    public let type: String
+    public let version: Int
+    public let eventID: String
+
+    public init(eventID: String) {
+        type = "focusCompletionAck"
+        version = focusCompletionProtocolVersion
+        self.eventID = eventID
     }
 }
 

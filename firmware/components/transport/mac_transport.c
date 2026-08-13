@@ -47,6 +47,7 @@
 #define SCREEN_CAPTURE_REQUEST_ID_MAX 64
 #define TLS_IO_PROGRESS_TIMEOUT_MS 2000
 #define CODEX_TASK_ID_MAX 80
+#define MINIMUM_TRUSTED_EPOCH 1704067200LL
 
 typedef struct {
     char wifi_ssid[WIFI_SSID_MAX];
@@ -97,6 +98,9 @@ static TaskHandle_t wifi_scan_task_handle;
 static SemaphoreHandle_t wifi_control_mutex;
 static ota_updater_status_t ota_status_pending;
 static bool ota_status_dirty;
+static dashboard_focus_completion_t focus_completion_pending;
+static bool focus_completion_requested;
+static bool focus_completion_in_flight;
 static mac_channel_kind_t active_channel_kind;
 static uint32_t active_channel_generation;
 static bool active_channel_present;
@@ -593,6 +597,50 @@ static bool send_pending_ota_status(mac_channel_t *channel)
     bool sent = channel_send_json(channel, message);
     cJSON_Delete(message);
     return sent;
+}
+
+static bool take_focus_completion(dashboard_focus_completion_t *completion)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool requested = focus_completion_requested;
+    if (requested) {
+        *completion = focus_completion_pending;
+        focus_completion_requested = false;
+        focus_completion_in_flight = true;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    return requested;
+}
+
+static bool send_focus_completion(mac_channel_t *channel, const dashboard_focus_completion_t *completion)
+{
+    cJSON *message = cJSON_CreateObject();
+    if (message == NULL) return false;
+    char event_id[40];
+    snprintf(event_id, sizeof(event_id), "focus-%lld", (long long)completion->completed_epoch);
+    cJSON_AddStringToObject(message, "type", "focusCompletion");
+    cJSON_AddNumberToObject(message, "version", 1);
+    cJSON_AddStringToObject(message, "eventID", event_id);
+    cJSON_AddNumberToObject(message, "durationMinutes", completion->duration_minutes);
+    cJSON_AddNumberToObject(message, "completedEpoch", (double)completion->completed_epoch);
+    bool sent = channel_send_json(channel, message);
+    cJSON_Delete(message);
+    return sent;
+}
+
+static bool handle_focus_completion_ack(cJSON *message)
+{
+    cJSON *version = cJSON_GetObjectItemCaseSensitive(message, "version");
+    cJSON *event_id = cJSON_GetObjectItemCaseSensitive(message, "eventID");
+    if (!json_number_equals(version, 1) || !cJSON_IsString(event_id)) return false;
+    char expected[40];
+    portENTER_CRITICAL(&refresh_lock);
+    snprintf(expected, sizeof(expected), "focus-%lld", (long long)focus_completion_pending.completed_epoch);
+    bool accepted = focus_completion_in_flight && strcmp(event_id->valuestring, expected) == 0;
+    if (accepted) focus_completion_in_flight = false;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (accepted) dashboard_ui_focus_completion_acknowledged();
+    return accepted;
 }
 
 static bool handle_firmware_update_command(cJSON *message)
@@ -1361,6 +1409,10 @@ static void release_channel(mac_channel_kind_t kind, uint32_t generation)
         continue_was_pending = codex_continue_requested || codex_continue_in_flight;
         codex_continue_requested = false;
         codex_continue_in_flight = false;
+        if (focus_completion_in_flight) {
+            focus_completion_requested = true;
+            focus_completion_in_flight = false;
+        }
     }
     portEXIT_CRITICAL(&refresh_lock);
     if (!releasing_active) return;
@@ -1431,6 +1483,9 @@ static void run_protocol_session(
     for (;;) {
         if (!channel_is_active(channel->kind, generation)) break;
         if (!send_pending_ota_status(channel)) break;
+        dashboard_focus_completion_t focus_completion;
+        if (take_focus_completion(&focus_completion)
+            && !send_focus_completion(channel, &focus_completion)) break;
         if (take_x_news_refresh_request() && !send_x_news_refresh_request(channel)) break;
         char chat_task_id[CODEX_TASK_ID_MAX + 1];
         char chat_request_id[sizeof(codex_chat_request_id)];
@@ -1488,6 +1543,12 @@ static void run_protocol_session(
         if (cJSON_IsString(message_type)
             && strcmp(message_type->valuestring, "firmwareUpdateCommand") == 0) {
             (void)handle_firmware_update_command(message);
+            cJSON_Delete(message);
+            continue;
+        }
+        if (cJSON_IsString(message_type)
+            && strcmp(message_type->valuestring, "focusCompletionAck") == 0) {
+            (void)handle_focus_completion_ack(message);
             cJSON_Delete(message);
             continue;
         }
@@ -1588,6 +1649,20 @@ void mac_transport_publish_ota_status(const ota_updater_status_t *status)
     ota_status_pending = *status;
     ota_status_dirty = true;
     portEXIT_CRITICAL(&refresh_lock);
+}
+
+bool mac_transport_publish_focus_completion(const dashboard_focus_completion_t *completion)
+{
+    if (completion == NULL || completion->duration_minutes < 1
+        || completion->duration_minutes > 720
+        || completion->completed_epoch < MINIMUM_TRUSTED_EPOCH) return false;
+    portENTER_CRITICAL(&refresh_lock);
+    focus_completion_pending = *completion;
+    focus_completion_requested = true;
+    focus_completion_in_flight = false;
+    portEXIT_CRITICAL(&refresh_lock);
+    ESP_LOGI(TAG, "Focus completion queued for paired Mac acknowledgment");
+    return true;
 }
 
 bool mac_transport_request_x_news_refresh(void)

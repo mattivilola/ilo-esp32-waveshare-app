@@ -5,6 +5,7 @@ struct DashboardPage: View {
     let onOpenXNews: () -> Void
     let onOpenWeather: () -> Void
     let onOpenSettings: () -> Void
+    let onStartFocus: (Int) -> Void
     let codexEnabled: Bool
     let xNewsEnabled: Bool
 
@@ -13,6 +14,7 @@ struct DashboardPage: View {
         onOpenXNews: @escaping () -> Void = {},
         onOpenWeather: @escaping () -> Void = {},
         onOpenSettings: @escaping () -> Void = {},
+        onStartFocus: @escaping (Int) -> Void = { _ in },
         codexEnabled: Bool = true,
         xNewsEnabled: Bool = true
     ) {
@@ -20,6 +22,7 @@ struct DashboardPage: View {
         self.onOpenXNews = onOpenXNews
         self.onOpenWeather = onOpenWeather
         self.onOpenSettings = onOpenSettings
+        self.onStartFocus = onStartFocus
         self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled
     }
@@ -213,10 +216,10 @@ struct DashboardPage: View {
                     action: onOpenSettings
                 )
                 localRow(
-                    "Mac connection optional",
-                    "Pair later to add Codex activity and Mac power",
-                    tint: BoardPalette.fog,
-                    action: onOpenSettings
+                    "Focus cockpit",
+                    "Hold a duration in Settings to begin a local session",
+                    tint: BoardPalette.amber,
+                    action: { onStartFocus(0) }
                 )
                 Button(action: xNewsEnabled ? onOpenXNews : onOpenWeather) {
                     HStack(spacing: 12) {
@@ -314,5 +317,8 @@ struct DashboardPage: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Open Codex chat: \(title)")
+        .onLongPressGesture(minimumDuration: 0.9) {
+            onStartFocus(index)
+        }
     }
 }

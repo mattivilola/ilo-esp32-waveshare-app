@@ -5,6 +5,7 @@ struct SettingsPage: View {
     let xNewsEnabled: Bool
     let firmwareVersion: String
     let companionVersion: String
+    let onStartFocus: (Int) -> Void
     @State private var screensaverMinutes = 2
     @State private var displayOffMinutes = 10
     @State private var privacyMode = false
@@ -17,12 +18,14 @@ struct SettingsPage: View {
         codexEnabled: Bool,
         xNewsEnabled: Bool,
         firmwareVersion: String = "0.2.0",
-        companionVersion: String = "0.1.3"
+        companionVersion: String = "0.1.3",
+        onStartFocus: @escaping (Int) -> Void = { _ in }
     ) {
         self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled
         self.firmwareVersion = firmwareVersion
         self.companionVersion = companionVersion
+        self.onStartFocus = onStartFocus
     }
 
     var body: some View {
@@ -60,6 +63,9 @@ struct SettingsPage: View {
                         }
                         compactSettingButton("Focus session", value: "\(focusMinutes) MIN") {
                             focusMinutes = next(focusMinutes, in: [25, 45, 60])
+                        }
+                        .onLongPressGesture(minimumDuration: 0.9) {
+                            onStartFocus(focusMinutes)
                         }
                     }
                 }

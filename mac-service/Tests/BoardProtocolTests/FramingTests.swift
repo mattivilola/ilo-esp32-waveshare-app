@@ -2,6 +2,18 @@ import BoardProtocol
 import Foundation
 import Testing
 
+@Test func focusCompletionProtocolRoundTripsBoundedReceipt() throws {
+    let message = FocusCompletionMessage(
+        eventID: "focus-1770000000",
+        durationMinutes: 25,
+        completedEpoch: 1_770_000_000
+    )
+    let payload = try ProtocolJSON.encoder().encode(message)
+    let decoded = try ProtocolJSON.decoder().decode(FocusCompletionMessage.self, from: payload)
+    #expect(decoded == message)
+    #expect(FocusCompletionAcknowledgement(eventID: message.eventID).type == "focusCompletionAck")
+}
+
 @Test func frameDecoderHandlesPartialAndCoalescedFrames() throws {
     let first = try FrameEncoder.encode(Data("first".utf8))
     let second = try FrameEncoder.encode(Data("second".utf8))

@@ -51,7 +51,8 @@ let package = Package(
                 "ILOBoardMenuSupport",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
-            exclude: ["Resources"]
+            exclude: ["Resources"],
+            linkerSettings: [.linkedFramework("UserNotifications")]
         ),
         .testTarget(name: "BoardProtocolTests", dependencies: ["BoardProtocol"]),
         .testTarget(name: "BoardHostCoreTests", dependencies: ["BoardHostCore", "BoardProtocol"]),
