@@ -67,8 +67,6 @@ extern "C" void app_main()
     ESP_ERROR_CHECK(dashboard_ui_present_boot());
     ESP_LOGI(TAG, "First interactive frame presented after %lld ms",
              (long long)((esp_timer_get_time() - startup_begin_us) / 1000));
-    ESP_ERROR_CHECK(ota_policy_confirm_after_stability());
-
     // Reserve the weather worker's internal stack before Wi-Fi/TLS fragment
     // the remaining DMA-capable RAM. The worker waits for network readiness.
     if (!weather_client_start(dashboard_ui_set_weather)) {

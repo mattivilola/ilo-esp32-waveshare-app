@@ -7,14 +7,11 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 
 static const char *TAG = "ota_policy";
 static const esp_partition_t *boot_partition;
 static bool pending_validation;
 static bool policy_initialized;
-static bool confirmation_scheduled;
 
 static esp_err_t validate_layout(void)
 {
@@ -56,41 +53,41 @@ static void reject_pending_image(const char *reason)
     }
 }
 
-static void validation_task(void *context)
+bool ota_policy_confirmation_required(void)
 {
-    (void)context;
-    vTaskDelay(pdMS_TO_TICKS(CONFIG_ILO_OTA_VALIDATION_SECONDS * 1000U));
+    return policy_initialized && pending_validation;
+}
 
+esp_err_t ota_policy_confirm_pending_image(void)
+{
+    if (!policy_initialized || !pending_validation) return ESP_ERR_INVALID_STATE;
     if (esp_ota_get_running_partition() != boot_partition) {
         reject_pending_image("running partition changed during validation");
-        vTaskDelete(NULL);
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
     size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (free_internal < CONFIG_ILO_OTA_MIN_INTERNAL_HEAP) {
         reject_pending_image("internal heap is below the confirmation threshold");
-        vTaskDelete(NULL);
-        return;
+        return ESP_ERR_NO_MEM;
     }
     esp_ota_img_states_t state = ESP_OTA_IMG_UNDEFINED;
     if (esp_ota_get_state_partition(boot_partition, &state) != ESP_OK || state != ESP_OTA_IMG_PENDING_VERIFY) {
         reject_pending_image("running image is no longer pending verification");
-        vTaskDelete(NULL);
-        return;
+        return ESP_ERR_INVALID_STATE;
     }
     esp_err_t status = esp_ota_mark_app_valid_cancel_rollback();
     if (status != ESP_OK) {
         reject_pending_image("could not persist the valid image state");
-        vTaskDelete(NULL);
-        return;
+        return status;
     }
+    pending_validation = false;
     ESP_LOGI(
         TAG,
         "OTA image confirmed after %d seconds; free internal heap %lu bytes",
         CONFIG_ILO_OTA_VALIDATION_SECONDS,
         (unsigned long)free_internal
     );
-    vTaskDelete(NULL);
+    return ESP_OK;
 }
 
 esp_err_t ota_policy_begin(void)
@@ -116,26 +113,5 @@ esp_err_t ota_policy_begin(void)
         return status;
     }
     policy_initialized = true;
-    return ESP_OK;
-}
-
-esp_err_t ota_policy_confirm_after_stability(void)
-{
-    if (!policy_initialized || confirmation_scheduled) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    confirmation_scheduled = true;
-    if (!pending_validation) {
-        ESP_LOGI(TAG, "No pending OTA image; confirmation task is not needed");
-        return ESP_OK;
-    }
-    if (!esp_ota_check_rollback_is_possible()) {
-        ESP_LOGW(TAG, "Pending bridge image has no rollback target; USB recovery remains required until confirmation");
-    }
-    if (xTaskCreate(validation_task, "ota_validate", 4096, NULL, 4, NULL) != pdPASS) {
-        reject_pending_image("could not start the validation task");
-        return ESP_ERR_NO_MEM;
-    }
-    ESP_LOGI(TAG, "Pending image will remain unconfirmed for a %d-second health window", CONFIG_ILO_OTA_VALIDATION_SECONDS);
     return ESP_OK;
 }

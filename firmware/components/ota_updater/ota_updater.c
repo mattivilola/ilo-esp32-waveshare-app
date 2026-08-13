@@ -23,6 +23,7 @@
 #include "mbedtls/rsa.h"
 #include "mbedtls/sha256.h"
 #include "nvs.h"
+#include "ota_policy.h"
 
 #define COMMAND_CHECK BIT0
 #define COMMAND_INSTALL BIT1
@@ -529,15 +530,15 @@ static bool download_and_stage(const verified_manifest_t *manifest)
 static void updater_task(void *argument)
 {
     (void)argument;
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    esp_ota_img_states_t initial_state = ESP_OTA_IMG_UNDEFINED;
-    if (running != NULL && esp_ota_get_state_partition(running, &initial_state) == ESP_OK
-        && initial_state == ESP_OTA_IMG_PENDING_VERIFY) {
+    if (ota_policy_confirmation_required()) {
         publish_status(OTA_UPDATER_IDLE, NULL, 0, "Completing first-boot health check");
-        vTaskDelay(pdMS_TO_TICKS((CONFIG_ILO_OTA_VALIDATION_SECONDS + 2U) * 1000U));
-        esp_ota_img_states_t confirmed_state = ESP_OTA_IMG_UNDEFINED;
-        if (esp_ota_get_state_partition(running, &confirmed_state) != ESP_OK
-            || confirmed_state != ESP_OTA_IMG_VALID) {
+        ESP_LOGI(
+            TAG,
+            "Pending image will remain unconfirmed for a %d-second health window",
+            CONFIG_ILO_OTA_VALIDATION_SECONDS
+        );
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_ILO_OTA_VALIDATION_SECONDS * 1000U));
+        if (ota_policy_confirm_pending_image() != ESP_OK) {
             publish_status(OTA_UPDATER_FAILED, NULL, 0, "Current firmware is not confirmed");
             updater_ready = false;
             updater_task_handle = NULL;
