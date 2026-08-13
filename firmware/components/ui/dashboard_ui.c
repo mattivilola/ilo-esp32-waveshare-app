@@ -14,6 +14,7 @@
 #include "lvgl.h"
 #include "board_waveshare_5.h"
 #include "device_settings.h"
+#include "focus_session.h"
 
 #define COLOR_CARBON  lv_color_hex(0x0A0F14)
 #define COLOR_SLATE   lv_color_hex(0x131B22)
@@ -36,6 +37,8 @@
 #define X_NEWS_RESULT_HOLD_MS 8000U
 #define CODEX_CONTINUE_HOLD_MS 900U
 #define CODEX_RESULT_HOLD_MS 8000U
+#define FOCUS_ACTION_HOLD_MS 900U
+#define MINIMUM_TRUSTED_EPOCH 1704067200LL
 #define MINUTE_MS 60000U
 
 static lv_obj_t *connection_label;
@@ -130,6 +133,25 @@ static lv_obj_t *settings_privacy_value;
 static lv_obj_t *settings_clock_value;
 static lv_obj_t *settings_temperature_value;
 static lv_obj_t *settings_focus_value;
+static lv_obj_t *focus_overlay;
+static lv_obj_t *focus_arc;
+static lv_obj_t *focus_time_label;
+static lv_obj_t *focus_state_label;
+static lv_obj_t *focus_title_label;
+static lv_obj_t *focus_pause_button;
+static lv_obj_t *focus_pause_label;
+static lv_obj_t *focus_add_button;
+static lv_obj_t *focus_end_button;
+static lv_obj_t *focus_end_label;
+static lv_obj_t *focus_dismiss_button;
+static dashboard_focus_completion_callback_t focus_completion_callback;
+static focus_session_snapshot_t focus_snapshot;
+static char focus_runtime_title[81] = "Open focus session";
+static uint32_t focus_hold_started_tick;
+static bool focus_hold_consumed;
+static bool focus_end_hold_consumed;
+static bool focus_completion_queued;
+static bool focus_completion_dismissed;
 static lv_obj_t *settings_x_news_value;
 static lv_obj_t *settings_connection_values;
 static lv_obj_t *settings_versions_value;
@@ -180,6 +202,9 @@ static void render_codex_detail(void);
 static void render_dashboard_signal(const dashboard_model_t *model);
 static void open_codex_chat(void);
 static void build_codex_chat_overlay(lv_obj_t *screen);
+static void build_focus_overlay(lv_obj_t *screen);
+static void refresh_focus_overlay(void);
+static bool start_focus_session(const char *title);
 static const char *weather_condition(int code);
 static double display_temperature(float celsius);
 static const char *temperature_unit(void);
@@ -457,8 +482,24 @@ static void codex_row_tapped(lv_event_t *event)
 
 static void dashboard_task_tapped(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    lv_event_code_t code = lv_event_get_code(event);
     int index = (int)(intptr_t)lv_event_get_user_data(event);
+    if (code == LV_EVENT_PRESSED) {
+        focus_hold_started_tick = lv_tick_get();
+        focus_hold_consumed = false;
+        return;
+    }
+    if (code == LV_EVENT_PRESSING && !focus_hold_consumed && codex_page_enabled
+        && latest_model_valid && index >= 0 && index < latest_model.task_count
+        && lv_tick_elaps(focus_hold_started_tick) >= FOCUS_ACTION_HOLD_MS) {
+        focus_hold_consumed = start_focus_session(latest_model.tasks[index].title);
+        return;
+    }
+    if (code != LV_EVENT_CLICKED) return;
+    if (focus_hold_consumed) {
+        focus_hold_consumed = false;
+        return;
+    }
     if (!codex_page_enabled) {
         show_page(index == 0 ? PAGE_WEATHER : PAGE_SETTINGS, LV_ANIM_ON);
         return;
@@ -1166,7 +1207,7 @@ static void refresh_settings_labels(void)
         lv_label_set_text(settings_temperature_value, current_settings.use_fahrenheit ? "FAHRENHEIT" : "CELSIUS");
     }
     if (settings_focus_value != NULL) {
-        snprintf(value, sizeof(value), "%u MIN", (unsigned int)current_settings.focus_minutes);
+        snprintf(value, sizeof(value), "%u MIN / HOLD", (unsigned int)current_settings.focus_minutes);
         lv_label_set_text(settings_focus_value, value);
     }
     if (settings_x_news_value != NULL) {
@@ -1363,6 +1404,161 @@ static void render_dashboard_mode(const dashboard_model_t *model)
     }
 }
 
+static int64_t focus_now_epoch(void)
+{
+    time_t now = time(NULL);
+    return now >= MINIMUM_TRUSTED_EPOCH ? (int64_t)now : 0;
+}
+
+static void set_focus_controls_visible(bool visible)
+{
+    lv_obj_t *controls[] = { focus_pause_button, focus_add_button, focus_end_button };
+    for (size_t index = 0; index < sizeof(controls) / sizeof(controls[0]); ++index) {
+        if (controls[index] == NULL) continue;
+        if (visible) lv_obj_remove_flag(controls[index], LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(controls[index], LV_OBJ_FLAG_HIDDEN);
+    }
+    if (focus_dismiss_button != NULL) {
+        if (visible) lv_obj_add_flag(focus_dismiss_button, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(focus_dismiss_button, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void queue_focus_completion_if_needed(void)
+{
+    if (!focus_snapshot.completion_pending || focus_completion_queued
+        || focus_completion_callback == NULL) return;
+    dashboard_focus_completion_t completion = {
+        .duration_minutes = focus_snapshot.duration_minutes,
+        .completed_epoch = focus_snapshot.completed_epoch,
+    };
+    focus_completion_queued = focus_completion_callback(&completion);
+}
+
+static void refresh_focus_overlay(void)
+{
+    if (focus_overlay == NULL) return;
+    int64_t now = focus_now_epoch();
+    if (now == 0 || focus_session_snapshot(now, &focus_snapshot) != ESP_OK) return;
+
+    if (focus_snapshot.status == FOCUS_SESSION_INACTIVE) {
+        if (!focus_snapshot.completion_pending) {
+            lv_obj_add_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+        if (focus_completion_dismissed) {
+            queue_focus_completion_if_needed();
+            return;
+        }
+        lv_obj_remove_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(focus_overlay);
+        lv_label_set_text(focus_state_label, "SESSION COMPLETE");
+        lv_obj_set_style_text_color(focus_state_label, COLOR_SIGNAL, 0);
+        lv_label_set_text(focus_time_label, "00:00");
+        lv_label_set_text(focus_title_label, "Your focus block is complete");
+        lv_arc_set_value(focus_arc, 100);
+        set_focus_controls_visible(false);
+        queue_focus_completion_if_needed();
+        return;
+    }
+
+    lv_obj_remove_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(focus_overlay);
+    set_focus_controls_visible(true);
+    uint32_t minutes = focus_snapshot.remaining_seconds / 60U;
+    uint32_t seconds = focus_snapshot.remaining_seconds % 60U;
+    char countdown[12];
+    snprintf(countdown, sizeof(countdown), "%02lu:%02lu", (unsigned long)minutes, (unsigned long)seconds);
+    lv_label_set_text(focus_time_label, countdown);
+    lv_arc_set_value(focus_arc, focus_snapshot.progress_percent);
+    bool paused = focus_snapshot.status == FOCUS_SESSION_PAUSED;
+    lv_label_set_text(focus_state_label, paused ? "PAUSED / RTC SAFE" : "FOCUS / RTC BACKED");
+    lv_obj_set_style_text_color(focus_state_label, paused ? COLOR_AMBER : COLOR_SIGNAL, 0);
+    lv_label_set_text(focus_pause_label, paused ? "RESUME" : "PAUSE");
+}
+
+static void show_focus_overlay(const char *title)
+{
+    if (title != NULL && title[0] != 0) {
+        strlcpy(focus_runtime_title, title, sizeof(focus_runtime_title));
+    }
+    lv_label_set_text(focus_title_label, focus_runtime_title);
+    lv_obj_remove_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(focus_overlay);
+    lv_display_trigger_activity(ui_display);
+    refresh_focus_overlay();
+}
+
+static bool start_focus_session(const char *title)
+{
+    int64_t now = focus_now_epoch();
+    if (now == 0 || focus_session_start(current_settings.focus_minutes, now) != ESP_OK) return false;
+    focus_completion_queued = false;
+    focus_completion_dismissed = false;
+    show_focus_overlay(title);
+    return true;
+}
+
+static void focus_pause_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    int64_t now = focus_now_epoch();
+    if (now == 0) return;
+    esp_err_t status = focus_snapshot.status == FOCUS_SESSION_PAUSED
+        ? focus_session_resume(now)
+        : focus_session_pause(now);
+    if (status == ESP_OK) refresh_focus_overlay();
+    lv_display_trigger_activity(ui_display);
+}
+
+static void focus_add_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    int64_t now = focus_now_epoch();
+    if (now != 0 && focus_session_add_minutes(5, now) == ESP_OK) refresh_focus_overlay();
+    lv_display_trigger_activity(ui_display);
+}
+
+static void focus_end_hold(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        focus_hold_started_tick = lv_tick_get();
+        focus_end_hold_consumed = false;
+        lv_label_set_text(focus_end_label, "KEEP HOLDING...");
+    } else if (code == LV_EVENT_PRESSING && !focus_end_hold_consumed
+               && lv_tick_elaps(focus_hold_started_tick) >= FOCUS_ACTION_HOLD_MS) {
+        focus_end_hold_consumed = true;
+        if (focus_session_cancel() == ESP_OK) {
+            strlcpy(focus_runtime_title, "Open focus session", sizeof(focus_runtime_title));
+            lv_obj_add_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN);
+        }
+    } else if ((code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) && !focus_end_hold_consumed) {
+        lv_label_set_text(focus_end_label, "HOLD TO END");
+    }
+}
+
+static void focus_dismiss_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    focus_completion_dismissed = true;
+    lv_obj_add_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_display_trigger_activity(ui_display);
+}
+
+static void focus_timer_tick(void)
+{
+    if (focus_overlay == NULL) return;
+    int64_t now = focus_now_epoch();
+    if (now == 0) return;
+    focus_session_snapshot_t snapshot;
+    if (focus_session_snapshot(now, &snapshot) != ESP_OK) return;
+    if (snapshot.status != FOCUS_SESSION_INACTIVE || snapshot.completion_pending) {
+        refresh_focus_overlay();
+        lv_display_trigger_activity(ui_display);
+    }
+}
+
 static void screensaver_setting_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
@@ -1416,7 +1612,22 @@ static void temperature_setting_tapped(lv_event_t *event)
 
 static void focus_setting_tapped(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        focus_hold_started_tick = lv_tick_get();
+        focus_hold_consumed = false;
+        return;
+    }
+    if (code == LV_EVENT_PRESSING && !focus_hold_consumed
+        && lv_tick_elaps(focus_hold_started_tick) >= FOCUS_ACTION_HOLD_MS) {
+        focus_hold_consumed = start_focus_session("Open focus session");
+        return;
+    }
+    if (code != LV_EVENT_CLICKED) return;
+    if (focus_hold_consumed) {
+        focus_hold_consumed = false;
+        return;
+    }
     current_settings.focus_minutes = device_settings_next_focus(current_settings.focus_minutes);
     device_settings_save(&current_settings);
     refresh_settings_labels();
@@ -1809,6 +2020,10 @@ static void screensaver_timer(lv_timer_t *timer)
 {
     (void)timer;
     refresh_clock_labels();
+    focus_timer_tick();
+    if (focus_overlay != NULL && !lv_obj_has_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN)) {
+        return;
+    }
     uint32_t inactive = lv_display_get_inactive_time(ui_display);
     uint32_t saver_timeout = (uint32_t)current_settings.screensaver_minutes * MINUTE_MS;
     uint32_t off_timeout = (uint32_t)current_settings.display_off_minutes * MINUTE_MS;
@@ -1829,6 +2044,122 @@ static void screensaver_timer(lv_timer_t *timer)
         lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
         screensaver_tick = 0;
     }
+}
+
+static lv_obj_t *create_focus_button(
+    lv_obj_t *parent,
+    int x,
+    int width,
+    const char *text,
+    lv_color_t color,
+    lv_event_cb_t callback,
+    lv_event_code_t filter,
+    lv_obj_t **label
+)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    set_clean_box(button, color, 14);
+    lv_obj_set_size(button, width, 58);
+    lv_obj_set_pos(button, x, 398);
+    lv_obj_set_style_bg_color(button, COLOR_STEEL, LV_STATE_PRESSED);
+    lv_obj_add_event_cb(button, callback, filter, NULL);
+    *label = create_label(button, text, &lv_font_montserrat_14, COLOR_CARBON);
+    lv_obj_center(*label);
+    return button;
+}
+
+static void build_focus_overlay(lv_obj_t *screen)
+{
+    focus_overlay = lv_obj_create(screen);
+    set_clean_box(focus_overlay, COLOR_CARBON, 0);
+    lv_obj_set_size(focus_overlay, ILO_BOARD_WIDTH, ILO_BOARD_HEIGHT);
+    lv_obj_center(focus_overlay);
+    lv_obj_clear_flag(focus_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *rail = lv_obj_create(focus_overlay);
+    set_clean_box(rail, COLOR_SIGNAL, 0);
+    lv_obj_set_size(rail, 6, ILO_BOARD_HEIGHT);
+    lv_obj_align(rail, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t *roundel = create_ilo_roundel(focus_overlay, 48);
+    lv_obj_set_pos(roundel, 28, 24);
+    lv_obj_t *eyebrow = create_label(focus_overlay, "ILO / FOCUS COCKPIT", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_set_pos(eyebrow, 92, 27);
+    lv_obj_t *hint = create_label(
+        focus_overlay,
+        "Battery-backed deadline / stays accurate through reset",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_set_pos(hint, 92, 51);
+
+    focus_arc = lv_arc_create(focus_overlay);
+    lv_obj_set_size(focus_arc, 320, 320);
+    lv_obj_set_pos(focus_arc, 82, 126);
+    lv_arc_set_range(focus_arc, 0, 100);
+    lv_arc_set_value(focus_arc, 0);
+    lv_arc_set_bg_angles(focus_arc, 0, 360);
+    lv_arc_set_rotation(focus_arc, 270);
+    lv_obj_set_style_arc_width(focus_arc, 24, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(focus_arc, COLOR_STEEL, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(focus_arc, 24, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(focus_arc, COLOR_SIGNAL, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(focus_arc, LV_OPA_TRANSP, LV_PART_KNOB);
+    lv_obj_clear_flag(focus_arc, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+
+    focus_time_label = create_label(focus_overlay, "25:00", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_align_to(focus_time_label, focus_arc, LV_ALIGN_CENTER, 0, -4);
+    focus_state_label = create_label(focus_overlay, "FOCUS / RTC BACKED", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_align_to(focus_state_label, focus_arc, LV_ALIGN_CENTER, 0, 32);
+
+    lv_obj_t *panel = create_card(focus_overlay, 454, 126, 534, 356, 18);
+    lv_obj_t *selected = create_label(panel, "SELECTED WORK", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(selected, 22, 22);
+    focus_title_label = create_label(panel, focus_runtime_title, &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_width(focus_title_label, 488);
+    lv_label_set_long_mode(focus_title_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_pos(focus_title_label, 22, 55);
+    lv_obj_t *rule = lv_obj_create(panel);
+    set_clean_box(rule, COLOR_STEEL, 0);
+    lv_obj_set_size(rule, 490, 1);
+    lv_obj_set_pos(rule, 22, 154);
+    lv_obj_t *action_hint = create_label(
+        panel,
+        "Pause safely, extend by five minutes, or hold to end.",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_set_pos(action_hint, 22, 178);
+
+    focus_pause_button = create_focus_button(
+        focus_overlay, 476, 154, "PAUSE", COLOR_SIGNAL,
+        focus_pause_tapped, LV_EVENT_CLICKED, &focus_pause_label
+    );
+    lv_obj_t *add_label = NULL;
+    focus_add_button = create_focus_button(
+        focus_overlay, 642, 142, "+5 MIN", COLOR_CYAN,
+        focus_add_tapped, LV_EVENT_CLICKED, &add_label
+    );
+    focus_end_button = create_focus_button(
+        focus_overlay, 796, 168, "HOLD TO END", COLOR_AMBER,
+        focus_end_hold, LV_EVENT_ALL, &focus_end_label
+    );
+
+    lv_obj_t *dismiss_label = NULL;
+    focus_dismiss_button = create_focus_button(
+        focus_overlay, 650, 188, "RETURN TO BOARD", COLOR_SIGNAL,
+        focus_dismiss_tapped, LV_EVENT_CLICKED, &dismiss_label
+    );
+    lv_obj_add_flag(focus_dismiss_button, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *footer = create_label(
+        focus_overlay,
+        "Tap a duration in Settings / hold it to start. Hold a Codex task to attach it.",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_align(footer, LV_ALIGN_BOTTOM_MID, 0, -30);
 }
 
 static void build_screensaver(lv_obj_t *screen)
@@ -1991,7 +2322,7 @@ static void build_ui(void)
         lv_obj_set_pos(task_rows[i], 286, 54 + (i * 88));
         lv_obj_add_flag(task_rows[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_bg_color(task_rows[i], COLOR_STEEL, LV_STATE_PRESSED);
-        lv_obj_add_event_cb(task_rows[i], dashboard_task_tapped, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_add_event_cb(task_rows[i], dashboard_task_tapped, LV_EVENT_ALL, (void *)(intptr_t)i);
 
         task_dots[i] = lv_obj_create(task_rows[i]);
         set_clean_box(task_dots[i], COLOR_STEEL, LV_RADIUS_CIRCLE);
@@ -2051,6 +2382,7 @@ static void build_ui(void)
 
     build_screensaver(screen);
     build_codex_chat_overlay(screen);
+    build_focus_overlay(screen);
 
     boot_ring_outer = lv_obj_create(screen);
     lv_obj_remove_style_all(boot_ring_outer);
@@ -2414,6 +2746,25 @@ void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_
 void dashboard_ui_set_codex_chat_callback(dashboard_codex_chat_callback_t callback)
 {
     codex_chat_callback = callback;
+}
+
+void dashboard_ui_set_focus_completion_callback(dashboard_focus_completion_callback_t callback)
+{
+    focus_completion_callback = callback;
+    if (ui_display == NULL) return;
+    lvgl_port_lock(0);
+    refresh_focus_overlay();
+    lvgl_port_unlock();
+}
+
+void dashboard_ui_focus_completion_acknowledged(void)
+{
+    if (focus_session_acknowledge_completion() != ESP_OK) return;
+    focus_completion_queued = false;
+    if (ui_display == NULL) return;
+    lvgl_port_lock(0);
+    refresh_focus_overlay();
+    lvgl_port_unlock();
 }
 
 void dashboard_ui_set_codex_chat_detail(const dashboard_codex_chat_detail_t *detail)

@@ -88,6 +88,13 @@ typedef struct {
 
 typedef bool (*dashboard_codex_chat_callback_t)(const char *task_id);
 
+typedef struct {
+    uint16_t duration_minutes;
+    int64_t completed_epoch;
+} dashboard_focus_completion_t;
+
+typedef bool (*dashboard_focus_completion_callback_t)(const dashboard_focus_completion_t *completion);
+
 esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd);
 esp_err_t dashboard_ui_present_boot(void);
 void dashboard_ui_set_model(const dashboard_model_t *model);
@@ -103,6 +110,8 @@ void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_
 void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t state);
 void dashboard_ui_set_codex_chat_callback(dashboard_codex_chat_callback_t callback);
 void dashboard_ui_set_codex_chat_detail(const dashboard_codex_chat_detail_t *detail);
+void dashboard_ui_set_focus_completion_callback(dashboard_focus_completion_callback_t callback);
+void dashboard_ui_focus_completion_acknowledged(void);
 void dashboard_ui_set_ota_callbacks(dashboard_ota_callback_t check_callback, dashboard_ota_callback_t install_callback);
 void dashboard_ui_set_ota_status(dashboard_ota_state_t state, const char *version, uint8_t progress_percent);
 esp_err_t dashboard_ui_capture_rgb565(uint8_t **pixels, size_t *size);

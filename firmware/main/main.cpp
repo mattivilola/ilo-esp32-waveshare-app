@@ -6,6 +6,7 @@
 #include "clock_sync.h"
 #include "dashboard_model.h"
 #include "dashboard_ui.h"
+#include "focus_session.h"
 #include "mac_transport.h"
 #include "ota_policy.h"
 #include "ota_updater.h"
@@ -51,6 +52,7 @@ extern "C" void app_main()
 
     ESP_LOGI(TAG, "Starting ILO Board protocol v1 (fixed Codex continue only)");
     ESP_ERROR_CHECK(board_waveshare_5_init());
+    ESP_ERROR_CHECK(focus_session_init());
     ESP_ERROR_CHECK(dashboard_ui_init(board_waveshare_5_lcd()));
     dashboard_ui_set_x_news_refresh_callback(mac_transport_request_x_news_refresh);
     dashboard_ui_set_wifi_update_callback(mac_transport_update_wifi);
