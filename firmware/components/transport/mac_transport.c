@@ -66,6 +66,10 @@ static bool codex_continue_in_flight;
 static char codex_continue_task_id[CODEX_TASK_ID_MAX + 1];
 static char codex_continue_request_id[25];
 static bool wifi_scan_in_progress;
+static bool wifi_scan_requested_once;
+static bool wifi_reconnect_suspended;
+static bool wifi_update_in_progress;
+static TickType_t wifi_scan_last_started;
 static size_t wifi_scan_count;
 static char wifi_scan_ssids[4][33];
 static TaskHandle_t wifi_scan_task_handle;
@@ -84,13 +88,32 @@ static void wifi_scan_task(void *argument)
     (void)argument;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        wifi_scan_config_t scan = { .show_hidden = false };
+        esp_err_t scan_status = esp_wifi_scan_start(&scan, true);
+        bool paused_reconnect = false;
+        if (scan_status == ESP_ERR_WIFI_STATE) {
+            portENTER_CRITICAL(&refresh_lock);
+            wifi_reconnect_suspended = true;
+            paused_reconnect = true;
+            portEXIT_CRITICAL(&refresh_lock);
+            (void)esp_wifi_disconnect();
+            vTaskDelay(pdMS_TO_TICKS(100));
+            scan_status = esp_wifi_scan_start(&scan, true);
+        }
+
         uint16_t count = 20;
         wifi_ap_record_t *records = calloc(count, sizeof(*records));
         size_t accepted = 0;
-        if (records != NULL && esp_wifi_scan_get_ap_records(&count, records) == ESP_OK) {
+        if (scan_status == ESP_OK && records != NULL
+            && esp_wifi_scan_get_ap_records(&count, records) == ESP_OK) {
             char discovered[4][33] = { 0 };
             for (uint16_t index = 0; index < count && accepted < 4; ++index) {
-                if (records[index].ssid[0] == 0 || records[index].authmode < WIFI_AUTH_WPA2_PSK) continue;
+                wifi_auth_mode_t authmode = records[index].authmode;
+                bool personal_network = authmode == WIFI_AUTH_WPA2_PSK
+                    || authmode == WIFI_AUTH_WPA_WPA2_PSK
+                    || authmode == WIFI_AUTH_WPA3_PSK
+                    || authmode == WIFI_AUTH_WPA2_WPA3_PSK;
+                if (records[index].ssid[0] == 0 || !personal_network) continue;
                 bool duplicate = false;
                 for (size_t existing = 0; existing < accepted; ++existing) {
                     if (strcmp(discovered[existing], (const char *)records[index].ssid) == 0) {
@@ -111,20 +134,29 @@ static void wifi_scan_task(void *argument)
         free(records);
         portENTER_CRITICAL(&refresh_lock);
         wifi_scan_in_progress = false;
+        bool should_reconnect = paused_reconnect && !wifi_update_in_progress;
+        if (should_reconnect) wifi_reconnect_suspended = false;
         portEXIT_CRITICAL(&refresh_lock);
+        if (scan_status != ESP_OK) {
+            ESP_LOGW(TAG, "Wi-Fi scan failed: %s", esp_err_to_name(scan_status));
+        }
+        if (should_reconnect) (void)esp_wifi_connect();
     }
 }
 
 static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *data)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
-        if (wifi_scan_task_handle != NULL) xTaskNotifyGive(wifi_scan_task_handle);
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(wifi_events, WIFI_READY_BIT);
-        dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
-        esp_wifi_connect();
+        portENTER_CRITICAL(&refresh_lock);
+        bool reconnect = !wifi_reconnect_suspended;
+        portEXIT_CRITICAL(&refresh_lock);
+        if (reconnect) {
+            dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
+            esp_wifi_connect();
+        }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(wifi_events, WIFI_READY_BIT);
     }
@@ -1260,22 +1292,48 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
     size_t password_size = strlen(password);
     if (ssid_size == 0 || ssid_size > 32 || password_size < 8 || password_size > 63) return false;
 
-    nvs_handle_t handle = 0;
-    esp_err_t status = nvs_open("ilo_board", NVS_READWRITE, &handle);
-    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_ssid", ssid);
-    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_password", password);
-    if (status == ESP_OK) status = nvs_commit(handle);
-    if (handle != 0) nvs_close(handle);
-    if (status != ESP_OK) return false;
-
     wifi_config_t config = { 0 };
     memcpy(config.sta.ssid, ssid, ssid_size);
     memcpy(config.sta.password, password, password_size);
     config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    if (esp_wifi_set_config(WIFI_IF_STA, &config) != ESP_OK) return false;
+
+    wifi_config_t previous_config = { 0 };
+    esp_err_t status = esp_wifi_get_config(WIFI_IF_STA, &previous_config);
+    if (status != ESP_OK) return false;
+
+    portENTER_CRITICAL(&refresh_lock);
+    wifi_update_in_progress = true;
+    wifi_reconnect_suspended = true;
+    portEXIT_CRITICAL(&refresh_lock);
+    (void)esp_wifi_scan_stop();
+    status = esp_wifi_stop();
+    if (status == ESP_OK) status = esp_wifi_set_config(WIFI_IF_STA, &config);
+
+    nvs_handle_t handle = 0;
+    if (status == ESP_OK) status = nvs_open("ilo_board", NVS_READWRITE, &handle);
+    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_ssid", ssid);
+    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_password", password);
+    if (status == ESP_OK) status = nvs_commit(handle);
+    if (handle != 0) nvs_close(handle);
+    if (status != ESP_OK) {
+        (void)esp_wifi_set_config(WIFI_IF_STA, &previous_config);
+    }
+
+    portENTER_CRITICAL(&refresh_lock);
+    wifi_update_in_progress = false;
+    wifi_reconnect_suspended = false;
+    portEXIT_CRITICAL(&refresh_lock);
+    esp_err_t start_status = esp_wifi_start();
+    if (status != ESP_OK || start_status != ESP_OK) {
+        ESP_LOGE(
+            TAG,
+            "Wi-Fi update failed: config=%s start=%s",
+            esp_err_to_name(status),
+            esp_err_to_name(start_status)
+        );
+        return false;
+    }
     dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_CONNECTING);
-    esp_wifi_disconnect();
-    esp_wifi_connect();
     ESP_LOGI(TAG, "Saved new Wi-Fi credentials; reconnecting");
     return true;
 }
@@ -1289,17 +1347,17 @@ size_t mac_transport_scan_wifi(char (*ssids)[33], size_t maximum_count)
     for (size_t index = 0; index < available; ++index) {
         strlcpy(ssids[index], wifi_scan_ssids[index], 33);
     }
-    bool should_start = !wifi_scan_in_progress;
-    if (should_start) wifi_scan_in_progress = true;
-    portEXIT_CRITICAL(&refresh_lock);
+    TickType_t now = xTaskGetTickCount();
+    bool cooldown_elapsed = !wifi_scan_requested_once
+        || (now - wifi_scan_last_started) >= pdMS_TO_TICKS(30000);
+    bool should_start = !wifi_scan_in_progress && cooldown_elapsed && wifi_scan_task_handle != NULL;
     if (should_start) {
-        wifi_scan_config_t scan = { .show_hidden = false };
-        if (esp_wifi_scan_start(&scan, false) != ESP_OK) {
-            portENTER_CRITICAL(&refresh_lock);
-            wifi_scan_in_progress = false;
-            portEXIT_CRITICAL(&refresh_lock);
-        }
+        wifi_scan_in_progress = true;
+        wifi_scan_requested_once = true;
+        wifi_scan_last_started = now;
     }
+    portEXIT_CRITICAL(&refresh_lock);
+    if (should_start) xTaskNotifyGive(wifi_scan_task_handle);
     return available;
 }
 
