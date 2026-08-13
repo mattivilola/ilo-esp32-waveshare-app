@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +93,15 @@ class FirmwareVersionCommandTests(unittest.TestCase):
             ["flash", "--port", "/dev/cu.test", "--version-bump", "minor"]
         )
         self.assertEqual(arguments.version_bump, "minor")
+
+
+class USBIdentityTests(unittest.TestCase):
+    def test_serial_number_for_port_accepts_only_the_expected_espressif_device(self):
+        expected = mock.Mock(device="/dev/cu.usbmodem1101", vid=0x303A, pid=0x1001, serial_number="94:A9:90:CA:5B:7C")
+        other = mock.Mock(device="/dev/cu.usbmodem2101", vid=0x1234, pid=0x1001, serial_number="AA:BB:CC:DD:EE:FF")
+
+        self.assertEqual(board.serial_number_for_port(expected.device, [other, expected]), "94A990CA5B7C")
+        self.assertIsNone(board.serial_number_for_port(other.device, [other, expected]))
 
 
 if __name__ == "__main__":

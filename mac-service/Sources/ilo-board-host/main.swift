@@ -97,6 +97,11 @@ struct ILOBoardHostCommand {
             try png.write(to: outputURL, options: options)
             print("Saved authenticated 1024x600 board capture: \(outputURL.path)")
         case "doctor":
+            let configuration = try? HostConfiguration.load()
+            let usbPresence = USBBoardMatcher.presence(
+                devices: IOKitUSBBoardDiscovery().connectedDevices(),
+                configuredSerialNumber: configuration?.usbSerialNumber
+            )
             print("ILO Board Host")
             print("  protocol: v\(boardProtocolVersion), tasks.read/continue.fixed + macPower.read + xNews.read/refresh.request + display.capture.rgb565")
             print("  service: _iloboard._tcp")
@@ -105,6 +110,7 @@ struct ILOBoardHostCommand {
             print("  Desktop task status: recent history only unless owned by this App Server")
             print("  Optional Grok adapter: \(GrokExecutableResolver.resolve()?.path ?? "CLI not found")")
             print("  X News: opt-in; verified cache only; daily policy available")
+            print("  USB: \(usbPresence.displayText)\(usbPresence.path.map { " (\($0))" } ?? "")")
             if let power = await CachedMacPowerStatusSource().currentStatus() {
                 print("  Mac power: \(power.levelPercent)% \(power.state.rawValue)")
             } else {

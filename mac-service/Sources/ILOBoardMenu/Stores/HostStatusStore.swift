@@ -25,6 +25,7 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var xNewsCacheGeneratedAt: Date?
     @Published private(set) var xNewsNotice: String?
     @Published private(set) var pairingAuthorizationNotice: String?
+    @Published private(set) var usbPresence: USBBoardPresence = .disconnected
 
     private var server: BoardServer?
     private var historyLog: ConnectionHistoryLog
@@ -36,8 +37,11 @@ final class HostStatusStore: ObservableObject {
     private let xNewsFeedCache: XNewsFeedCache
     private let weatherLocationSource: any WeatherLocationProviding
     private let usesCompanionCredential: Bool
+    private let usbDiscovery: any USBBoardDiscovering
     private var powerMonitorTask: Task<Void, Never>?
     private var xNewsMonitorTask: Task<Void, Never>?
+    private var usbMonitorTask: Task<Void, Never>?
+    private var configuredUSBSerialNumber: String?
     private static let historyDefaultsKey = "ilo-board.connection-history.v1"
 
     init(
@@ -48,6 +52,7 @@ final class HostStatusStore: ObservableObject {
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
         xNewsFeedCache: XNewsFeedCache = XNewsFeedCache(),
         weatherLocationSource: any WeatherLocationProviding = NoWeatherLocationSource(),
+        usbDiscovery: any USBBoardDiscovering = IOKitUSBBoardDiscovery(),
         usesCompanionCredential: Bool = KeychainPSKStore.shouldUseCompanionCredential,
         autoStart: Bool = true
     ) {
@@ -58,6 +63,7 @@ final class HostStatusStore: ObservableObject {
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.xNewsFeedCache = xNewsFeedCache
         self.weatherLocationSource = weatherLocationSource
+        self.usbDiscovery = usbDiscovery
         self.usesCompanionCredential = usesCompanionCredential
         historyLog = ConnectionHistoryLog.decode(defaults.data(forKey: Self.historyDefaultsKey))
         connectionHistory = historyLog.entries
@@ -86,6 +92,17 @@ final class HostStatusStore: ObservableObject {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
+        usbMonitorTask = Task { [weak self, usbDiscovery] in
+            while !Task.isCancelled {
+                let devices = usbDiscovery.connectedDevices()
+                guard let self else { return }
+                self.usbPresence = USBBoardMatcher.presence(
+                    devices: devices,
+                    configuredSerialNumber: self.configuredUSBSerialNumber
+                )
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
     }
 
     func start() {
@@ -95,6 +112,7 @@ final class HostStatusStore: ObservableObject {
             let configuration = try HostConfiguration.load()
             boardID = configuration.boardID
             servicePort = configuration.port
+            configuredUSBSerialNumber = configuration.usbSerialNumber
             let secret: Data
             if usesCompanionCredential {
                 do {
@@ -124,6 +142,7 @@ final class HostStatusStore: ObservableObject {
             configuration = try HostConfiguration.load()
             boardID = configuration.boardID
             servicePort = configuration.port
+            configuredUSBSerialNumber = configuration.usbSerialNumber
             secret = try KeychainPSKStore().authorizeCompanion(boardID: configuration.boardID)
         } catch HostConfigurationError.notProvisioned {
             transition(to: .notProvisioned, recording: .setupRequired)
@@ -149,6 +168,7 @@ final class HostStatusStore: ObservableObject {
     deinit {
         powerMonitorTask?.cancel()
         xNewsMonitorTask?.cancel()
+        usbMonitorTask?.cancel()
     }
 
     func stop() {

@@ -9,12 +9,51 @@ import Testing
     defer { try? FileManager.default.removeItem(at: directory) }
 
     let url = directory.appendingPathComponent("board.json")
-    try Data(#"{"boardID":"ilo-test_board.1","port":47472,"protocolVersion":1}"#.utf8).write(to: url)
+    try Data(#"{"boardID":"ilo-test_board.1","port":47472,"protocolVersion":1,"usbSerialNumber":"94:a9:90:ca:5b:7c"}"#.utf8).write(to: url)
 
     let configuration = try HostConfiguration.load(from: url)
     #expect(configuration.boardID == "ilo-test_board.1")
     #expect(configuration.port == 47_472)
     #expect(configuration.protocolVersion == 1)
+    #expect(configuration.usbSerialNumber == "94:a9:90:ca:5b:7c")
+}
+
+@Test func legacyHostConfigurationWithoutUSBIdentityRemainsCompatible() throws {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-host-legacy-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data(#"{"boardID":"ilo-test","port":47472,"protocolVersion":1}"#.utf8).write(to: url)
+
+    let configuration = try HostConfiguration.load(from: url)
+    #expect(configuration.usbSerialNumber == nil)
+}
+
+@Test func usbPresenceRequiresTheProvisionedHardwareSerialForAPairedMatch() {
+    let paired = USBBoardDevice(
+        path: "/dev/cu.usbmodem1101",
+        serialNumber: "94:A9:90:CA:5B:7C",
+        vendorID: 0x303A,
+        productID: 0x1001
+    )
+    let other = USBBoardDevice(
+        path: "/dev/cu.usbmodem2101",
+        serialNumber: "AA:BB:CC:DD:EE:FF",
+        vendorID: 0x303A,
+        productID: 0x1001
+    )
+
+    #expect(USBBoardMatcher.presence(
+        devices: [other, paired],
+        configuredSerialNumber: "94a990ca5b7c"
+    ) == .paired(path: paired.path))
+    #expect(USBBoardMatcher.presence(
+        devices: [other],
+        configuredSerialNumber: "94a990ca5b7c"
+    ) == .compatible(path: other.path))
+    #expect(USBBoardMatcher.presence(
+        devices: [],
+        configuredSerialNumber: "94a990ca5b7c"
+    ) == .disconnected)
 }
 
 @Test func hostConfigurationRejectsUnsupportedProtocol() throws {

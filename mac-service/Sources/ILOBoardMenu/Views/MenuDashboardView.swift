@@ -240,6 +240,8 @@ struct MenuDashboardView: View {
             Divider()
             detailRow("Service", value: serviceDescription)
             Divider()
+            detailRow("USB", value: store.usbPresence.displayText)
+            Divider()
             detailRow("Last sync", value: lastSyncDescription)
             Divider()
             detailRow("MacBook", value: macPowerDescription)

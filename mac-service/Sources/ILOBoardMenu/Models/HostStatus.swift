@@ -27,7 +27,7 @@ enum HostServiceState: Equatable {
         case .pairingAuthorizationRequired: "Review one-time Keychain access before connecting"
         case .starting: "Opening encrypted local service"
         case .listening: "The Mac is ready on your network"
-        case .connected: "Encrypted status sync is active"
+        case .connected: "Encrypted status sync is active over Wi-Fi"
         case .stopped: "The board will retain its last snapshot"
         case let .failed(message): message
         }

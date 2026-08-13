@@ -18,11 +18,18 @@ public struct HostConfiguration: Codable, Equatable, Sendable {
     public let boardID: String
     public let port: UInt16
     public let protocolVersion: Int
+    public let usbSerialNumber: String?
 
-    public init(boardID: String, port: UInt16, protocolVersion: Int = 1) {
+    public init(
+        boardID: String,
+        port: UInt16,
+        protocolVersion: Int = 1,
+        usbSerialNumber: String? = nil
+    ) {
         self.boardID = boardID
         self.port = port
         self.protocolVersion = protocolVersion
+        self.usbSerialNumber = usbSerialNumber.flatMap(Self.normalizedUSBSerialNumber)
     }
 
     public static var defaultURL: URL {
@@ -37,10 +44,17 @@ public struct HostConfiguration: Codable, Equatable, Sendable {
         guard let configuration = try? JSONDecoder().decode(HostConfiguration.self, from: data),
               KeychainPSKStore.valid(boardID: configuration.boardID),
               configuration.port > 0,
-              configuration.protocolVersion == 1
+              configuration.protocolVersion == 1,
+              configuration.usbSerialNumber.map({ normalizedUSBSerialNumber($0) != nil }) ?? true
         else {
             throw HostConfigurationError.invalid
         }
         return configuration
+    }
+
+    public static func normalizedUSBSerialNumber(_ value: String) -> String? {
+        let normalized = value.uppercased().filter(\.isHexDigit)
+        guard (12...32).contains(normalized.count) else { return nil }
+        return normalized
     }
 }

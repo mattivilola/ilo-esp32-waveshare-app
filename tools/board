@@ -13,6 +13,7 @@ import json
 import math
 import os
 from pathlib import Path
+import site
 import secrets
 import shutil
 import socket
@@ -367,9 +368,26 @@ def existing_board_id() -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-def save_host_config(board_id: str, host_port: int) -> None:
+def serial_number_for_port(port: str, devices=None) -> str | None:
+    if devices is None:
+        ensure_esptool()
+        for packages in VENV.glob("lib/python*/site-packages"):
+            site.addsitedir(str(packages))
+        from serial.tools import list_ports
+        devices = list_ports.comports()
+
+    for device in devices:
+        if device.device == port and device.vid == 0x303A and device.pid == 0x1001:
+            value = "".join(character for character in (device.serial_number or "").upper() if character in "0123456789ABCDEF")
+            return value if 12 <= len(value) <= 32 else None
+    return None
+
+
+def save_host_config(board_id: str, host_port: int, usb_serial_number: str | None = None) -> None:
     HOST_CONFIG.parent.mkdir(parents=True, exist_ok=True)
     payload = {"boardID": board_id, "port": host_port, "protocolVersion": 1}
+    if usb_serial_number:
+        payload["usbSerialNumber"] = usb_serial_number
     HOST_CONFIG.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     os.chmod(HOST_CONFIG, 0o600)
 
@@ -451,9 +469,10 @@ def provision(args: argparse.Namespace) -> None:
         print("  2. Press and release RESET")
         print("  3. Release BOOT")
         input("Press Return when the board is ready... ")
-        esptool(resolve_port(args.port), "write-flash", hex(offset), str(image_path))
+        port = resolve_port(args.port)
+        esptool(port, "write-flash", hex(offset), str(image_path))
 
-    save_host_config(board_id, host_port)
+    save_host_config(board_id, host_port, serial_number_for_port(port))
     print("Provisioning verified and host configuration saved.")
     print(f"Board ID: {board_id}")
     print("Press and release RESET once without BOOT, then run `./tools/host menu`.")
