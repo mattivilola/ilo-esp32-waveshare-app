@@ -36,6 +36,7 @@
 #define DASHBOARD_VISIBLE_TASKS 3
 #define CODEX_VISIBLE_TASKS 3
 #define X_NEWS_VISIBLE_STORIES DASHBOARD_MAX_NEWS
+#define WEATHER_VISIBLE_FORECAST_DAYS 3
 #define X_NEWS_RESULT_HOLD_MS 8000U
 #define CODEX_CONTINUE_HOLD_MS 900U
 #define CODEX_RESULT_HOLD_MS 8000U
@@ -186,10 +187,10 @@ static lv_obj_t *weather_feels_value_label;
 static lv_obj_t *weather_wind_value_label;
 static lv_obj_t *weather_today_range_label;
 static lv_obj_t *weather_next_label;
-static lv_obj_t *weather_day_icons[WEATHER_FORECAST_DAYS];
-static lv_obj_t *weather_day_labels[WEATHER_FORECAST_DAYS];
-static lv_obj_t *weather_day_condition_labels[WEATHER_FORECAST_DAYS];
-static lv_obj_t *weather_day_temperature_labels[WEATHER_FORECAST_DAYS];
+static lv_obj_t *weather_day_icons[WEATHER_VISIBLE_FORECAST_DAYS];
+static lv_obj_t *weather_day_labels[WEATHER_VISIBLE_FORECAST_DAYS];
+static lv_obj_t *weather_day_condition_labels[WEATHER_VISIBLE_FORECAST_DAYS];
+static lv_obj_t *weather_day_temperature_labels[WEATHER_VISIBLE_FORECAST_DAYS];
 static lv_display_t *ui_display;
 static device_settings_t current_settings;
 static dashboard_model_t latest_model;
@@ -1098,10 +1099,10 @@ static void build_weather_page(lv_obj_t *page)
     lv_obj_set_width(weather_next_label, 410);
     lv_label_set_long_mode(weather_next_label, LV_LABEL_LONG_DOT);
 
-    static const int forecast_x[WEATHER_FORECAST_DAYS] = { 22, 352, 676 };
-    static const int forecast_width[WEATHER_FORECAST_DAYS] = { 314, 308, 320 };
-    static const char *day_names[WEATHER_FORECAST_DAYS] = { "TODAY", "TOMORROW", "+2 DAYS" };
-    for (int index = 0; index < WEATHER_FORECAST_DAYS; ++index) {
+    static const int forecast_x[WEATHER_VISIBLE_FORECAST_DAYS] = { 22, 352, 676 };
+    static const int forecast_width[WEATHER_VISIBLE_FORECAST_DAYS] = { 314, 308, 320 };
+    static const char *day_names[WEATHER_VISIBLE_FORECAST_DAYS] = { "TOMORROW", "+2 DAYS", "+3 DAYS" };
+    for (int index = 0; index < WEATHER_VISIBLE_FORECAST_DAYS; ++index) {
         lv_obj_t *forecast = create_card(page, forecast_x[index], 284, forecast_width[index], 110, 14);
         weather_day_icons[index] = lv_obj_create(forecast);
         set_clean_box(weather_day_icons[index], COLOR_STEEL, 12);
@@ -3179,6 +3180,34 @@ static const char *temperature_unit(void)
     return current_settings.use_fahrenheit ? "F" : "C";
 }
 
+static void weather_updated_text(char *buffer, size_t size, const weather_model_t *model)
+{
+    if (buffer == NULL || size == 0 || model == NULL || model->updated_epoch < MINIMUM_TRUSTED_EPOCH) {
+        if (buffer != NULL && size > 0) snprintf(buffer, size, "Updated recently");
+        return;
+    }
+    time_t local_epoch = (time_t)model->updated_epoch + (time_t)model->utc_offset_seconds;
+    struct tm local_time;
+    if (gmtime_r(&local_epoch, &local_time) == NULL) {
+        snprintf(buffer, size, "Updated recently");
+        return;
+    }
+    char clock[16];
+    strftime(
+        clock,
+        sizeof(clock),
+        current_settings.use_24_hour_clock ? "%H:%M" : "%I:%M %p",
+        &local_time
+    );
+    snprintf(
+        buffer,
+        size,
+        "Updated %s %s",
+        clock,
+        model->timezone_abbreviation[0] != 0 ? model->timezone_abbreviation : "local time"
+    );
+}
+
 static void render_dashboard_weather(const weather_model_t *model)
 {
     if (model == NULL || dashboard_weather_location_label == NULL) return;
@@ -3315,41 +3344,37 @@ static void render_weather(const weather_model_t *model)
             );
             lv_label_set_text(weather_today_range_label, text);
         }
-        static const char *day_names[WEATHER_FORECAST_DAYS] = { "TODAY", "TOMORROW", "+2 DAYS" };
-        for (int index = 0; index < WEATHER_FORECAST_DAYS && index < model->day_count; ++index) {
+        static const char *day_names[WEATHER_VISIBLE_FORECAST_DAYS] = { "TOMORROW", "+2 DAYS", "+3 DAYS" };
+        for (int index = 0; index < WEATHER_VISIBLE_FORECAST_DAYS && index + 1 < model->day_count; ++index) {
+            int day_index = index + 1;
             lv_label_set_text(weather_day_labels[index], day_names[index]);
             lv_label_set_text(
                 weather_day_condition_labels[index],
-                weather_condition_for_code(model->days[index].weather_code)
+                weather_condition_for_code(model->days[day_index].weather_code)
             );
             snprintf(
                 text,
                 sizeof(text),
                 "%.0f / %.0f %s",
-                display_temperature(model->days[index].maximum_c),
-                display_temperature(model->days[index].minimum_c),
+                display_temperature(model->days[day_index].maximum_c),
+                display_temperature(model->days[day_index].minimum_c),
                 temperature_unit()
             );
             lv_label_set_text(weather_day_temperature_labels[index], text);
             weather_icon_draw(
                 weather_day_icons[index],
-                model->days[index].weather_code,
+                model->days[day_index].weather_code,
                 58,
                 model->state == WEATHER_STATE_LIVE ? COLOR_MIST : COLOR_FOG
             );
         }
-        if (model->day_count > 1) {
-            snprintf(
-                text,
-                sizeof(text),
-                "Tomorrow: %s, %.0f / %.0f %s",
-                weather_condition_for_code(model->days[1].weather_code),
-                display_temperature(model->days[1].maximum_c),
-                display_temperature(model->days[1].minimum_c),
-                temperature_unit()
-            );
-            lv_label_set_text(weather_next_label, text);
-        }
+        weather_updated_text(text, sizeof(text), model);
+        lv_label_set_text(weather_next_label, text);
+        lv_obj_set_style_text_color(
+            weather_next_label,
+            model->state == WEATHER_STATE_STALE ? COLOR_AMBER : COLOR_CYAN,
+            0
+        );
     } else {
         lv_label_set_text(weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
         const char *condition = model->state == WEATHER_STATE_NOT_CONFIGURED ? "Choose a weather location"
@@ -3367,8 +3392,9 @@ static void render_weather(const weather_model_t *model)
         lv_label_set_text(weather_feels_value_label, "--");
         lv_label_set_text(weather_wind_value_label, "--");
         lv_label_set_text(weather_today_range_label, "-- / --");
-        lv_label_set_text(weather_next_label, "Forecast details will appear automatically");
-        for (int index = 0; index < WEATHER_FORECAST_DAYS; ++index) {
+        lv_label_set_text(weather_next_label, "Update time will appear with the forecast");
+        lv_obj_set_style_text_color(weather_next_label, state_color, 0);
+        for (int index = 0; index < WEATHER_VISIBLE_FORECAST_DAYS; ++index) {
             weather_icon_draw_status(weather_day_icons[index], symbol, 58, COLOR_FOG);
             lv_label_set_text(weather_day_condition_labels[index], "Waiting");
             lv_label_set_text(weather_day_temperature_labels[index], "-- / --");

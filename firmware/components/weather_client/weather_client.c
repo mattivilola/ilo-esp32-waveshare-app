@@ -20,6 +20,8 @@
 #define RESPONSE_CAPACITY 8192
 #define REFRESH_INTERVAL_MS (30U * 60U * 1000U)
 #define RETRY_INTERVAL_MS (60U * 1000U)
+#define STRINGIFY_VALUE_(value) #value
+#define STRINGIFY_VALUE(value) STRINGIFY_VALUE_(value)
 
 typedef struct {
     char location[41];
@@ -159,7 +161,7 @@ static bool fetch_weather(const weather_config_t *weather_config, weather_model_
         "https://api.open-meteo.com/v1/forecast?latitude=%s&longitude=%s"
         "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
         "&daily=weather_code,temperature_2m_max,temperature_2m_min"
-        "&timezone=auto&forecast_days=3&wind_speed_unit=ms",
+        "&timezone=auto&forecast_days=" STRINGIFY_VALUE(WEATHER_FORECAST_DAYS) "&wind_speed_unit=ms",
         weather_config->latitude,
         weather_config->longitude
     );

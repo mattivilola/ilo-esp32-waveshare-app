@@ -56,7 +56,7 @@ struct WeatherPage: View {
                             weatherStat("Wind", "5.0 m/s")
                             weatherStat("High / low", "16° / 10°")
                         }
-                        Text("Tomorrow: Cloudy, 18° / 11°")
+                        Text("Updated 09:41 EEST")
                             .font(.board(13, weight: .semibold))
                             .foregroundStyle(BoardPalette.cyan)
                     }
@@ -66,9 +66,9 @@ struct WeatherPage: View {
             .frame(height: 216)
 
             HStack(spacing: 12) {
-                forecast("TODAY", "16° / 10°", "Rain", "cloud.rain.fill", BoardPalette.cyan)
                 forecast("TOMORROW", "18° / 11°", "Cloudy", "cloud.fill", BoardPalette.fog)
                 forecast("+2 DAYS", "20° / 12°", "Clear", "sun.max.fill", BoardPalette.amber)
+                forecast("+3 DAYS", "17° / 9°", "Showers", "cloud.sun.rain.fill", BoardPalette.cyan)
             }
             .frame(height: 110)
         }

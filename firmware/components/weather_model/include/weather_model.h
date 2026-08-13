@@ -6,7 +6,7 @@
 extern "C" {
 #endif
 
-#define WEATHER_FORECAST_DAYS 3
+#define WEATHER_FORECAST_DAYS 4
 
 typedef enum {
     WEATHER_STATE_NOT_CONFIGURED,
