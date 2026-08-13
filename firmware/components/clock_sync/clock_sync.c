@@ -8,16 +8,14 @@
 #include "esp_netif_sntp.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
-#include "freertos/task.h"
-#include "mac_transport.h"
 
 #define CLOCK_READY_BIT BIT0
-#define CLOCK_SYNC_TIMEOUT_MS 15000
-#define CLOCK_RETRY_INTERVAL_MS 60000
 #define MINIMUM_TRUSTED_EPOCH 1704067200LL // 2024-01-01 00:00:00 UTC
 
 static const char *TAG = "clock_sync";
 static EventGroupHandle_t clock_events;
+static portMUX_TYPE clock_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool rtc_update_pending;
 
 static bool clock_is_valid(void)
 {
@@ -44,39 +42,33 @@ static bool restore_clock_from_rtc(void)
     return true;
 }
 
-static bool sync_clock_from_network(void)
+static void clock_synchronized(struct timeval *time_value)
 {
-    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    esp_err_t status = esp_netif_sntp_init(&config);
-    if (status != ESP_OK && status != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "Unable to initialize SNTP: %s", esp_err_to_name(status));
-        return false;
-    }
-    status = esp_netif_sntp_sync_wait(pdMS_TO_TICKS(CLOCK_SYNC_TIMEOUT_MS));
-    if (status != ESP_OK || !clock_is_valid()) {
-        ESP_LOGW(TAG, "Time sync unavailable; retrying automatically");
-        return false;
-    }
+    (void)time_value;
+    if (!clock_is_valid() || clock_events == NULL) return;
+    portENTER_CRITICAL(&clock_lock);
+    rtc_update_pending = true;
+    portEXIT_CRITICAL(&clock_lock);
+    xEventGroupSetBits(clock_events, CLOCK_READY_BIT);
     ESP_LOGI(TAG, "Clock synchronized over Wi-Fi");
-    time_t synchronized = time(NULL);
-    status = board_waveshare_5_rtc_write_epoch((int64_t)synchronized);
+}
+
+static void persist_synchronized_clock(void)
+{
+    portENTER_CRITICAL(&clock_lock);
+    bool should_update = rtc_update_pending;
+    rtc_update_pending = false;
+    portEXIT_CRITICAL(&clock_lock);
+    if (!should_update) return;
+
+    esp_err_t status = board_waveshare_5_rtc_write_epoch((int64_t)time(NULL));
     if (status == ESP_OK) {
         ESP_LOGI(TAG, "Battery-backed RTC updated from network UTC");
     } else {
+        portENTER_CRITICAL(&clock_lock);
+        rtc_update_pending = true;
+        portEXIT_CRITICAL(&clock_lock);
         ESP_LOGW(TAG, "Network time is valid, but RTC update failed: %s", esp_err_to_name(status));
-    }
-    return true;
-}
-
-static void clock_task(void *argument)
-{
-    (void)argument;
-    for (;;) {
-        if (mac_transport_wait_for_network(30000) && sync_clock_from_network()) {
-            xEventGroupSetBits(clock_events, CLOCK_READY_BIT);
-            vTaskDelete(NULL);
-        }
-        vTaskDelay(pdMS_TO_TICKS(CLOCK_RETRY_INTERVAL_MS));
     }
 }
 
@@ -88,20 +80,26 @@ bool clock_sync_start(void)
     if (clock_is_valid() || restore_clock_from_rtc()) {
         xEventGroupSetBits(clock_events, CLOCK_READY_BIT);
     }
-    if (xTaskCreatePinnedToCore(clock_task, "clock_sync", 4096, NULL, 3, NULL, 0) != pdPASS) {
-        if (!clock_is_valid()) {
-            vEventGroupDelete(clock_events);
-            clock_events = NULL;
-            return false;
-        }
-        ESP_LOGW(TAG, "RTC time is available, but the SNTP refresh task could not start");
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    config.wait_for_sync = false;
+    config.sync_cb = clock_synchronized;
+    esp_err_t status = esp_netif_sntp_init(&config);
+    if (status != ESP_OK) {
+        vEventGroupDelete(clock_events);
+        clock_events = NULL;
+        ESP_LOGW(TAG, "Unable to initialize asynchronous SNTP: %s", esp_err_to_name(status));
+        return false;
     }
+    ESP_LOGI(TAG, "Asynchronous network clock refresh started");
     return true;
 }
 
 bool clock_sync_wait(uint32_t timeout_ms)
 {
-    if (clock_is_valid()) return true;
+    if (clock_is_valid()) {
+        persist_synchronized_clock();
+        return true;
+    }
     if (clock_events == NULL) return false;
     EventBits_t bits = xEventGroupWaitBits(
         clock_events,
@@ -110,5 +108,7 @@ bool clock_sync_wait(uint32_t timeout_ms)
         pdTRUE,
         pdMS_TO_TICKS(timeout_ms)
     );
-    return (bits & CLOCK_READY_BIT) != 0 && clock_is_valid();
+    bool ready = (bits & CLOCK_READY_BIT) != 0 && clock_is_valid();
+    if (ready) persist_synchronized_clock();
+    return ready;
 }
