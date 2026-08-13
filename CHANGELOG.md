@@ -8,6 +8,7 @@ Notable ILO Board macOS companion changes are documented here.
 - Add standalone mode without Codex
 - Add battery-backed RTC clock fallback
 - Add resilient authenticated USB fallback
+- Add RTC-backed Focus Cockpit with pause, extension, task attachment, and Mac completion notifications
 
 ### Changed
 - Make Wi-Fi scanning deterministic

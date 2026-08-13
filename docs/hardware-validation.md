@@ -56,7 +56,7 @@ Never put the Wi-Fi password, pairing secret, complete board ID, local IP addres
 | HW-104 | Exercise every Settings row and privacy toggle, then return to each page. | Hit targets respond once per tap, labels update, content stays clipped to its cards, and navigation remains available. | Video + values tested | NOT RUN |
 | HW-105 | Reboot after changing every persisted setting. | Screensaver timeout, display-off timeout, and privacy state survive a normal reboot. | Before/after photos + boot log | NOT RUN |
 | HW-106 | Switch 24-hour/12-hour clock, Celsius/Fahrenheit, and 25/45/60-minute focus duration, rebooting after the final choice. | Header/screensaver format and every weather temperature use the selected units; focus duration and all choices survive reboot. | Before/after photos + chosen values | NOT RUN |
-| HW-107 | Start a 25-minute focus session, pause/resume it, and let a shortened development session reach zero. | One tap starts, subsequent taps pause/resume, countdown does not jump, completion is explicit, and restart requires a tap. | Timed video + serial log | NOT RUN |
+| HW-107 | Hold the 25-minute Settings row to start, pause/resume, add five minutes, reset during the run, and let a shortened development session reach zero. Also hold a Codex row to attach it and hold End to cancel a separate run. | Focus Cockpit opens only after the hold; countdown/deadline and pause state survive reset through NVS + RTC; +5 extends exactly five minutes; natural completion is explicit and can notify the paired Mac once; early End does not claim completion; task text is not retained after reboot. | Timed video + serial log + Mac notification | NOT RUN |
 
 ## C. Failure and privacy states
 

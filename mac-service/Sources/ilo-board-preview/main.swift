@@ -38,6 +38,13 @@ enum ILOBoardPreviewCommand {
                 for scenario in BoardPreviewScenario.allCases {
                     try render(scenario, to: "\(outputDirectory)/\(scenario.rawValue).png")
                 }
+            case "focus-screenshot":
+                let output = value(after: "--output", in: arguments) ?? "artifacts/ui-previews/focus.png"
+                try render(
+                    BoardDeviceView(focusMinutes: 25, focusTitle: "Design work pulse UX"),
+                    label: "Focus Cockpit",
+                    to: output
+                )
             default:
                 throw PreviewError.invalidCommand(command)
             }
@@ -155,7 +162,7 @@ private enum PreviewError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case let .invalidCommand(command): "Unknown command '\(command)'. Use preview, screenshot, screenshots, scenario-screenshot, or scenario-screenshots."
+        case let .invalidCommand(command): "Unknown command '\(command)'. Use preview, screenshot, screenshots, focus-screenshot, scenario-screenshot, or scenario-screenshots."
         case .invalidPage: "Pass --screen dashboard, codex, x-news, weather, or settings."
         case .invalidScenario: "Pass --scenario offline, loading, stale, error, long-text, privacy, sleep, reconnect, screensaver, or approval-request."
         case .renderFailed: "The 1024×600 UI preview could not be rendered."

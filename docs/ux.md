@@ -54,6 +54,12 @@ Codex shows sanitized task names, coarse state, last update, and attention type.
 
 The fixed continue action is deliberately distinct from reading the conversation or approving work: it remains on the task/action surface, shows the exact `Please continue.` consequence, holding only arms it, and a separate tap confirms it. “Approval needed” never implies that the board can approve. Any future approval design still requires explicit action text, origin, consequence, expiry, hold-to-confirm, and a Mac-side audit trail.
 
+## Focus Cockpit
+
+Focus opens as a full-screen mode above the normal page chrome. Tap the Settings duration to cycle 25/45/60 minutes and hold it to start an open session; holding a recent Codex row starts the same timer with that row's visible title attached for the current run. A large native LVGL arc, monospaced countdown, and explicit `RTC BACKED`/`PAUSED` state remain readable at a glance. Controls are bounded to Pause/Resume, +5 minutes, and hold-to-end. Natural completion is explicit and dismissible; ending early does not claim completion or notify the Mac.
+
+The ring updates once per second without transforms, shadows, or continuous animation. The absolute deadline and pause state survive reset in NVS and use the battery-backed UTC clock, while attached task text remains memory-only. The optional Mac notification receives no title or task identifier.
+
 ## Weather
 
 Weather operates independently of the Mac after USB provisioning supplies a name and coordinates. The board synchronizes time before a certificate-verified HTTPS request, refreshes every 30 minutes, and distinguishes LIVE, STALE, OFFLINE, and SETUP NEEDED. Desktop preview data is labeled PREVIEW DATA; live firmware never silently presents an old result as current. The provider attribution remains visible on the Weather page.
@@ -92,13 +98,12 @@ This IPS LCD is not primarily at risk of OLED burn-in. A moving screensaver is t
 
 Useful future signals should earn dashboard space by being actionable and quickly understood:
 
-- next calendar event and focus block;
+- next calendar event;
 - build/deploy/CI state for the active project;
 - production incident or uptime alert;
 - priority Slack/Teams mentions, summarized by the Mac;
 - GitHub review/PR attention;
 - Mac thermal pressure and do-not-disturb state. Battery percentage and charging state are now implemented as a bounded read-only Work Pulse signal;
-- a focus timer and one selected “next action.”
 
 The dashboard should aggregate only the top one or two of these. Dedicated pages or a later configurable card stack are better than turning the first screen into a wall of metrics.
 
@@ -106,7 +111,7 @@ The dashboard should aggregate only the top one or two of these. Dedicated pages
 
 `BoardUIPrototype` is a SwiftUI representation fixed at the board's exact 1024×600 resolution. It exists for rapid layout review, deterministic documentation screenshots, and interaction design while hardware is unavailable. It is not a replacement for LVGL or physical verification.
 
-The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages; `./tools/board ui-screenshot --screen codex --chat` renders the focused chat-reader fixture.
+The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages; `./tools/board ui-screenshot --screen codex --chat` renders the focused chat-reader fixture; `swift run --package-path mac-service ilo-board-preview focus-screenshot` renders the Focus Cockpit.
 
 The first LVGL port now mirrors the adaptive four/five-page structure with `lv_tileview`, dynamically sized bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, optional verified cached X News, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. X News accepts vertical momentum scrolling for up to five stories and chains horizontal gestures back to the page tileview; a hint appears only when more than three stories are available. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side validation. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
 

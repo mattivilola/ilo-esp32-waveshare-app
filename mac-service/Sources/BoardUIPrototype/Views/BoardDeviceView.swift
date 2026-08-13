@@ -45,6 +45,17 @@ public struct BoardDeviceView: View {
         codexChatOpen = false
     }
 
+    public init(focusMinutes: Int, focusTitle: String) {
+        _page = State(initialValue: .dashboard)
+        _focusContext = State(initialValue: FocusPreviewContext(minutes: focusMinutes, title: focusTitle))
+        interactive = false
+        fixedPage = .dashboard
+        scenario = nil
+        codexEnabled = true
+        xNewsEnabled = true
+        codexChatOpen = false
+    }
+
     public var body: some View {
         Group {
             if scenario == .sleep {
