@@ -24,7 +24,7 @@ int main(void)
     assert(snapshot.remaining_seconds == 1740);
     assert(snapshot.duration_minutes == 30);
 
-    assert(focus_session_model_snapshot(&state, 3740, &snapshot));
+    assert(focus_session_model_snapshot(&state, 3800, &snapshot));
     assert(snapshot.status == FOCUS_SESSION_INACTIVE);
     assert(snapshot.remaining_seconds == 0);
     assert(snapshot.progress_percent == 100);

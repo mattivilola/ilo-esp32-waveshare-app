@@ -108,7 +108,8 @@ bool focus_session_model_snapshot(
 {
     if (state == NULL || snapshot == NULL || now_epoch <= 0) return false;
     if (state->status == FOCUS_SESSION_RUNNING && remaining_seconds(state, now_epoch) == 0) {
-        (void)focus_session_model_end(state, now_epoch);
+        int64_t deadline_epoch = state->deadline_epoch;
+        (void)focus_session_model_end(state, deadline_epoch);
     }
     uint32_t remaining = remaining_seconds(state, now_epoch);
     *snapshot = (focus_session_snapshot_t){
