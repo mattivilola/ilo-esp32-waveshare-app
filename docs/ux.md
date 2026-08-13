@@ -85,7 +85,7 @@ Reboot, pairing reset, erase, and update installation require a separate confirm
 
 ## Screensaver and power
 
-The screensaver is “Pulse”: the clock/roundel cluster occupies the left two-thirds and snaps among five bounded positions every 20 seconds. The right third is a medium slate-gray Codex Pet panel where Lando breathes, blinks, and occasionally waves using native-size RGB565 frame swaps. The panel color keeps his mostly black fur distinct and is generated from one configurable color value. Touch wakes immediately. When waking from backlight-off sleep, the firmware consumes the entire first touch until release so it cannot accidentally activate a control underneath.
+The screensaver is “Pulse”: the clock/roundel cluster occupies the left two-thirds and snaps among five bounded positions every 20 seconds. The right third is a medium slate-gray ILO PET panel where Lando breathes, blinks, and occasionally waves using native-size RGB565 frame swaps. The panel color keeps his mostly black fur distinct and is generated from one configurable color value. Tap its Settings row to cycle the timeout; hold it for 0.9 seconds to show the saver immediately without changing the saved value. Touch wakes immediately. When waking from backlight-off sleep, the firmware consumes the entire first touch until release so it cannot accidentally activate a control underneath.
 
 This IPS LCD is not primarily at risk of OLED burn-in. A moving screensaver is therefore an ambient experience. The exact 5B routes `DISP` through a CH422G expander output and does not expose PWM brightness control, so the honest power policy is:
 

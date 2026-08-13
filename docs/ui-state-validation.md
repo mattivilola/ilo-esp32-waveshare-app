@@ -37,7 +37,7 @@ The fixture model is intentionally disconnected from the live transport. It cann
   <img src="images/ui-states/loading.png" alt="Codex loading validation fixture" width="49%">
 </p>
 <p align="center">
-  <img src="images/ui-states/screensaver.png" alt="Pulse screensaver with clock and animated Codex Pet Lando" width="49%">
+  <img src="images/ui-states/screensaver.png" alt="Pulse screensaver with clock and animated ILO PET Lando" width="49%">
   <img src="images/ui-states/approval-request.png" alt="Two-step approval safety validation fixture" width="49%">
 </p>
 <p align="center">

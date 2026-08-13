@@ -9,6 +9,7 @@ public struct BoardDeviceView: View {
     @State private var page: BoardPage
     @State private var selectedCodexTask = 0
     @State private var focusContext: FocusPreviewContext?
+    @State private var screensaverVisible = false
     private let interactive: Bool
     private let fixedPage: BoardPage?
     private let scenario: BoardPreviewScenario?
@@ -60,8 +61,12 @@ public struct BoardDeviceView: View {
         Group {
             if scenario == .sleep {
                 BoardSleepValidationView()
-            } else if scenario == .screensaver {
+            } else if scenario == .screensaver || screensaverVisible {
                 BoardScreensaverValidationView()
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if interactive { screensaverVisible = false }
+                    }
             } else {
                 boardSurface
             }
@@ -183,10 +188,18 @@ public struct BoardDeviceView: View {
             case .xNews: XNewsPage(interactive: interactive)
             case .weather: WeatherPage()
             case .settings:
-                SettingsPage(codexEnabled: codexEnabled, xNewsEnabled: xNewsEnabled) { minutes in
-                    guard interactive else { return }
-                    focusContext = FocusPreviewContext(minutes: minutes, title: "Open focus session")
-                }
+                SettingsPage(
+                    codexEnabled: codexEnabled,
+                    xNewsEnabled: xNewsEnabled,
+                    onStartFocus: { minutes in
+                        guard interactive else { return }
+                        focusContext = FocusPreviewContext(minutes: minutes, title: "Open focus session")
+                    },
+                    onShowScreensaver: {
+                        guard interactive else { return }
+                        screensaverVisible = true
+                    }
+                )
             }
         }
     }

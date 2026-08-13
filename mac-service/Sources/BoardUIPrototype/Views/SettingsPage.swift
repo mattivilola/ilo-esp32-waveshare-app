@@ -6,6 +6,7 @@ struct SettingsPage: View {
     let firmwareVersion: String
     let companionVersion: String
     let onStartFocus: (Int) -> Void
+    let onShowScreensaver: () -> Void
     @State private var screensaverMinutes = 2
     @State private var displayOffMinutes = 10
     @State private var privacyMode = false
@@ -19,13 +20,15 @@ struct SettingsPage: View {
         xNewsEnabled: Bool,
         firmwareVersion: String = "0.2.0",
         companionVersion: String = "0.1.3",
-        onStartFocus: @escaping (Int) -> Void = { _ in }
+        onStartFocus: @escaping (Int) -> Void = { _ in },
+        onShowScreensaver: @escaping () -> Void = {}
     ) {
         self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled
         self.firmwareVersion = firmwareVersion
         self.companionVersion = companionVersion
         self.onStartFocus = onStartFocus
+        self.onShowScreensaver = onShowScreensaver
     }
 
     var body: some View {
@@ -33,9 +36,10 @@ struct SettingsPage: View {
             PulseCard {
                 VStack(alignment: .leading, spacing: 13) {
                     SectionLabel(title: "Display")
-                    settingButton("Pulse screensaver", value: minutes(screensaverMinutes)) {
+                    settingButton("Pulse screensaver", value: "\(minutes(screensaverMinutes)) / HOLD") {
                         screensaverMinutes = next(screensaverMinutes, in: [0, 2, 5])
                     }
+                    .onLongPressGesture(minimumDuration: 0.9, perform: onShowScreensaver)
                     settingButton("Display off", value: minutes(displayOffMinutes)) {
                         displayOffMinutes = next(displayOffMinutes, in: [0, 5, 10, 30])
                     }

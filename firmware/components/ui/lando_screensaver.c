@@ -170,7 +170,7 @@ lv_obj_t *lando_screensaver_create(lv_obj_t *parent)
     lv_obj_set_style_radius(divider, 0, 0);
     lv_obj_clear_flag(divider, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *eyebrow = create_label(panel, "CODEX PET", &lv_font_montserrat_14, LANDO_COLOR_SIGNAL);
+    lv_obj_t *eyebrow = create_label(panel, "ILO PET", &lv_font_montserrat_14, LANDO_COLOR_SIGNAL);
     lv_obj_set_pos(eyebrow, 34, 42);
     lv_obj_t *name = create_label(panel, "LANDO", &lv_font_montserrat_28, LANDO_COLOR_MIST);
     lv_obj_set_pos(name, 34, 68);

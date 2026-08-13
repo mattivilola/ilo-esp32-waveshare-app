@@ -356,7 +356,7 @@ struct BoardScreensaverValidationView: View {
                 Rectangle()
                     .fill(Color(red: 92 / 255, green: 104 / 255, blue: 112 / 255))
                     .frame(width: 2, height: 600)
-                Text("CODEX PET")
+                Text("ILO PET")
                     .font(.board(14, weight: .bold))
                     .tracking(1.0)
                     .foregroundStyle(BoardPalette.signal)
@@ -392,6 +392,6 @@ struct BoardScreensaverValidationView: View {
             .frame(width: 340, height: 600)
         }
         .frame(width: 1024, height: 600)
-        .accessibilityLabel("Pulse screensaver fixture showing clock, date, timezone, and animated Codex Pet Lando")
+        .accessibilityLabel("Pulse screensaver fixture showing clock, date, timezone, and animated ILO PET Lando")
     }
 }
