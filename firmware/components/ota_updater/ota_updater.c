@@ -30,7 +30,7 @@
 #define PAYLOAD_MAX_BYTES 8192
 #define SIGNATURE_BYTES 384
 #define DOWNLOAD_BUFFER_BYTES 4096
-#define UPDATER_TASK_STACK_BYTES 16384
+#define UPDATER_TASK_STACK_BYTES 8192
 #define BOARD_TARGET "waveshare-esp32-s3-touch-lcd-5b-28151"
 #define ENVELOPE_SCHEMA "ilo-board-firmware-manifest-envelope-v1"
 #define PAYLOAD_SCHEMA "ilo-board-firmware-manifest-v1"

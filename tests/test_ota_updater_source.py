@@ -9,6 +9,7 @@ SOURCE = (ROOT / "firmware" / "components" / "ota_updater" / "ota_updater.c").re
 
 class OTAUpdaterSourceTests(unittest.TestCase):
     def test_worker_uses_a_static_stack_and_explicit_ready_state(self):
+        self.assertIn("#define UPDATER_TASK_STACK_BYTES 8192", SOURCE)
         self.assertIn("static StackType_t updater_task_stack", SOURCE)
         self.assertIn("xTaskCreateStatic(", SOURCE)
         self.assertNotRegex(SOURCE, re.compile(r"xTaskCreate\(updater_task"))
