@@ -2,6 +2,18 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.9 - 2026-08-13
+
+### Added
+- Allow holding the Pulse screensaver setting to show ILO PET immediately
+- Enable the board's signed wireless firmware update channel after one verified USB setup
+
+### Changed
+- Extend the board weather outlook
+- Preserve Focus completion state across resets
+- Clarify that OTA setup is independent of normal USB and Wi-Fi connectivity
+
+
 ## 0.1.8 - 2026-08-13
 
 ### Added
