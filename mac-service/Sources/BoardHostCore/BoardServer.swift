@@ -2,6 +2,7 @@ import BoardProtocol
 import Darwin
 import Foundation
 import Network
+import OSLog
 import Security
 
 public enum BoardServerError: Error, LocalizedError, Sendable {
@@ -274,6 +275,7 @@ public final class BoardServer: @unchecked Sendable {
 }
 
 private final class BoardConnection: @unchecked Sendable {
+    private let statusLog = Logger(subsystem: "com.iloapps.iloboard", category: "BoardSnapshot")
     private let channel: any BoardConnectionChannel
     private let expectedBoardID: String
     private let source: any TaskSource
@@ -299,6 +301,7 @@ private final class BoardConnection: @unchecked Sendable {
     private var revision: UInt64 = 0
     private var captureAssembler: ScreenCaptureAssembler?
     private var captureFinished = false
+    private var lastWeatherLocationPresence: Bool?
 
     init(
         channel: any BoardConnectionChannel,
@@ -686,6 +689,11 @@ private final class BoardConnection: @unchecked Sendable {
             let raw = try await source.snapshot(revision: revision)
             let macPower = await powerStatusSource.currentStatus()
             let weatherLocation = await weatherLocationSource.currentLocation()
+            let hasWeatherLocation = weatherLocation != nil
+            if lastWeatherLocationPresence != hasWeatherLocation {
+                lastWeatherLocationPresence = hasWeatherLocation
+                statusLog.notice("Outgoing board snapshot weather location present: \(hasWeatherLocation, privacy: .public)")
+            }
             let tasks = raw.tasks.map(TaskSanitizer.sanitize)
             let snapshot = DashboardSnapshot(
                 revision: raw.revision,

@@ -33,6 +33,10 @@ CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
 CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
 CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
+# Keep TLS's sizeable transient allocations in the board's 8 MB PSRAM so
+# display, Wi-Fi, authenticated USB, and weather can remain active together.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+
 # Authenticated USB fallback uses HKDF-SHA256 and ChaCha20-Poly1305.
 CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y

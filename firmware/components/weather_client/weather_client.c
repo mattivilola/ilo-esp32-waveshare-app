@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include "clock_sync.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -164,26 +165,43 @@ static bool fetch_weather(const weather_config_t *weather_config, weather_model_
     );
     if (length <= 0 || (size_t)length >= sizeof(url)) return false;
 
-    response_buffer_t response = { 0 };
+    // The response is larger than the weather task's original stack by itself.
+    // Keep it in PSRAM so the HTTP/TLS call chain retains real stack headroom.
+    response_buffer_t *response = heap_caps_calloc(
+        1,
+        sizeof(*response),
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
+    if (response == NULL) {
+        ESP_LOGE(TAG, "Weather response buffer could not be allocated in PSRAM");
+        return false;
+    }
     esp_http_client_config_t config = {
         .url = url,
         .user_agent = "ILOBoard/0.1",
         .event_handler = http_event,
-        .user_data = &response,
+        .user_data = response,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 10000,
         .buffer_size = 2048,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
-    if (client == NULL) return false;
+    if (client == NULL) {
+        free(response);
+        return false;
+    }
     esp_err_t status = esp_http_client_perform(client);
     int http_status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
-    if (status != ESP_OK || http_status != 200 || response.overflow || response.used == 0) {
+    if (status != ESP_OK || http_status != 200 || response->overflow || response->used == 0) {
         ESP_LOGW(TAG, "Weather request failed: %s, HTTP %d", esp_err_to_name(status), http_status);
+        free(response);
         return false;
     }
-    return parse_weather(response.data, model);
+    bool parsed = parse_weather(response->data, model);
+    free(response);
+    if (!parsed) ESP_LOGW(TAG, "Weather response could not be parsed");
+    return parsed;
 }
 
 static void publish(const weather_model_t *model)
@@ -220,6 +238,7 @@ static void weather_task(void *argument)
         if (ok) {
             model.state = WEATHER_STATE_LIVE;
             model.updated_epoch = (int64_t)time(NULL);
+            ESP_LOGI(TAG, "Weather forecast refreshed");
         } else {
             model.state = model.updated_epoch > 0 ? WEATHER_STATE_STALE : WEATHER_STATE_ERROR;
         }
@@ -234,10 +253,15 @@ bool weather_client_start(weather_model_callback_t callback)
     weather_config_t config = { 0 };
     active_config_valid = load_weather_config(&config);
     if (active_config_valid) active_config = config;
+    // Keep the task stack in internal RAM because successful forecasts update
+    // RTC/NVS state while the flash cache is disabled. Large HTTP response and
+    // TLS allocations live in PSRAM instead.
     if (xTaskCreatePinnedToCore(weather_task, "weather", 8192, NULL, 3, &weather_task_handle, 0) != pdPASS) {
         weather_task_handle = NULL;
+        ESP_LOGE(TAG, "Weather task could not allocate its internal stack");
         return false;
     }
+    ESP_LOGI(TAG, "Weather task started (%s)", active_config_valid ? "configured" : "awaiting location");
     return true;
 }
 

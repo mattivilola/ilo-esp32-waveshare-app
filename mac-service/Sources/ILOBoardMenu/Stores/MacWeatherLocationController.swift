@@ -137,9 +137,13 @@ final class MacWeatherLocationController: NSObject, ObservableObject, @preconcur
                 ?? placemark?.administrativeArea
                 ?? "Current location"
             let weatherLocation = WeatherLocation(name: city, latitude: latitude, longitude: longitude)
+            await cache.update(weatherLocation)
+            guard defaults.bool(forKey: Self.enabledKey) else {
+                await cache.update(nil)
+                return
+            }
             state = .ready
             detail = "\(weatherLocation.name) / about 1 km precision; sent only to the paired board."
-            await cache.update(weatherLocation)
         }
     }
 

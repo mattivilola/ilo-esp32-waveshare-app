@@ -69,6 +69,12 @@ extern "C" void app_main()
              (long long)((esp_timer_get_time() - startup_begin_us) / 1000));
     ESP_ERROR_CHECK(ota_policy_confirm_after_stability());
 
+    // Reserve the weather worker's internal stack before Wi-Fi/TLS fragment
+    // the remaining DMA-capable RAM. The worker waits for network readiness.
+    if (!weather_client_start(dashboard_ui_set_weather)) {
+        ESP_LOGW(TAG, "Weather client could not be started");
+    }
+
     if (!mac_transport_start(handle_mac_model)) {
         bool wifi_started = mac_transport_start_wifi_only();
         ESP_LOGW(TAG, "Mac host is not configured; keeping the standalone dashboard");
@@ -76,15 +82,9 @@ extern "C" void app_main()
         if (wifi_started && !clock_sync_start()) {
             ESP_LOGW(TAG, "Clock synchronization could not be started");
         }
-        if (!weather_client_start(dashboard_ui_set_weather)) {
-            ESP_LOGW(TAG, "Weather client could not be started");
-        }
     } else {
         if (!clock_sync_start()) {
             ESP_LOGW(TAG, "Clock synchronization could not be started");
-        }
-        if (!weather_client_start(dashboard_ui_set_weather)) {
-            ESP_LOGW(TAG, "Direct weather is not configured yet");
         }
     }
     (void)ota_updater_start(handle_ota_status);
