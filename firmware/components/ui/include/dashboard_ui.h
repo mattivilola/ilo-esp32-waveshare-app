@@ -42,6 +42,37 @@ typedef enum {
 
 typedef bool (*dashboard_codex_continue_callback_t)(const char *task_id);
 
+#define DASHBOARD_CODEX_CHAT_MAX_MESSAGES 6
+#define DASHBOARD_CODEX_CHAT_TEXT_MAX 360
+
+typedef enum {
+    DASHBOARD_CODEX_CHAT_READY,
+    DASHBOARD_CODEX_CHAT_UNAVAILABLE,
+    DASHBOARD_CODEX_CHAT_BUSY,
+    DASHBOARD_CODEX_CHAT_FAILED,
+} dashboard_codex_chat_state_t;
+
+typedef enum {
+    DASHBOARD_CODEX_CHAT_USER,
+    DASHBOARD_CODEX_CHAT_ASSISTANT,
+} dashboard_codex_chat_role_t;
+
+typedef struct {
+    dashboard_codex_chat_role_t role;
+    char text[DASHBOARD_CODEX_CHAT_TEXT_MAX + 1];
+} dashboard_codex_chat_message_t;
+
+typedef struct {
+    dashboard_codex_chat_state_t state;
+    char task_id[81];
+    char title[81];
+    char status_message[96];
+    uint8_t message_count;
+    dashboard_codex_chat_message_t messages[DASHBOARD_CODEX_CHAT_MAX_MESSAGES];
+} dashboard_codex_chat_detail_t;
+
+typedef bool (*dashboard_codex_chat_callback_t)(const char *task_id);
+
 esp_err_t dashboard_ui_init(esp_lcd_panel_handle_t lcd);
 esp_err_t dashboard_ui_present_boot(void);
 void dashboard_ui_set_model(const dashboard_model_t *model);
@@ -55,6 +86,8 @@ void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_
 void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t state);
 void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_t callback);
 void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t state);
+void dashboard_ui_set_codex_chat_callback(dashboard_codex_chat_callback_t callback);
+void dashboard_ui_set_codex_chat_detail(const dashboard_codex_chat_detail_t *detail);
 esp_err_t dashboard_ui_capture_rgb565(uint8_t **pixels, size_t *size);
 
 #ifdef __cplusplus

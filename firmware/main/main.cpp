@@ -43,6 +43,7 @@ extern "C" void app_main()
     dashboard_ui_set_x_news_refresh_callback(mac_transport_request_x_news_refresh);
     dashboard_ui_set_wifi_update_callback(mac_transport_update_wifi);
     dashboard_ui_set_wifi_scan_callback(mac_transport_scan_wifi);
+    dashboard_ui_set_codex_chat_callback(mac_transport_request_codex_chat);
     dashboard_ui_set_codex_continue_callback(mac_transport_request_codex_continue);
 
     dashboard_model_t initial = dashboard_model_demo();

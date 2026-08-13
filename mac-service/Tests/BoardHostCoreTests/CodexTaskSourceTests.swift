@@ -41,6 +41,37 @@ import Testing
     #expect(CodexHistoryMapper.task(from: question).attentionKind == .question)
 }
 
+@Test func recentCodexChatKeepsOnlyNewestVisibleUserAndAssistantText() throws {
+    let data = Data(#"""
+    [
+      {
+        "items": [
+          {"id":"new-user","type":"userMessage","content":[{"type":"text","text":"Newest question"},{"type":"image","url":"data:image/png;base64,private"}]},
+          {"id":"tool","type":"commandExecution","command":"cat secret","cwd":"/private/project","commandActions":[],"status":"completed"},
+          {"id":"new-agent","type":"agentMessage","text":"Newest answer","phase":"final_answer"}
+        ]
+      },
+      {
+        "items": [
+          {"id":"old-user","type":"userMessage","content":[{"type":"text","text":"Older question"}]},
+          {"id":"reasoning","type":"reasoning","summary":["private reasoning"]},
+          {"id":"old-agent","type":"agentMessage","text":"Older answer","phase":"commentary"}
+        ]
+      }
+    ]
+    """#.utf8)
+    let newestFirst = try JSONDecoder().decode([CodexTurnRecord].self, from: data)
+    let messages = CodexChatHistoryMapper.messages(fromNewestFirst: newestFirst)
+
+    #expect(messages == [
+        CodexChatMessage(role: .user, text: "Older question"),
+        CodexChatMessage(role: .assistant, text: "Older answer"),
+        CodexChatMessage(role: .user, text: "Newest question"),
+        CodexChatMessage(role: .assistant, text: "Newest answer"),
+    ])
+    #expect(!messages.contains { $0.text.contains("secret") || $0.text.contains("reasoning") })
+}
+
 @Test func packagedAppCodexResolverSupportsExplicitPath() {
     let resolved = CodexExecutableResolver.resolve(environment: ["ILO_BOARD_CODEX_PATH": "/bin/sh"])
     #expect(resolved?.path == "/bin/sh")

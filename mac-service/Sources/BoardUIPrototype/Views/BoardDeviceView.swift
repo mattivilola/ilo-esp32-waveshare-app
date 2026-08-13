@@ -6,14 +6,21 @@ public struct BoardDeviceView: View {
     private let fixedPage: BoardPage?
     private let scenario: BoardPreviewScenario?
     private let xNewsEnabled: Bool
+    private let codexChatOpen: Bool
 
-    public init(page: BoardPage = .dashboard, interactive: Bool = true, xNewsEnabled: Bool = true) {
+    public init(
+        page: BoardPage = .dashboard,
+        interactive: Bool = true,
+        xNewsEnabled: Bool = true,
+        codexChatOpen: Bool = false
+    ) {
         let initialPage = !xNewsEnabled && page == .xNews ? .weather : page
         _page = State(initialValue: initialPage)
         self.interactive = interactive
         fixedPage = interactive ? nil : initialPage
         scenario = nil
         self.xNewsEnabled = xNewsEnabled
+        self.codexChatOpen = codexChatOpen
     }
 
     public init(scenario: BoardPreviewScenario) {
@@ -22,6 +29,7 @@ public struct BoardDeviceView: View {
         fixedPage = scenario.page
         self.scenario = scenario
         xNewsEnabled = true
+        codexChatOpen = false
     }
 
     public var body: some View {
@@ -105,7 +113,11 @@ public struct BoardDeviceView: View {
         } else {
             switch visiblePage {
             case .dashboard: DashboardPage()
-            case .codex: CodexPage()
+            case .codex:
+                CodexPage(
+                    initiallyShowingChat: codexChatOpen,
+                    interactive: interactive
+                )
             case .xNews: XNewsPage(interactive: interactive)
             case .weather: WeatherPage()
             case .settings: SettingsPage(xNewsEnabled: xNewsEnabled)

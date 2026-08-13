@@ -50,9 +50,9 @@ On cold boot, the backlight stays off until the first real Dashboard frame is re
 
 ## Codex
 
-Codex shows sanitized task names, coarse state, last update, and attention type. It also keeps the capability boundary visible: history from a separately launched App Server is not presented as authoritative live Desktop state. Full prompts, transcripts, paths, commands, diffs, and credentials do not belong on the board.
+Codex shows sanitized task names, coarse state, last update, and attention type. Tapping a task opens a focused, full-width reader for the newest six user/Codex text messages. The conversation view is fetched on demand, scrolls vertically, opens at the newest message, and stays visibly labeled `READ ONLY` and `RECENT`; Back returns to the task/action surface. Commands, tool output, reasoning, paths, diffs, attachments, approvals, credentials, and the complete transcript do not belong on the board. Enabling the board's summary privacy setting suppresses the chat request as well as the list summaries.
 
-The fixed continue action is deliberately distinct from approval: tapping a task shows the exact `Please continue.` consequence, holding only arms it, and a separate tap confirms it. “Approval needed” never implies that the board can approve. Any future approval design still requires explicit action text, origin, consequence, expiry, hold-to-confirm, and a Mac-side audit trail.
+The fixed continue action is deliberately distinct from reading the conversation or approving work: it remains on the task/action surface, shows the exact `Please continue.` consequence, holding only arms it, and a separate tap confirms it. “Approval needed” never implies that the board can approve. Any future approval design still requires explicit action text, origin, consequence, expiry, hold-to-confirm, and a Mac-side audit trail.
 
 ## Weather
 
@@ -106,7 +106,7 @@ The dashboard should aggregate only the top one or two of these. Dedicated pages
 
 `BoardUIPrototype` is a SwiftUI representation fixed at the board's exact 1024×600 resolution. It exists for rapid layout review, deterministic documentation screenshots, and interaction design while hardware is unavailable. It is not a replacement for LVGL or physical verification.
 
-The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages.
+The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages; `./tools/board ui-screenshot --screen codex --chat` renders the focused chat-reader fixture.
 
 The first LVGL port now mirrors the adaptive four/five-page structure with `lv_tileview`, dynamically sized bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, optional verified cached X News, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. X News accepts vertical momentum scrolling for up to five stories and chains horizontal gestures back to the page tileview; a hint appears only when more than three stories are available. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side validation. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
 

@@ -64,6 +64,49 @@ private struct ThreadListResult: Decodable, Sendable {
     let data: [CodexThreadRecord]
 }
 
+struct CodexTurnRecord: Decodable, Equatable, Sendable {
+    let items: [CodexThreadItemRecord]
+}
+
+struct CodexThreadItemRecord: Decodable, Equatable, Sendable {
+    private struct UserContent: Decodable, Equatable, Sendable {
+        let type: String
+        let text: String?
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case content
+        case text
+        case phase
+    }
+
+    let type: String
+    let text: String?
+    let phase: String?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decode(String.self, forKey: .type)
+        phase = try container.decodeIfPresent(String.self, forKey: .phase)
+        if type == "userMessage" {
+            let content = try container.decodeIfPresent([UserContent].self, forKey: .content) ?? []
+            let parts = content.compactMap { item in
+                item.type == "text" ? item.text : nil
+            }
+            text = parts.isEmpty ? nil : parts.joined(separator: "\n")
+        } else if type == "agentMessage" {
+            text = try container.decodeIfPresent(String.self, forKey: .text)
+        } else {
+            text = nil
+        }
+    }
+}
+
+private struct ThreadTurnsListResult: Decodable, Sendable {
+    let data: [CodexTurnRecord]
+}
+
 private struct CodexTurnStartResult: Decodable, Sendable {
     struct Turn: Decodable, Sendable {
         let id: String
@@ -94,6 +137,19 @@ actor CodexAppServerClient {
             throw CodexSourceError.invalidResponse
         }
         return result.data
+    }
+
+    func recentChat(threadID: String, turnLimit: Int = 4) async throws -> [CodexChatMessage] {
+        let data = try await request(method: "thread/turns/list", params: [
+            "threadId": threadID,
+            "limit": max(1, min(turnLimit, 6)),
+            "sortDirection": "desc",
+            "itemsView": "full",
+        ] as [String: Any])
+        guard let result = try? JSONDecoder().decode(ThreadTurnsListResult.self, from: data) else {
+            throw CodexSourceError.invalidResponse
+        }
+        return CodexChatHistoryMapper.messages(fromNewestFirst: result.data)
     }
 
     func continueThread(id threadID: String, requestID: String) async throws {
@@ -301,6 +357,29 @@ enum CodexHistoryMapper {
     }
 }
 
+enum CodexChatHistoryMapper {
+    static func messages(fromNewestFirst turns: [CodexTurnRecord]) -> [CodexChatMessage] {
+        let messages = turns.reversed().flatMap { turn in
+            turn.items.compactMap { item -> CodexChatMessage? in
+                guard let text = item.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !text.isEmpty
+                else {
+                    return nil
+                }
+                switch item.type {
+                case "userMessage":
+                    return CodexChatMessage(role: .user, text: text)
+                case "agentMessage":
+                    return CodexChatMessage(role: .assistant, text: text)
+                default:
+                    return nil
+                }
+            }
+        }
+        return Array(messages.suffix(codexChatMaximumMessages))
+    }
+}
+
 enum CodexContinuationPolicy {
     static func allows(_ thread: CodexThreadRecord) -> Bool {
         thread.status.type == "idle" || thread.status.type == "notLoaded"
@@ -346,6 +425,28 @@ public actor CodexHistoryTaskSource: TaskSource {
         )
     }
 
+    public func chatDetail(id: String) async -> CodexChatDetailOutcome {
+        guard let thread = cachedThreads.first(where: { $0.id == id }) else {
+            actionLog.notice("Rejected chat detail for a task outside the visible snapshot")
+            return .unavailable
+        }
+        do {
+            let messages = try await client.recentChat(threadID: id)
+            return .ready(
+                title: thread.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                    ?? "Untitled Codex task",
+                messages: messages
+            )
+        } catch CodexSourceError.requestAlreadyRunning {
+            return .busy
+        } catch CodexSourceError.executableNotFound {
+            return .unavailable
+        } catch {
+            actionLog.error("Recent Codex chat could not be read")
+            return .failed
+        }
+    }
+
     public func continueTask(id: String, requestID: String) async -> CodexContinueOutcome {
         guard continueFeature.isEnabled else {
             actionLog.notice("Rejected fixed continuation because Mac consent is off")
@@ -387,4 +488,8 @@ public actor CodexHistoryTaskSource: TaskSource {
             return .failed
         }
     }
+}
+
+private extension String {
+    var nilIfEmpty: String? { isEmpty ? nil : self }
 }

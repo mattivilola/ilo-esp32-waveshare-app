@@ -17,7 +17,7 @@ enum ILOBoardPreviewCommand {
             case "screenshot":
                 let page = try pageArgument(arguments)
                 let output = value(after: "--output", in: arguments) ?? "artifacts/ui-previews/\(page.rawValue).png"
-                try render(page, to: output)
+                try render(page, codexChatOpen: arguments.contains("--chat"), to: output)
             case "screenshots":
                 let outputDirectory = value(after: "--output-dir", in: arguments) ?? "artifacts/ui-previews"
                 for page in BoardPage.allCases {
@@ -45,7 +45,11 @@ enum ILOBoardPreviewCommand {
     private static func runPreview(arguments: [String]) {
         let application = NSApplication.shared
         application.setActivationPolicy(.regular)
-        let view = BoardDeviceView(xNewsEnabled: !arguments.contains("--without-x-news"))
+        let view = BoardDeviceView(
+            page: arguments.contains("--chat") ? .codex : .dashboard,
+            xNewsEnabled: !arguments.contains("--without-x-news"),
+            codexChatOpen: arguments.contains("--chat")
+        )
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1024, height: 600),
             styleMask: [.titled, .closable, .miniaturizable],
@@ -64,8 +68,12 @@ enum ILOBoardPreviewCommand {
     }
 
     @MainActor
-    private static func render(_ page: BoardPage, to path: String) throws {
-        try render(BoardDeviceView(page: page, interactive: false), label: page.title, to: path)
+    private static func render(_ page: BoardPage, codexChatOpen: Bool = false, to path: String) throws {
+        try render(
+            BoardDeviceView(page: page, interactive: false, codexChatOpen: codexChatOpen),
+            label: codexChatOpen ? "Codex chat" : page.title,
+            to: path
+        )
     }
 
     @MainActor

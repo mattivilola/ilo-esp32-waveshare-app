@@ -340,6 +340,8 @@ private final class BoardConnection: @unchecked Sendable {
             }
         case "xNewsRefreshRequest":
             handleXNewsRefreshRequest(payload)
+        case "codexChatRequest":
+            handleCodexChatRequest(payload)
         case "codexContinueRequest":
             handleCodexContinueRequest(payload)
         default:
@@ -415,6 +417,62 @@ private final class BoardConnection: @unchecked Sendable {
                 status: response.0,
                 message: response.1
             ))
+        }
+    }
+
+    private func handleCodexChatRequest(_ payload: Data) {
+        guard helloAccepted, subscribed,
+              let request = try? ProtocolJSON.decoder().decode(CodexChatRequest.self, from: payload),
+              request.type == "codexChatRequest",
+              request.version == codexChatProtocolVersion,
+              Self.validRequestID(request.requestID),
+              Self.validTaskID(request.taskID)
+        else {
+            send(ErrorMessage(
+                code: "invalidCodexChatRequest",
+                message: "A subscribed session and bounded identifiers are required."
+            ))
+            return
+        }
+        Task { [weak self, source] in
+            let outcome = await source.chatDetail(id: request.taskID)
+            guard let self else { return }
+            let response: CodexChatDetailMessage = switch outcome {
+            case let .ready(title, messages):
+                CodexChatDetailMessage(
+                    requestID: request.requestID,
+                    taskID: request.taskID,
+                    status: .ready,
+                    title: BoardDisplayText.sanitized(title, maximum: 80),
+                    messages: CodexChatSanitizer.sanitize(messages),
+                    message: messages.isEmpty ? "No recent text messages" : nil
+                )
+            case .unavailable:
+                CodexChatDetailMessage(
+                    requestID: request.requestID,
+                    taskID: request.taskID,
+                    status: .unavailable,
+                    title: "",
+                    message: "Recent chat is unavailable"
+                )
+            case .busy:
+                CodexChatDetailMessage(
+                    requestID: request.requestID,
+                    taskID: request.taskID,
+                    status: .busy,
+                    title: "",
+                    message: "Codex is busy; try again"
+                )
+            case .failed:
+                CodexChatDetailMessage(
+                    requestID: request.requestID,
+                    taskID: request.taskID,
+                    status: .failed,
+                    title: "",
+                    message: "Recent chat could not be loaded"
+                )
+            }
+            self.send(response)
         }
     }
 

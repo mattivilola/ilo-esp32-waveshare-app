@@ -27,13 +27,38 @@ import Testing
     let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     let encodedPower = try #require(object["macPower"] as? [String: Any])
 
-    #expect(snapshot.capabilities == ["tasks.read", "macPower.read", "hostTime.read"])
+    #expect(snapshot.capabilities == ["tasks.read", "tasks.chat.read", "macPower.read", "hostTime.read"])
     #expect(snapshot.xNewsEnabled == false)
     #expect(object["xNewsEnabled"] as? Bool == false)
     #expect(snapshot.macPower?.levelPercent == 100)
     #expect(encodedPower.keys.sorted() == ["levelPercent", "state"])
     #expect(encodedPower["levelPercent"] as? Int == 100)
     #expect(encodedPower["state"] as? String == "charging")
+}
+
+@Test func codexChatMessagesAreReadOnlyAndBounded() throws {
+    let request = CodexChatRequest(requestID: "board-chat-1", taskID: "019f-task-7")
+    let requestData = try ProtocolJSON.encoder().encode(request)
+    let requestObject = try #require(JSONSerialization.jsonObject(with: requestData) as? [String: Any])
+    #expect(requestObject.keys.sorted() == ["requestID", "taskID", "type", "version"])
+    #expect(requestObject["type"] as? String == "codexChatRequest")
+    #expect(requestObject["action"] == nil)
+
+    let response = CodexChatDetailMessage(
+        requestID: "board-chat-1",
+        taskID: "019f-task-7",
+        status: .ready,
+        title: "Board chat detail",
+        messages: (0..<8).map { index in
+            CodexChatMessage(role: index.isMultiple(of: 2) ? .user : .assistant, text: "Message \(index)")
+        }
+    )
+    #expect(response.messages.count == codexChatMaximumMessages)
+    let decoded = try ProtocolJSON.decoder().decode(
+        CodexChatDetailMessage.self,
+        from: ProtocolJSON.encoder().encode(response)
+    )
+    #expect(decoded == response)
 }
 
 @Test func fixedCodexContinueCapabilityRequiresMacOptIn() {

@@ -291,6 +291,8 @@ def ui_screenshot(args: argparse.Namespace) -> None:
             arguments.extend(("--output-dir", args.output))
     else:
         arguments = ["screenshot", "--screen", args.screen]
+        if args.chat:
+            arguments.append("--chat")
         if args.output:
             arguments.extend(("--output", args.output))
     swift_preview(*arguments)
@@ -512,6 +514,7 @@ def parser() -> argparse.ArgumentParser:
     screenshot_parser = sub.add_parser("ui-screenshot", help="render simulator PNGs; this is not a live board framebuffer capture")
     screenshot_parser.add_argument("--screen", choices=("dashboard", "codex", "x-news", "weather", "settings"), default="dashboard")
     screenshot_parser.add_argument("--all", action="store_true", help="render all five screens")
+    screenshot_parser.add_argument("--chat", action="store_true", help="render the open read-only Codex chat reader")
     screenshot_parser.add_argument("--output", help="output PNG path, or output directory with --all")
     screenshot_parser.set_defaults(handler=ui_screenshot)
     sub.add_parser("build", help="configure and build firmware").set_defaults(handler=build)

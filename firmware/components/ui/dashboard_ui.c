@@ -66,6 +66,15 @@ static lv_obj_t *codex_hold_label;
 static lv_obj_t *codex_confirm_button;
 static lv_obj_t *codex_confirm_label;
 static dashboard_codex_continue_callback_t codex_continue_callback;
+static lv_obj_t *codex_chat_overlay;
+static lv_obj_t *codex_chat_title;
+static lv_obj_t *codex_chat_status;
+static lv_obj_t *codex_chat_scroll;
+static lv_obj_t *codex_chat_hint;
+static lv_obj_t *codex_chat_rows[DASHBOARD_CODEX_CHAT_MAX_MESSAGES];
+static lv_obj_t *codex_chat_roles[DASHBOARD_CODEX_CHAT_MAX_MESSAGES];
+static lv_obj_t *codex_chat_texts[DASHBOARD_CODEX_CHAT_MAX_MESSAGES];
+static dashboard_codex_chat_callback_t codex_chat_callback;
 static char codex_selected_task_id[81];
 static uint32_t codex_hold_started_tick;
 static uint32_t codex_result_started_tick;
@@ -158,6 +167,8 @@ static void update_page_chrome(void);
 static void finish_boot_animation(void);
 static void refresh_clock_labels(void);
 static void render_codex_detail(void);
+static void open_codex_chat(void);
+static void build_codex_chat_overlay(lv_obj_t *screen);
 
 static void set_clock_timezone_locked(int32_t utc_offset_seconds, const char *abbreviation)
 {
@@ -334,6 +345,72 @@ static void codex_row_tapped(lv_event_t *event)
     render_codex_detail();
 }
 
+static void clear_codex_chat_rows(void)
+{
+    for (int index = 0; index < DASHBOARD_CODEX_CHAT_MAX_MESSAGES; ++index) {
+        if (codex_chat_rows[index] != NULL) {
+            lv_obj_add_flag(codex_chat_rows[index], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void show_codex_chat_status(const char *text, lv_color_t color)
+{
+    clear_codex_chat_rows();
+    if (codex_chat_status != NULL) {
+        lv_label_set_text(codex_chat_status, text);
+        lv_obj_set_style_text_color(codex_chat_status, color, 0);
+        lv_obj_remove_flag(codex_chat_status, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (codex_chat_hint != NULL) {
+        lv_label_set_text(codex_chat_hint, "READ ONLY / RECENT TEXT ONLY");
+    }
+}
+
+static void codex_chat_back_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_chat_overlay == NULL) return;
+    lv_obj_add_flag(codex_chat_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_display_trigger_activity(ui_display);
+}
+
+static void open_codex_chat(void)
+{
+    const dashboard_task_t *task = selected_codex_task();
+    if (task == NULL || codex_chat_overlay == NULL) return;
+    lv_obj_move_foreground(codex_chat_overlay);
+    lv_obj_remove_flag(codex_chat_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(codex_chat_title, task->title);
+    lv_obj_scroll_to_y(codex_chat_scroll, 0, LV_ANIM_OFF);
+    if (current_settings.hide_task_summaries) {
+        show_codex_chat_status(
+            "Chat details are hidden by the board privacy setting.",
+            COLOR_AMBER
+        );
+        lv_label_set_text(codex_chat_hint, "BACK / SETTINGS TO SHOW SUMMARIES");
+        return;
+    }
+    show_codex_chat_status("Loading recent conversation from the Mac...", COLOR_FOG);
+    if (codex_chat_callback == NULL || !codex_chat_callback(task->id)) {
+        show_codex_chat_status(
+            "Recent chat is unavailable. Update or reconnect the Mac companion.",
+            COLOR_AMBER
+        );
+    }
+    lv_display_trigger_activity(ui_display);
+}
+
+static void codex_row_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || codex_continue_in_flight) return;
+    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    if (!latest_model_valid || index < 0 || index >= latest_model.task_count) return;
+    strlcpy(codex_selected_task_id, latest_model.tasks[index].id, sizeof(codex_selected_task_id));
+    codex_continue_armed = false;
+    codex_result_visible = false;
+    render_codex_detail();
+    open_codex_chat();
+}
 static void codex_hold_event(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
@@ -680,6 +757,101 @@ static void build_codex_page(lv_obj_t *page)
     codex_confirm_label = create_label(codex_confirm_button, "CONFIRM CONTINUE", &lv_font_montserrat_14, COLOR_CARBON);
     lv_obj_center(codex_confirm_label);
     lv_obj_add_flag(codex_confirm_button, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void build_codex_chat_overlay(lv_obj_t *screen)
+{
+    codex_chat_overlay = lv_obj_create(screen);
+    set_clean_box(codex_chat_overlay, COLOR_CARBON, 0);
+    lv_obj_set_size(codex_chat_overlay, ILO_BOARD_WIDTH, ILO_BOARD_HEIGHT);
+    lv_obj_set_pos(codex_chat_overlay, 0, 0);
+    lv_obj_add_flag(codex_chat_overlay, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *back = lv_button_create(codex_chat_overlay);
+    set_clean_box(back, COLOR_STEEL, 12);
+    lv_obj_set_size(back, 122, 46);
+    lv_obj_set_pos(back, 22, 18);
+    lv_obj_add_event_cb(back, codex_chat_back_tapped, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_label = create_label(back, LV_SYMBOL_LEFT "  BACK", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_center(back_label);
+
+    codex_chat_title = create_label(codex_chat_overlay, "Codex chat", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_width(codex_chat_title, 610);
+    lv_label_set_long_mode(codex_chat_title, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(codex_chat_title, 166, 14);
+    lv_obj_t *subtitle = create_label(
+        codex_chat_overlay,
+        "RECENT CONVERSATION / USER + CODEX TEXT",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_set_pos(subtitle, 166, 44);
+    lv_obj_t *read_only = create_label(codex_chat_overlay, "READ ONLY", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_align(read_only, LV_ALIGN_TOP_RIGHT, -28, 28);
+
+    codex_chat_scroll = lv_obj_create(codex_chat_overlay);
+    lv_obj_remove_style_all(codex_chat_scroll);
+    lv_obj_set_size(codex_chat_scroll, 980, 458);
+    lv_obj_set_pos(codex_chat_scroll, 22, 82);
+    lv_obj_set_scroll_dir(codex_chat_scroll, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(codex_chat_scroll, LV_SCROLLBAR_MODE_ACTIVE);
+    lv_obj_set_flex_flow(codex_chat_scroll, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(
+        codex_chat_scroll,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_CENTER,
+        LV_FLEX_ALIGN_CENTER
+    );
+    lv_obj_set_style_pad_all(codex_chat_scroll, 8, 0);
+    lv_obj_set_style_pad_row(codex_chat_scroll, 12, 0);
+
+    codex_chat_status = create_label(
+        codex_chat_scroll,
+        "Loading recent conversation from the Mac...",
+        &lv_font_montserrat_20,
+        COLOR_FOG
+    );
+    lv_obj_set_width(codex_chat_status, 920);
+    lv_obj_set_height(codex_chat_status, 340);
+    lv_label_set_long_mode(codex_chat_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(codex_chat_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(codex_chat_status, 142, 0);
+
+    for (int index = 0; index < DASHBOARD_CODEX_CHAT_MAX_MESSAGES; ++index) {
+        codex_chat_rows[index] = lv_obj_create(codex_chat_scroll);
+        set_clean_box(codex_chat_rows[index], COLOR_SLATE, 14);
+        lv_obj_set_width(codex_chat_rows[index], 944);
+        lv_obj_set_height(codex_chat_rows[index], LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(codex_chat_rows[index], LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_style_pad_all(codex_chat_rows[index], 16, 0);
+        lv_obj_set_style_pad_row(codex_chat_rows[index], 8, 0);
+
+        codex_chat_roles[index] = create_label(
+            codex_chat_rows[index],
+            index % 2 == 0 ? "YOU" : "CODEX",
+            &lv_font_montserrat_14,
+            index % 2 == 0 ? COLOR_CYAN : COLOR_SIGNAL
+        );
+        codex_chat_texts[index] = create_label(
+            codex_chat_rows[index],
+            "",
+            &lv_font_montserrat_14,
+            COLOR_MIST
+        );
+        lv_obj_set_width(codex_chat_texts[index], 900);
+        lv_label_set_long_mode(codex_chat_texts[index], LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_line_space(codex_chat_texts[index], 5, 0);
+        lv_obj_add_flag(codex_chat_rows[index], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    codex_chat_hint = create_label(
+        codex_chat_overlay,
+        "SWIPE TO SCROLL / LATEST SIX / READ ONLY",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_align(codex_chat_hint, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_add_flag(codex_chat_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_weather_page(lv_obj_t *page)
@@ -1704,6 +1876,7 @@ static void build_ui(void)
     configure_x_news_page(false);
 
     build_screensaver(screen);
+    build_codex_chat_overlay(screen);
 
     boot_ring_outer = lv_obj_create(screen);
     lv_obj_remove_style_all(boot_ring_outer);
@@ -1959,6 +2132,9 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         codex_continue_armed = false;
         codex_continue_in_flight = false;
         codex_result_visible = false;
+        if (codex_chat_overlay != NULL) {
+            lv_obj_add_flag(codex_chat_overlay, LV_OBJ_FLAG_HIDDEN);
+        }
     }
     if (codex_result_visible && lv_tick_elaps(codex_result_started_tick) >= CODEX_RESULT_HOLD_MS) {
         codex_result_visible = false;
@@ -2055,6 +2231,76 @@ void dashboard_ui_set_wifi_scan_callback(dashboard_wifi_scan_callback_t callback
 void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_t callback)
 {
     codex_continue_callback = callback;
+}
+
+void dashboard_ui_set_codex_chat_callback(dashboard_codex_chat_callback_t callback)
+{
+    codex_chat_callback = callback;
+}
+
+void dashboard_ui_set_codex_chat_detail(const dashboard_codex_chat_detail_t *detail)
+{
+    if (codex_chat_status == NULL) return;
+    lvgl_port_lock(0);
+    if (detail == NULL) {
+        show_codex_chat_status("Recent chat could not be loaded from the Mac.", COLOR_AMBER);
+        lvgl_port_unlock();
+        return;
+    }
+    if (detail->task_id[0] != 0
+        && strcmp(detail->task_id, codex_selected_task_id) != 0) {
+        lvgl_port_unlock();
+        return;
+    }
+    if (detail->title[0] != 0) {
+        lv_label_set_text(codex_chat_title, detail->title);
+    }
+    if (detail->state != DASHBOARD_CODEX_CHAT_READY) {
+        const char *fallback = detail->state == DASHBOARD_CODEX_CHAT_BUSY
+            ? "Codex is busy. Go back and try again shortly."
+            : (detail->state == DASHBOARD_CODEX_CHAT_UNAVAILABLE
+            ? "Recent chat is unavailable for this task."
+            : "Recent chat could not be loaded from the Mac.");
+        show_codex_chat_status(
+            detail->status_message[0] != 0 ? detail->status_message : fallback,
+            detail->state == DASHBOARD_CODEX_CHAT_BUSY ? COLOR_CYAN : COLOR_AMBER
+        );
+        lvgl_port_unlock();
+        return;
+    }
+    if (detail->message_count == 0) {
+        show_codex_chat_status(
+            detail->status_message[0] != 0
+                ? detail->status_message : "No recent user or Codex text messages were found.",
+            COLOR_FOG
+        );
+        lvgl_port_unlock();
+        return;
+    }
+
+    clear_codex_chat_rows();
+    lv_obj_add_flag(codex_chat_status, LV_OBJ_FLAG_HIDDEN);
+    for (int index = 0; index < detail->message_count
+         && index < DASHBOARD_CODEX_CHAT_MAX_MESSAGES; ++index) {
+        bool user = detail->messages[index].role == DASHBOARD_CODEX_CHAT_USER;
+        lv_label_set_text(codex_chat_roles[index], user ? "YOU" : "CODEX");
+        lv_obj_set_style_text_color(codex_chat_roles[index], user ? COLOR_CYAN : COLOR_SIGNAL, 0);
+        lv_label_set_text(codex_chat_texts[index], detail->messages[index].text);
+        lv_obj_set_style_bg_color(codex_chat_rows[index], user ? COLOR_STEEL : COLOR_SLATE, 0);
+        lv_obj_remove_flag(codex_chat_rows[index], LV_OBJ_FLAG_HIDDEN);
+    }
+    char hint[48];
+    snprintf(
+        hint,
+        sizeof(hint),
+        "SWIPE UP/DOWN / %u RECENT MESSAGE%s / READ ONLY",
+        (unsigned int)detail->message_count,
+        detail->message_count == 1 ? "" : "S"
+    );
+    lv_label_set_text(codex_chat_hint, hint);
+    lv_obj_update_layout(codex_chat_scroll);
+    lv_obj_scroll_to_view(codex_chat_rows[detail->message_count - 1], LV_ANIM_OFF);
+    lvgl_port_unlock();
 }
 
 void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t state)
