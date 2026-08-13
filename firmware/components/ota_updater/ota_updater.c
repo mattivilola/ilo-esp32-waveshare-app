@@ -30,6 +30,7 @@
 #define PAYLOAD_MAX_BYTES 8192
 #define SIGNATURE_BYTES 384
 #define DOWNLOAD_BUFFER_BYTES 4096
+#define UPDATER_TASK_STACK_BYTES 16384
 #define BOARD_TARGET "waveshare-esp32-s3-touch-lcd-5b-28151"
 #define ENVELOPE_SCHEMA "ilo-board-firmware-manifest-envelope-v1"
 #define PAYLOAD_SCHEMA "ilo-board-firmware-manifest-v1"
@@ -66,6 +67,10 @@ static EventGroupHandle_t commands;
 static verified_manifest_t cached_manifest;
 static bool cached_manifest_valid;
 static EventGroupHandle_t network_events;
+static StaticTask_t updater_task_storage;
+static StackType_t updater_task_stack[UPDATER_TASK_STACK_BYTES / sizeof(StackType_t)];
+static TaskHandle_t updater_task_handle;
+static bool updater_ready;
 #define NETWORK_READY BIT0
 #endif
 
@@ -428,8 +433,28 @@ static bool fetch_manifest(verified_manifest_t *manifest)
     esp_err_t status = client != NULL ? esp_http_client_perform(client) : ESP_ERR_NO_MEM;
     int http_status = client != NULL ? esp_http_client_get_status_code(client) : 0;
     if (client != NULL) esp_http_client_cleanup(client);
-    bool valid = status == ESP_OK && http_status == 200 && !response.overflow
-        && parse_verified_manifest(response.bytes, response.length, manifest);
+    bool transport_valid = status == ESP_OK && http_status == 200 && !response.overflow;
+    bool valid = transport_valid && parse_verified_manifest(response.bytes, response.length, manifest);
+    if (!transport_valid) {
+        ESP_LOGW(
+            TAG,
+            "Manifest request failed: transport=%s HTTP=%d bytes=%u overflow=%s",
+            esp_err_to_name(status),
+            http_status,
+            (unsigned)response.length,
+            response.overflow ? "yes" : "no"
+        );
+    } else if (!valid) {
+        ESP_LOGW(TAG, "Manifest response was not accepted (%u bytes)", (unsigned)response.length);
+    } else {
+        ESP_LOGI(
+            TAG,
+            "Verified signed manifest for %s (sequence %lu); task stack reserve %u bytes",
+            manifest->version,
+            (unsigned long)manifest->sequence,
+            (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t))
+        );
+    }
     free(response.bytes);
     return valid;
 }
@@ -514,6 +539,8 @@ static void updater_task(void *argument)
         if (esp_ota_get_state_partition(running, &confirmed_state) != ESP_OK
             || confirmed_state != ESP_OTA_IMG_VALID) {
             publish_status(OTA_UPDATER_FAILED, NULL, 0, "Current firmware is not confirmed");
+            updater_ready = false;
+            updater_task_handle = NULL;
             vTaskDelete(NULL);
             return;
         }
@@ -529,9 +556,22 @@ static void updater_task(void *argument)
             commands, COMMAND_CHECK | COMMAND_INSTALL, pdTRUE, pdFALSE, portMAX_DELAY
         );
         if ((bits & COMMAND_CHECK) != 0) {
+            ESP_LOGI(TAG, "Checking signed firmware manifest");
             publish_status(OTA_UPDATER_CHECKING, NULL, 0, "Checking signed release manifest");
             verified_manifest_t manifest = { 0 };
-            if (!wait_for_network(15000) || !wait_for_trusted_clock(30000) || !fetch_manifest(&manifest)) {
+            if (!wait_for_network(15000)) {
+                ESP_LOGW(TAG, "Update check stopped because Wi-Fi is unavailable");
+                cached_manifest_valid = false;
+                publish_status(OTA_UPDATER_FAILED, NULL, 0, "Wi-Fi unavailable for update check");
+                continue;
+            }
+            if (!wait_for_trusted_clock(30000)) {
+                ESP_LOGW(TAG, "Update check stopped because the clock is not synchronized");
+                cached_manifest_valid = false;
+                publish_status(OTA_UPDATER_FAILED, NULL, 0, "Clock unavailable for secure update check");
+                continue;
+            }
+            if (!fetch_manifest(&manifest)) {
                 cached_manifest_valid = false;
                 publish_status(OTA_UPDATER_FAILED, NULL, 0, "Update manifest was not verified");
                 continue;
@@ -544,6 +584,7 @@ static void updater_task(void *argument)
             }
             cached_manifest = manifest;
             cached_manifest_valid = true;
+            ESP_LOGI(TAG, "Signed firmware %s is available", manifest.version);
             publish_status(OTA_UPDATER_AVAILABLE, manifest.version, 0, "Signed update available");
         }
         if ((bits & COMMAND_INSTALL) != 0) {
@@ -572,22 +613,56 @@ bool ota_updater_start(ota_updater_status_callback_t callback)
     publish_status(OTA_UPDATER_DISABLED, NULL, 0, "Signed OTA is not enabled in this build");
     return false;
 #else
-    if (commands != NULL) return true;
+    if (updater_ready && updater_task_handle != NULL) return true;
+    bool wifi_handler_registered = false;
+    bool ip_handler_registered = false;
     commands = xEventGroupCreate();
     network_events = xEventGroupCreate();
-    if (commands == NULL || network_events == NULL
-        || esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, network_event, NULL) != ESP_OK
-        || esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, network_event, NULL) != ESP_OK
-        || xTaskCreate(updater_task, "ota_updater", 10240, NULL, 4, NULL) != pdPASS) {
+    if (commands != NULL) {
+        wifi_handler_registered = esp_event_handler_register(
+            WIFI_EVENT, ESP_EVENT_ANY_ID, network_event, NULL
+        ) == ESP_OK;
+    }
+    if (wifi_handler_registered) {
+        ip_handler_registered = esp_event_handler_register(
+            IP_EVENT, IP_EVENT_STA_GOT_IP, network_event, NULL
+        ) == ESP_OK;
+    }
+    if (commands != NULL && network_events != NULL && wifi_handler_registered && ip_handler_registered) {
+        updater_task_handle = xTaskCreateStatic(
+            updater_task,
+            "ota_updater",
+            sizeof(updater_task_stack) / sizeof(updater_task_stack[0]),
+            NULL,
+            4,
+            updater_task_stack,
+            &updater_task_storage
+        );
+    }
+    if (updater_task_handle == NULL) {
+        if (ip_handler_registered) {
+            (void)esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, network_event);
+        }
+        if (wifi_handler_registered) {
+            (void)esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, network_event);
+        }
+        if (network_events != NULL) vEventGroupDelete(network_events);
+        if (commands != NULL) vEventGroupDelete(commands);
+        network_events = NULL;
+        commands = NULL;
+        updater_ready = false;
+        ESP_LOGE(TAG, "Updater worker could not start");
         publish_status(OTA_UPDATER_FAILED, NULL, 0, "Updater task could not start");
         return false;
     }
+    updater_ready = true;
     esp_netif_t *station = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_ip_info_t address = { 0 };
     if (station != NULL && esp_netif_get_ip_info(station, &address) == ESP_OK && address.ip.addr != 0) {
         xEventGroupSetBits(network_events, NETWORK_READY);
     }
     publish_status(OTA_UPDATER_IDLE, NULL, 0, "Waiting for network");
+    ESP_LOGI(TAG, "Updater worker ready with %u-byte static stack", (unsigned)sizeof(updater_task_stack));
     return true;
 #endif
 }
@@ -595,11 +670,15 @@ bool ota_updater_start(ota_updater_status_callback_t callback)
 bool ota_updater_request_check(void)
 {
 #if CONFIG_ILO_OTA_DELIVERY
-    if (commands == NULL) return false;
+    if (!updater_ready || updater_task_handle == NULL || commands == NULL) {
+        ESP_LOGW(TAG, "Update check rejected because the updater worker is unavailable");
+        return false;
+    }
     ota_updater_status_t status = ota_updater_status();
     if (status.state == OTA_UPDATER_DOWNLOADING || status.state == OTA_UPDATER_VERIFYING
         || status.state == OTA_UPDATER_REBOOTING) return false;
     xEventGroupSetBits(commands, COMMAND_CHECK);
+    ESP_LOGI(TAG, "Firmware update check queued");
     return true;
 #else
     return false;
@@ -609,7 +688,7 @@ bool ota_updater_request_check(void)
 bool ota_updater_request_install(void)
 {
 #if CONFIG_ILO_OTA_DELIVERY
-    if (commands == NULL || !cached_manifest_valid) return false;
+    if (!updater_ready || updater_task_handle == NULL || commands == NULL || !cached_manifest_valid) return false;
     ota_updater_status_t status = ota_updater_status();
     if (status.state != OTA_UPDATER_AVAILABLE) return false;
     xEventGroupSetBits(commands, COMMAND_INSTALL);
