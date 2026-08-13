@@ -85,12 +85,12 @@ Reboot, pairing reset, erase, and update installation require a separate confirm
 
 ## Screensaver and power
 
-The first implementation is “Pulse”: a slow-moving ILO roundel and one small connection indicator on an otherwise black screen. Touch wakes immediately. When waking from backlight-off sleep, the firmware consumes the entire first touch until release so it cannot accidentally activate a control underneath.
+The screensaver is “Pulse”: the clock/roundel cluster occupies the left two-thirds and snaps among five bounded positions every 20 seconds. The right third is a medium slate-gray Codex Pet panel where Lando breathes, blinks, and occasionally waves using native-size RGB565 frame swaps. The panel color keeps his mostly black fur distinct and is generated from one configurable color value. Touch wakes immediately. When waking from backlight-off sleep, the firmware consumes the entire first touch until release so it cannot accidentally activate a control underneath.
 
 This IPS LCD is not primarily at risk of OLED burn-in. A moving screensaver is therefore an ambient experience. The exact 5B routes `DISP` through a CH422G expander output and does not expose PWM brightness control, so the honest power policy is:
 
 1. backlight on during interaction;
-2. moving Pulse screen after the configured idle timeout;
+2. bounded Pulse/Lando screen after the configured idle timeout;
 3. backlight fully off after the display-off timeout;
 4. consume the first touch, restore the backlight, and return to the previous page.
 
@@ -113,7 +113,7 @@ The dashboard should aggregate only the top one or two of these. Dedicated pages
 
 The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages; `./tools/board ui-screenshot --screen codex --chat` renders the focused chat-reader fixture; `swift run --package-path mac-service ilo-board-preview focus-screenshot` renders the Focus Cockpit.
 
-The first LVGL port now mirrors the adaptive four/five-page structure with `lv_tileview`, dynamically sized bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, optional verified cached X News, sample Weather, persistent NVS-backed Settings, summary privacy, a moving Pulse screensaver, and binary backlight sleep. X News accepts vertical momentum scrolling for up to five stories and chains horizontal gestures back to the page tileview; a hint appears only when more than three stories are available. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side validation. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
+The first LVGL port now mirrors the adaptive four/five-page structure with `lv_tileview`, dynamically sized bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, optional verified cached X News, sample Weather, persistent NVS-backed Settings, summary privacy, a bounded Pulse/Lando screensaver, and binary backlight sleep. Lando uses ten precomposited RGB565 frames (six idle and four waving), never a scaled or alpha-blended atlas; his animation pauses whenever the saver is hidden or the backlight is off. X News accepts vertical momentum scrolling for up to five stories and chains horizontal gestures back to the page tileview; a hint appears only when more than three stories are available. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side validation. It has passed firmware compilation only. Physical review must precede any claim that the prototype and LVGL output match.
 
 ## macOS menu-bar companion
 

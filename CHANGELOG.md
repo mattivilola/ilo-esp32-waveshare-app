@@ -9,6 +9,7 @@ Notable ILO Board macOS companion changes are documented here.
 - Add battery-backed RTC clock fallback
 - Add resilient authenticated USB fallback
 - Add RTC-backed Focus Cockpit with pause, extension, task attachment, and Mac completion notifications
+- Add the animated Lando Codex Pet to the right third of the Pulse screensaver
 
 ### Changed
 - Make Wi-Fi scanning deterministic

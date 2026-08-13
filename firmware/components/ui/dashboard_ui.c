@@ -15,6 +15,7 @@
 #include "board_waveshare_5.h"
 #include "device_settings.h"
 #include "focus_session.h"
+#include "lando_screensaver.h"
 
 #define COLOR_CARBON  lv_color_hex(0x0A0F14)
 #define COLOR_SLATE   lv_color_hex(0x131B22)
@@ -40,6 +41,7 @@
 #define FOCUS_ACTION_HOLD_MS 900U
 #define MINIMUM_TRUSTED_EPOCH 1704067200LL
 #define MINUTE_MS 60000U
+#define SCREENSAVER_POSITION_INTERVAL_SECONDS 20U
 
 static lv_obj_t *connection_label;
 static lv_obj_t *dashboard_status_title;
@@ -187,6 +189,7 @@ static bool display_asleep;
 static bool consuming_wake_touch;
 static bool boot_animation_active;
 static uint32_t screensaver_tick;
+static uint8_t screensaver_position_index;
 static int32_t clock_utc_offset_seconds;
 static char clock_timezone_abbreviation[8] = "UTC";
 static weather_model_t latest_weather_model;
@@ -1638,6 +1641,7 @@ static void sleep_now_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_RELEASED) return;
     lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+    lando_screensaver_set_active(false);
     if (board_waveshare_5_set_backlight(false) == ESP_OK) {
         display_asleep = true;
     }
@@ -2011,9 +2015,41 @@ static void screensaver_tapped(lv_event_t *event)
     if (lv_event_get_code(event) == LV_EVENT_PRESSED) {
         board_waveshare_5_set_backlight(true);
         display_asleep = false;
+        lando_screensaver_set_active(false);
         lv_display_trigger_activity(ui_display);
         lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
     }
+}
+
+static void reset_screensaver_position(void)
+{
+    screensaver_tick = 0;
+    screensaver_position_index = 0;
+    if (screensaver_content != NULL) {
+        lv_obj_set_pos(screensaver_content, 132, 214);
+    }
+}
+
+static void advance_screensaver_position(void)
+{
+    static const lv_point_t positions[] = {
+        { 132, 214 },
+        { 56, 72 },
+        { 232, 72 },
+        { 56, 356 },
+        { 232, 356 },
+    };
+    ++screensaver_tick;
+    if (screensaver_tick % SCREENSAVER_POSITION_INTERVAL_SECONDS != 0) {
+        return;
+    }
+    screensaver_position_index = (screensaver_position_index + 1)
+        % (sizeof(positions) / sizeof(positions[0]));
+    lv_obj_set_pos(
+        screensaver_content,
+        positions[screensaver_position_index].x,
+        positions[screensaver_position_index].y
+    );
 }
 
 static void screensaver_timer(lv_timer_t *timer)
@@ -2022,6 +2058,7 @@ static void screensaver_timer(lv_timer_t *timer)
     refresh_clock_labels();
     focus_timer_tick();
     if (focus_overlay != NULL && !lv_obj_has_flag(focus_overlay, LV_OBJ_FLAG_HIDDEN)) {
+        lando_screensaver_set_active(false);
         return;
     }
     uint32_t inactive = lv_display_get_inactive_time(ui_display);
@@ -2030,19 +2067,24 @@ static void screensaver_timer(lv_timer_t *timer)
 
     if (!display_asleep && off_timeout > 0 && inactive >= off_timeout) {
         lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+        lando_screensaver_set_active(false);
         if (board_waveshare_5_set_backlight(false) == ESP_OK) {
             display_asleep = true;
         }
         return;
     }
     if (display_asleep) {
+        lando_screensaver_set_active(false);
         return;
     }
     if (saver_timeout > 0 && inactive >= saver_timeout) {
         lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+        lando_screensaver_set_active(true);
+        advance_screensaver_position();
     } else {
+        lando_screensaver_set_active(false);
         lv_obj_add_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
-        screensaver_tick = 0;
+        reset_screensaver_position();
     }
 }
 
@@ -2177,7 +2219,7 @@ static void build_screensaver(lv_obj_t *screen)
     lv_obj_set_style_border_width(screensaver_content, 0, 0);
     lv_obj_set_size(screensaver_content, 420, 172);
     lv_obj_clear_flag(screensaver_content, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_center(screensaver_content);
+    lv_obj_set_pos(screensaver_content, 132, 214);
 
     // Keep the saver cheap to redraw: moving an ARGB image across the RGB565
     // framebuffer can hold the software renderer long enough to starve IDLE1
@@ -2198,6 +2240,7 @@ static void build_screensaver(lv_obj_t *screen)
     lv_obj_set_size(screensaver_status_dot, 10, 10);
     lv_obj_align(screensaver_status_dot, LV_ALIGN_LEFT_MID, 92, 48);
 
+    lando_screensaver_create(screensaver);
     lv_timer_create(screensaver_timer, 1000, NULL);
     refresh_clock_labels();
 }

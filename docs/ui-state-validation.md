@@ -29,7 +29,7 @@ The fixture model is intentionally disconnected from the live transport. It cann
 | Privacy | Dashboard | Summaries are hidden while coarse state remains useful. |
 | Sleep | Dashboard | The deterministic output is completely black; only hardware can prove the backlight is electrically off. |
 | Reconnect | Dashboard | Wi-Fi, authenticated Mac session, and cached board data are distinguished. |
-| Screensaver | Dashboard | Clock, date, timezone, and wake guidance remain readable in the moving Pulse treatment. |
+| Screensaver | Dashboard | Clock/date/wake guidance remain readable in the left two-thirds; Lando and his status remain distinct against the slate-gray right third. |
 | Approval request | Codex | Exact consequence and expiry are visible; hold and confirmation are separate; the fixture explicitly sends nothing. |
 
 <p align="center">
@@ -37,7 +37,7 @@ The fixture model is intentionally disconnected from the live transport. It cann
   <img src="images/ui-states/loading.png" alt="Codex loading validation fixture" width="49%">
 </p>
 <p align="center">
-  <img src="images/ui-states/screensaver.png" alt="Clock and date Pulse screensaver validation fixture" width="49%">
+  <img src="images/ui-states/screensaver.png" alt="Pulse screensaver with clock and animated Codex Pet Lando" width="49%">
   <img src="images/ui-states/approval-request.png" alt="Two-step approval safety validation fixture" width="49%">
 </p>
 <p align="center">

@@ -31,12 +31,19 @@ class LandoScreensaverAssetTests(unittest.TestCase):
         expected_size = frame_count * ASSET.CELL_WIDTH * ASSET.CELL_HEIGHT * 2
         binary = ROOT / "firmware" / "components" / "ui" / "assets" / "lando_screensaver.rgb565"
         header = ROOT / "firmware" / "components" / "ui" / "assets" / "lando_screensaver_asset.h"
+        preview = ROOT / "mac-service" / "Sources" / "BoardUIPrototype" / "Resources" / "lando_idle.png"
         self.assertTrue(binary.is_file())
         self.assertEqual(binary.stat().st_size, expected_size)
+        self.assertEqual(
+            binary.read_bytes()[:2],
+            ASSET.composite_rgb565((0, 0, 0, 0), ASSET.parse_hex_color(ASSET.DEFAULT_BACKGROUND)),
+        )
         self.assertIn(
             f"#define LANDO_SCREENSAVER_ASSET_BYTES {expected_size}",
             header.read_text(),
         )
+        self.assertTrue(preview.is_file())
+        self.assertEqual(preview.read_bytes()[16:24], struct.pack(">II", ASSET.CELL_WIDTH, ASSET.CELL_HEIGHT))
 
 
 if __name__ == "__main__":

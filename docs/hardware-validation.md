@@ -76,7 +76,7 @@ Use [the deterministic state gallery](ui-state-validation.md) as a semantic refe
 
 | ID | Procedure | Pass condition | Evidence | Result |
 | --- | --- | --- | --- | --- |
-| HW-301 | Set Pulse screensaver to 2 minutes and leave the board untouched. | Static saver appears at approximately 2 minutes; time/status continue updating and serial remains free of watchdog, panic, or reboot output for at least 5 minutes. | Timed video + serial log | NOT RUN |
+| HW-301 | Set Pulse screensaver to 2 minutes and leave the board untouched. | Saver appears at approximately 2 minutes; the left clock cluster visits all five bounded positions, Lando breathes/blinks and waves on the slate right panel without visible black-fur loss, and serial remains free of watchdog, panic, or reboot output for at least 5 minutes. | Timed video + serial log | NOT RUN |
 | HW-302 | Touch once while only the screensaver is active. | Normal UI returns and the touch does not activate the control underneath it. | Video | NOT RUN |
 | HW-303 | Set display off to 5 minutes and leave the board untouched. | CH422G `DISP` makes the physical backlight fully dark at approximately 5 minutes; this is not merely a black framebuffer. | Dark-room video + current observation if available | NOT RUN |
 | HW-304 | Touch once while the backlight is off. | Backlight returns; the wake touch is consumed and no hidden control changes. | Video showing unchanged setting/page | NOT RUN |

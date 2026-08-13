@@ -18,7 +18,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "BoardProtocol"),
-        .target(name: "BoardUIPrototype"),
+        .target(name: "BoardUIPrototype", resources: [.process("Resources")]),
         .target(
             name: "ILOBoardMenuSupport",
             linkerSettings: [.linkedFramework("ServiceManagement")]

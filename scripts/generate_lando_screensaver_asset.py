@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SOURCE = Path.home() / ".codex" / "pets" / "lando" / "spritesheet.webp"
 DEFAULT_OUTPUT_BIN = ROOT / "firmware" / "components" / "ui" / "assets" / "lando_screensaver.rgb565"
 DEFAULT_OUTPUT_HEADER = ROOT / "firmware" / "components" / "ui" / "assets" / "lando_screensaver_asset.h"
+DEFAULT_OUTPUT_PREVIEW = ROOT / "mac-service" / "Sources" / "BoardUIPrototype" / "Resources" / "lando_idle.png"
 
 ATLAS_WIDTH = 1536
 ATLAS_HEIGHT = 2288
@@ -64,6 +65,27 @@ def identify_dimensions(source: Path) -> tuple[int, int]:
 def decode_rgba(source: Path, output: Path) -> None:
     subprocess.run(
         ["magick", str(source), "-depth", "8", f"RGBA:{output}"],
+        check=True,
+    )
+
+
+def render_preview(source: Path, output: Path, background_hex: str) -> None:
+    subprocess.run(
+        [
+            "magick",
+            str(source),
+            "-crop",
+            f"{CELL_WIDTH}x{CELL_HEIGHT}+0+0",
+            "+repage",
+            "-background",
+            f"#{background_hex}",
+            "-alpha",
+            "background",
+            "-strip",
+            "-define",
+            "png:exclude-chunks=date,time",
+            str(output),
+        ],
         check=True,
     )
 
@@ -117,7 +139,14 @@ def write_if_changed(path: Path, payload: bytes) -> None:
     temporary.replace(path)
 
 
-def generate(source: Path, output_bin: Path, output_header: Path, background_hex: str, check: bool) -> None:
+def generate(
+    source: Path,
+    output_bin: Path,
+    output_header: Path,
+    output_preview: Path,
+    background_hex: str,
+    check: bool,
+) -> None:
     if shutil.which("magick") is None:
         raise SystemExit("ImageMagick 'magick' is required")
     if not source.is_file():
@@ -133,8 +162,11 @@ def generate(source: Path, output_bin: Path, output_header: Path, background_hex
     source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
     with tempfile.TemporaryDirectory(prefix="lando-screensaver-") as temporary_dir:
         rgba_path = Path(temporary_dir) / "atlas.rgba"
+        preview_path = Path(temporary_dir) / "lando_idle.png"
         decode_rgba(source, rgba_path)
+        render_preview(source, preview_path, normalized_background)
         raw_rgba = rgba_path.read_bytes()
+        preview = preview_path.read_bytes()
     expected_rgba_bytes = ATLAS_WIDTH * ATLAS_HEIGHT * 4
     if len(raw_rgba) != expected_rgba_bytes:
         raise SystemExit(f"Decoded atlas has {len(raw_rgba)} bytes; expected {expected_rgba_bytes}")
@@ -147,6 +179,8 @@ def generate(source: Path, output_bin: Path, output_header: Path, background_hex
             mismatches.append(str(output_bin))
         if not output_header.is_file() or output_header.read_bytes() != header:
             mismatches.append(str(output_header))
+        if not output_preview.is_file() or output_preview.read_bytes() != preview:
+            mismatches.append(str(output_preview))
         if mismatches:
             raise SystemExit("Lando firmware assets are stale: " + ", ".join(mismatches))
         print(f"Lando firmware asset verified: {len(binary)} bytes, background #{normalized_background}")
@@ -154,6 +188,7 @@ def generate(source: Path, output_bin: Path, output_header: Path, background_hex
 
     write_if_changed(output_bin, binary)
     write_if_changed(output_header, header)
+    write_if_changed(output_preview, preview)
     print(f"Generated {len(binary)} bytes from {source}")
     print(f"Panel background: #{normalized_background}")
 
@@ -163,6 +198,7 @@ def main() -> None:
     parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
     parser.add_argument("--output-bin", type=Path, default=DEFAULT_OUTPUT_BIN)
     parser.add_argument("--output-header", type=Path, default=DEFAULT_OUTPUT_HEADER)
+    parser.add_argument("--output-preview", type=Path, default=DEFAULT_OUTPUT_PREVIEW)
     parser.add_argument("--background", default=DEFAULT_BACKGROUND)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
@@ -171,6 +207,7 @@ def main() -> None:
             args.source.expanduser().resolve(),
             args.output_bin.expanduser().resolve(),
             args.output_header.expanduser().resolve(),
+            args.output_preview.expanduser().resolve(),
             args.background,
             args.check,
         )

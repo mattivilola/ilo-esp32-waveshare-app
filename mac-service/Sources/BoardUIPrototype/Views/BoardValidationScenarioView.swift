@@ -315,40 +315,83 @@ struct BoardSleepValidationView: View {
 
 struct BoardScreensaverValidationView: View {
     var body: some View {
-        ZStack {
-            BoardPalette.carbon
-            HStack(spacing: 20) {
-                Image(nsImage: BrandAsset.image())
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 64, height: 64)
-                    .clipShape(Circle())
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("ILO / PULSE")
-                        .font(.board(18, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundStyle(BoardPalette.signal)
-                    Text("09:41")
-                        .font(.system(size: 56, weight: .bold, design: .rounded))
-                        .foregroundStyle(BoardPalette.mist)
-                    Text("SUN 10 AUG · EEST")
-                        .font(.board(14, weight: .semibold))
-                        .tracking(0.8)
-                        .foregroundStyle(BoardPalette.fog)
-                    HStack(spacing: 9) {
-                        Circle()
-                            .fill(BoardPalette.signal)
-                            .frame(width: 8, height: 8)
-                        Text("Touch to wake")
-                            .font(.board(13))
+        HStack(spacing: 0) {
+            ZStack {
+                BoardPalette.carbon
+                HStack(spacing: 20) {
+                    Image(nsImage: BrandAsset.image())
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 64, height: 64)
+                        .clipShape(Circle())
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("ILO / PULSE")
+                            .font(.board(18, weight: .bold))
+                            .tracking(1.2)
+                            .foregroundStyle(BoardPalette.signal)
+                        Text("09:41")
+                            .font(.system(size: 56, weight: .bold, design: .rounded))
+                            .foregroundStyle(BoardPalette.mist)
+                        Text("SUN 10 AUG · EEST")
+                            .font(.board(14, weight: .semibold))
+                            .tracking(0.8)
                             .foregroundStyle(BoardPalette.fog)
+                        HStack(spacing: 9) {
+                            Circle()
+                                .fill(BoardPalette.signal)
+                                .frame(width: 8, height: 8)
+                            Text("Touch to wake")
+                                .font(.board(13))
+                                .foregroundStyle(BoardPalette.fog)
+                        }
+                        .padding(.top, 5)
                     }
-                    .padding(.top, 5)
                 }
+                .position(x: 342, y: 300)
             }
-            .offset(x: 126, y: -82)
+            .frame(width: 684, height: 600)
+
+            ZStack(alignment: .topLeading) {
+                Color(red: 58 / 255, green: 69 / 255, blue: 76 / 255)
+                Rectangle()
+                    .fill(Color(red: 92 / 255, green: 104 / 255, blue: 112 / 255))
+                    .frame(width: 2, height: 600)
+                Text("CODEX PET")
+                    .font(.board(14, weight: .bold))
+                    .tracking(1.0)
+                    .foregroundStyle(BoardPalette.signal)
+                    .offset(x: 34, y: 42)
+                Text("LANDO")
+                    .font(.board(28, weight: .bold))
+                    .foregroundStyle(BoardPalette.mist)
+                    .offset(x: 34, y: 68)
+                Text("BORDER COLLIE / AWAKE")
+                    .font(.board(14, weight: .semibold))
+                    .foregroundStyle(Color(red: 184 / 255, green: 195 / 255, blue: 202 / 255))
+                    .offset(x: 34, y: 111)
+                Image(nsImage: LandoAsset.image())
+                    .resizable()
+                    .interpolation(.none)
+                    .frame(width: 192, height: 208)
+                    .offset(x: 74, y: 174)
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(BoardPalette.signal)
+                        .frame(width: 10, height: 10)
+                    Text("KEEPING WATCH")
+                        .font(.board(14, weight: .semibold))
+                        .foregroundStyle(BoardPalette.mist)
+                }
+                .offset(x: 78, y: 428)
+                Text("A quiet companion for deep work.")
+                    .font(.board(14))
+                    .foregroundStyle(Color(red: 184 / 255, green: 195 / 255, blue: 202 / 255))
+                    .frame(width: 272)
+                    .offset(x: 34, y: 482)
+            }
+            .frame(width: 340, height: 600)
         }
         .frame(width: 1024, height: 600)
-        .accessibilityLabel("Pulse screensaver fixture showing clock, date, and timezone")
+        .accessibilityLabel("Pulse screensaver fixture showing clock, date, timezone, and animated Codex Pet Lando")
     }
 }
