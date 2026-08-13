@@ -6,6 +6,7 @@
 
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
+#include "esp_heap_caps.h"
 #include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -206,8 +207,11 @@ static bool make_aad(char direction, uint64_t sequence, char *aad, size_t capaci
 esp_err_t usb_secure_channel_initialize(void)
 {
     usb_serial_jtag_driver_config_t config = {
-        .tx_buffer_size = 16384,
-        .rx_buffer_size = 4096,
+        // One encrypted screen-capture chunk is about 5.3 KB on the wire. An
+        // 8 KB TX ring preserves atomic protocol lines while leaving enough
+        // scarce internal RAM for a simultaneous Wi-Fi TLS session.
+        .tx_buffer_size = 8192,
+        .rx_buffer_size = 1024,
     };
     esp_err_t status = usb_serial_jtag_driver_install(&config);
     if (status != ESP_OK && status != ESP_ERR_INVALID_STATE) return status;
@@ -225,7 +229,10 @@ bool usb_secure_channel_accept(
 {
     if (channel == NULL || board_id == NULL || secret == NULL) return false;
     memset(channel, 0, sizeof(*channel));
-    channel->line = malloc(USB_LINE_MAX + 1);
+    channel->line = heap_caps_malloc(
+        USB_LINE_MAX + 1,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+    );
     if (channel->line == NULL) return false;
 
     uint8_t client_nonce[USB_NONCE_SIZE];

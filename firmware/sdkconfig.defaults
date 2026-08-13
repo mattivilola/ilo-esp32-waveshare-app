@@ -25,6 +25,13 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 
 # TLS-PSK is the only wireless application transport in protocol v1
 CONFIG_ESP_TLS_PSK_VERIFICATION=y
+# Protocol frames are length-prefixed and streamed across TLS records. Keep
+# record buffers bounded so the display, Wi-Fi, TLS, and USB fallback can all
+# coexist in internal RAM on the ESP32-S3.
+CONFIG_MBEDTLS_ASYMMETRIC_CONTENT_LEN=y
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=8192
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
 
 # Authenticated USB fallback uses HKDF-SHA256 and ChaCha20-Poly1305.
 CONFIG_MBEDTLS_CHACHA20_C=y

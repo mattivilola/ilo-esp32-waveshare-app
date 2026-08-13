@@ -18,6 +18,7 @@ protocol BoardConnectionChannel: AnyObject, Sendable {
 }
 
 final class NetworkBoardConnectionChannel: BoardConnectionChannel, @unchecked Sendable {
+    private static let maximumTLSWriteBytes = 8_000
     private let connection: NWConnection
     private var eventHandler: (@Sendable (BoardConnectionChannelEvent) -> Void)?
 
@@ -48,9 +49,23 @@ final class NetworkBoardConnectionChannel: BoardConnectionChannel, @unchecked Se
     }
 
     func send(_ data: Data) {
-        connection.send(content: data, completion: .contentProcessed { [weak self] error in
-            if error != nil { self?.connection.cancel() }
-        })
+        send(data, offset: 0)
+    }
+
+    private func send(_ data: Data, offset: Int) {
+        guard offset < data.count else { return }
+        let end = min(data.count, offset + Self.maximumTLSWriteBytes)
+        connection.send(
+            content: data.subdata(in: offset..<end),
+            completion: .contentProcessed { [weak self] error in
+                guard let self else { return }
+                if error != nil {
+                    self.connection.cancel()
+                } else {
+                    self.send(data, offset: end)
+                }
+            }
+        )
     }
 
     func cancel() {
