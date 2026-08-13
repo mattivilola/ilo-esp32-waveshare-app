@@ -9,7 +9,7 @@ SOURCE = (ROOT / "firmware" / "components" / "ota_updater" / "ota_updater.c").re
 
 class OTAUpdaterSourceTests(unittest.TestCase):
     def test_worker_uses_a_static_stack_and_explicit_ready_state(self):
-        self.assertIn("#define UPDATER_TASK_STACK_BYTES 8192", SOURCE)
+        self.assertIn("#define UPDATER_TASK_STACK_BYTES 6144", SOURCE)
         self.assertIn("static StackType_t updater_task_stack", SOURCE)
         self.assertIn("xTaskCreateStatic(", SOURCE)
         self.assertNotRegex(SOURCE, re.compile(r"xTaskCreate\(updater_task"))
@@ -29,6 +29,11 @@ class OTAUpdaterSourceTests(unittest.TestCase):
         self.assertIn("Clock unavailable for secure update check", SOURCE)
         self.assertIn("Update manifest was not verified", SOURCE)
         self.assertIn("Verified signed manifest for %s", SOURCE)
+
+    def test_boot_does_not_race_other_tls_clients_with_an_automatic_check(self):
+        startup = SOURCE[SOURCE.index("static void updater_task"):SOURCE.index("bool ota_updater_start")]
+        first_wait = startup.index("for (;;)")
+        self.assertNotIn("xEventGroupSetBits(commands, COMMAND_CHECK)", startup[:first_wait])
 
 
 if __name__ == "__main__":
