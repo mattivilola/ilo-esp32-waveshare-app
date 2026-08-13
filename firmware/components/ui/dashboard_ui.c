@@ -40,6 +40,7 @@
 #define CODEX_CONTINUE_HOLD_MS 900U
 #define CODEX_RESULT_HOLD_MS 8000U
 #define FOCUS_ACTION_HOLD_MS 900U
+#define SCREENSAVER_ACTION_HOLD_MS 900U
 #define MINIMUM_TRUSTED_EPOCH 1704067200LL
 #define MINUTE_MS 60000U
 #define SCREENSAVER_POSITION_INTERVAL_SECONDS 20U
@@ -154,6 +155,9 @@ static bool focus_hold_consumed;
 static bool focus_end_hold_consumed;
 static bool focus_completion_queued;
 static bool focus_completion_dismissed;
+static uint32_t screensaver_hold_started_tick;
+static bool screensaver_hold_consumed;
+static bool screensaver_forced_visible;
 static lv_obj_t *settings_x_news_value;
 static lv_obj_t *settings_connection_values;
 static lv_obj_t *settings_versions_value;
@@ -216,6 +220,7 @@ static void build_codex_chat_overlay(lv_obj_t *screen);
 static void build_focus_overlay(lv_obj_t *screen);
 static void refresh_focus_overlay(void);
 static bool start_focus_session(const char *title);
+static void show_screensaver_now(void);
 static double display_temperature(float celsius);
 static const char *temperature_unit(void);
 
@@ -1324,6 +1329,7 @@ static void refresh_settings_labels(void)
     char value[20];
     if (settings_screensaver_value != NULL) {
         format_minutes(value, sizeof(value), current_settings.screensaver_minutes);
+        strlcat(value, " / HOLD", sizeof(value));
         lv_label_set_text(settings_screensaver_value, value);
     }
     if (settings_display_off_value != NULL) {
@@ -1699,7 +1705,23 @@ static void focus_timer_tick(void)
 
 static void screensaver_setting_tapped(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        screensaver_hold_started_tick = lv_tick_get();
+        screensaver_hold_consumed = false;
+        return;
+    }
+    if (code == LV_EVENT_PRESSING && !screensaver_hold_consumed
+        && lv_tick_elaps(screensaver_hold_started_tick) >= SCREENSAVER_ACTION_HOLD_MS) {
+        screensaver_hold_consumed = true;
+        show_screensaver_now();
+        return;
+    }
+    if (code != LV_EVENT_CLICKED) return;
+    if (screensaver_hold_consumed) {
+        screensaver_hold_consumed = false;
+        return;
+    }
     current_settings.screensaver_minutes = device_settings_next_screensaver(current_settings.screensaver_minutes);
     device_settings_save(&current_settings);
     refresh_settings_labels();
@@ -1775,6 +1797,7 @@ static void focus_setting_tapped(lv_event_t *event)
 static void sleep_now_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_RELEASED) return;
+    screensaver_forced_visible = false;
     lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
     lando_screensaver_set_active(false);
     if (board_waveshare_5_set_backlight(false) == ESP_OK) {
@@ -2148,6 +2171,7 @@ static void nav_tapped(lv_event_t *event)
 static void screensaver_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) == LV_EVENT_PRESSED) {
+        screensaver_forced_visible = false;
         board_waveshare_5_set_backlight(true);
         display_asleep = false;
         lando_screensaver_set_active(false);
@@ -2163,6 +2187,17 @@ static void reset_screensaver_position(void)
     if (screensaver_content != NULL) {
         lv_obj_set_pos(screensaver_content, 132, 214);
     }
+}
+
+static void show_screensaver_now(void)
+{
+    screensaver_forced_visible = true;
+    reset_screensaver_position();
+    refresh_clock_labels();
+    lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(screensaver);
+    lando_screensaver_set_active(true);
+    lv_display_trigger_activity(ui_display);
 }
 
 static void advance_screensaver_position(void)
@@ -2201,6 +2236,7 @@ static void screensaver_timer(lv_timer_t *timer)
     uint32_t off_timeout = (uint32_t)current_settings.display_off_minutes * MINUTE_MS;
 
     if (!display_asleep && off_timeout > 0 && inactive >= off_timeout) {
+        screensaver_forced_visible = false;
         lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
         lando_screensaver_set_active(false);
         if (board_waveshare_5_set_backlight(false) == ESP_OK) {
@@ -2212,7 +2248,7 @@ static void screensaver_timer(lv_timer_t *timer)
         lando_screensaver_set_active(false);
         return;
     }
-    if (saver_timeout > 0 && inactive >= saver_timeout) {
+    if (screensaver_forced_visible || (saver_timeout > 0 && inactive >= saver_timeout)) {
         lv_obj_remove_flag(screensaver, LV_OBJ_FLAG_HIDDEN);
         lando_screensaver_set_active(true);
         advance_screensaver_position();
