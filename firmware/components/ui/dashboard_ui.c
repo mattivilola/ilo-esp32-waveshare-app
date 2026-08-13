@@ -16,6 +16,7 @@
 #include "device_settings.h"
 #include "focus_session.h"
 #include "lando_screensaver.h"
+#include "weather_visual.h"
 
 #define COLOR_CARBON  lv_color_hex(0x0A0F14)
 #define COLOR_SLATE   lv_color_hex(0x131B22)
@@ -50,7 +51,6 @@ static lv_obj_t *dashboard_mode_title;
 static lv_obj_t *mac_power_percent_label;
 static lv_obj_t *mac_power_state_label;
 static lv_obj_t *dashboard_weather_icon_box;
-static lv_obj_t *dashboard_weather_icon_label;
 static lv_obj_t *dashboard_weather_location_label;
 static lv_obj_t *dashboard_weather_temperature_label;
 static lv_obj_t *dashboard_weather_condition_label;
@@ -177,7 +177,15 @@ static lv_obj_t *weather_state_label;
 static lv_obj_t *weather_temperature_label;
 static lv_obj_t *weather_condition_label;
 static lv_obj_t *weather_details_label;
+static lv_obj_t *weather_now_icon;
+static lv_obj_t *weather_feels_value_label;
+static lv_obj_t *weather_wind_value_label;
+static lv_obj_t *weather_today_range_label;
+static lv_obj_t *weather_next_label;
+static lv_obj_t *weather_day_icons[WEATHER_FORECAST_DAYS];
 static lv_obj_t *weather_day_labels[WEATHER_FORECAST_DAYS];
+static lv_obj_t *weather_day_condition_labels[WEATHER_FORECAST_DAYS];
+static lv_obj_t *weather_day_temperature_labels[WEATHER_FORECAST_DAYS];
 static lv_display_t *ui_display;
 static device_settings_t current_settings;
 static dashboard_model_t latest_model;
@@ -208,7 +216,6 @@ static void build_codex_chat_overlay(lv_obj_t *screen);
 static void build_focus_overlay(lv_obj_t *screen);
 static void refresh_focus_overlay(void);
 static bool start_focus_session(const char *title);
-static const char *weather_condition(int code);
 static double display_temperature(float celsius);
 static const char *temperature_unit(void);
 
@@ -324,6 +331,109 @@ static lv_obj_t *create_card(lv_obj_t *parent, int x, int y, int width, int heig
     lv_obj_set_pos(card, x, y);
     lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     return card;
+}
+
+static int weather_icon_scale(int value, int size)
+{
+    int scaled = (value * size) / 100;
+    return scaled > 0 ? scaled : 1;
+}
+
+static lv_obj_t *weather_icon_shape(
+    lv_obj_t *parent,
+    int size,
+    int x,
+    int y,
+    int width,
+    int height,
+    int radius,
+    lv_color_t color
+)
+{
+    lv_obj_t *shape = lv_obj_create(parent);
+    set_clean_box(shape, color, radius == LV_RADIUS_CIRCLE ? LV_RADIUS_CIRCLE : weather_icon_scale(radius, size));
+    lv_obj_set_size(shape, weather_icon_scale(width, size), weather_icon_scale(height, size));
+    lv_obj_set_pos(shape, weather_icon_scale(x, size), weather_icon_scale(y, size));
+    lv_obj_clear_flag(shape, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    return shape;
+}
+
+static void weather_icon_draw_sun(lv_obj_t *root, int size, lv_color_t color, bool compact)
+{
+    int offset = compact ? 8 : 0;
+    weather_icon_shape(root, size, 35 - offset, 35 - offset, 30, 30, LV_RADIUS_CIRCLE, color);
+    weather_icon_shape(root, size, 47 - offset, 8 - offset / 2, 6, 18, 3, color);
+    weather_icon_shape(root, size, 47 - offset, 74 - offset, 6, 18, 3, color);
+    weather_icon_shape(root, size, 8 - offset / 2, 47 - offset, 18, 6, 3, color);
+    weather_icon_shape(root, size, 74 - offset, 47 - offset, 18, 6, 3, color);
+}
+
+static void weather_icon_draw_cloud(lv_obj_t *root, int size, lv_color_t color, bool show_sun)
+{
+    if (show_sun) {
+        weather_icon_shape(root, size, 18, 16, 28, 28, LV_RADIUS_CIRCLE, COLOR_AMBER);
+        weather_icon_shape(root, size, 29, 4, 5, 9, 3, COLOR_AMBER);
+        weather_icon_shape(root, size, 7, 27, 9, 5, 3, COLOR_AMBER);
+    }
+    weather_icon_shape(root, size, 18, 49, 68, 26, 13, color);
+    weather_icon_shape(root, size, 22, 38, 34, 34, LV_RADIUS_CIRCLE, color);
+    weather_icon_shape(root, size, 43, 29, 43, 43, LV_RADIUS_CIRCLE, color);
+}
+
+static void weather_icon_draw(lv_obj_t *root, int code, int size, lv_color_t color)
+{
+    if (root == NULL) return;
+    lv_obj_clean(root);
+    switch (weather_visual_for_code(code)) {
+    case WEATHER_VISUAL_CLEAR:
+        weather_icon_draw_sun(root, size, COLOR_AMBER, false);
+        break;
+    case WEATHER_VISUAL_PARTLY_CLOUDY:
+        weather_icon_draw_cloud(root, size, color, true);
+        break;
+    case WEATHER_VISUAL_FOG:
+        weather_icon_draw_cloud(root, size, color, false);
+        weather_icon_shape(root, size, 20, 82, 64, 5, 3, color);
+        weather_icon_shape(root, size, 29, 92, 46, 5, 3, color);
+        break;
+    case WEATHER_VISUAL_DRIZZLE:
+    case WEATHER_VISUAL_RAIN:
+    case WEATHER_VISUAL_SHOWERS:
+        weather_icon_draw_cloud(root, size, color, weather_visual_for_code(code) == WEATHER_VISUAL_SHOWERS);
+        weather_icon_shape(root, size, 28, 80, 5, 14, 3, COLOR_CYAN);
+        weather_icon_shape(root, size, 48, 84, 5, 14, 3, COLOR_CYAN);
+        weather_icon_shape(root, size, 68, 80, 5, 14, 3, COLOR_CYAN);
+        break;
+    case WEATHER_VISUAL_SNOW:
+        weather_icon_draw_cloud(root, size, color, false);
+        weather_icon_shape(root, size, 28, 82, 8, 8, LV_RADIUS_CIRCLE, COLOR_MIST);
+        weather_icon_shape(root, size, 48, 88, 8, 8, LV_RADIUS_CIRCLE, COLOR_MIST);
+        weather_icon_shape(root, size, 68, 82, 8, 8, LV_RADIUS_CIRCLE, COLOR_MIST);
+        break;
+    case WEATHER_VISUAL_THUNDERSTORM:
+        weather_icon_draw_cloud(root, size, color, false);
+        weather_icon_shape(root, size, 49, 76, 8, 13, 2, COLOR_AMBER);
+        weather_icon_shape(root, size, 42, 86, 14, 7, 2, COLOR_AMBER);
+        weather_icon_shape(root, size, 42, 90, 8, 10, 2, COLOR_AMBER);
+        break;
+    case WEATHER_VISUAL_MIXED:
+    default:
+        weather_icon_draw_cloud(root, size, color, true);
+        break;
+    }
+}
+
+static void weather_icon_draw_status(lv_obj_t *root, const char *symbol, int size, lv_color_t color)
+{
+    if (root == NULL) return;
+    lv_obj_clean(root);
+    lv_obj_t *label = create_label(
+        root,
+        symbol,
+        size >= 70 ? &lv_font_montserrat_20 : &lv_font_montserrat_14,
+        color
+    );
+    lv_obj_center(label);
 }
 
 static const dashboard_task_t *selected_codex_task(void)
@@ -935,49 +1045,74 @@ static void build_weather_page(lv_obj_t *page)
 {
     weather_location_label = create_label(page, "Weather", &lv_font_montserrat_20, COLOR_MIST);
     lv_obj_set_pos(weather_location_label, 22, 8);
-    lv_obj_set_width(weather_location_label, 300);
+    lv_obj_set_width(weather_location_label, 360);
     lv_label_set_long_mode(weather_location_label, LV_LABEL_LONG_DOT);
     weather_state_label = create_label(page, "WAITING", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_set_pos(weather_state_label, 340, 12);
+    lv_obj_set_pos(weather_state_label, 398, 12);
     lv_obj_t *attribution = create_label(page, "Weather data by Open-Meteo.com", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(attribution, LV_ALIGN_TOP_RIGHT, -22, 12);
 
-    lv_obj_t *now = create_card(page, 22, 52, 350, 230, 16);
+    lv_obj_t *now = create_card(page, 22, 52, 974, 216, 16);
     lv_obj_t *now_label = create_label(now, "NOW", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(now_label, LV_ALIGN_TOP_LEFT, 18, 18);
+    weather_now_icon = lv_obj_create(now);
+    set_clean_box(weather_now_icon, COLOR_STEEL, 16);
+    lv_obj_set_size(weather_now_icon, 92, 92);
+    lv_obj_set_pos(weather_now_icon, 18, 58);
+    lv_obj_clear_flag(weather_now_icon, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    weather_icon_draw_status(weather_now_icon, LV_SYMBOL_REFRESH, 92, COLOR_FOG);
     weather_temperature_label = create_label(now, "-- C", &lv_font_montserrat_28, COLOR_MIST);
-    lv_obj_align(weather_temperature_label, LV_ALIGN_TOP_LEFT, 18, 66);
+    lv_obj_set_pos(weather_temperature_label, 132, 55);
     weather_condition_label = create_label(now, "Waiting for forecast", &lv_font_montserrat_20, COLOR_CYAN);
-    lv_obj_align(weather_condition_label, LV_ALIGN_TOP_LEFT, 18, 118);
-    weather_details_label = create_label(now, "Direct Wi-Fi / Mac not required", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(weather_details_label, LV_ALIGN_BOTTOM_LEFT, 18, -18);
+    lv_obj_set_pos(weather_condition_label, 132, 96);
+    lv_obj_set_width(weather_condition_label, 330);
+    weather_details_label = create_label(now, "Useful details will appear here", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(weather_details_label, 132, 132);
 
-    lv_obj_t *hours = create_card(page, 388, 52, 608, 230, 16);
-    lv_obj_t *hours_title = create_label(hours, "INDEPENDENT WEATHER", &lv_font_montserrat_14, COLOR_FOG);
-    lv_obj_align(hours_title, LV_ALIGN_TOP_LEFT, 18, 18);
-    lv_obj_t *hour_values = create_label(
-        hours,
-        "HTTPS verified with the ESP certificate bundle\nClock synchronized before the secure request\nForecast refreshes every 30 minutes",
-        &lv_font_montserrat_14,
-        COLOR_MIST
-    );
-    lv_obj_set_style_text_line_space(hour_values, 18, 0);
-    lv_obj_align(hour_values, LV_ALIGN_TOP_LEFT, 18, 62);
-    lv_obj_t *transition = create_label(hours, "Cached values are visibly marked STALE", &lv_font_montserrat_14, COLOR_CYAN);
-    lv_obj_align(transition, LV_ALIGN_BOTTOM_LEFT, 18, -22);
+    lv_obj_t *now_divider = lv_obj_create(now);
+    set_clean_box(now_divider, COLOR_STEEL, 0);
+    lv_obj_set_size(now_divider, 1, 172);
+    lv_obj_set_pos(now_divider, 500, 22);
 
-    lv_obj_t *today = create_card(page, 22, 298, 314, 96, 14);
-    weather_day_labels[0] = create_label(today, "TODAY\nWaiting", &lv_font_montserrat_14, COLOR_MIST);
-    lv_obj_set_style_text_line_space(weather_day_labels[0], 10, 0);
-    lv_obj_align(weather_day_labels[0], LV_ALIGN_LEFT_MID, 18, 0);
-    lv_obj_t *tomorrow = create_card(page, 352, 298, 308, 96, 14);
-    weather_day_labels[1] = create_label(tomorrow, "TOMORROW\nWaiting", &lv_font_montserrat_14, COLOR_MIST);
-    lv_obj_set_style_text_line_space(weather_day_labels[1], 10, 0);
-    lv_obj_align(weather_day_labels[1], LV_ALIGN_LEFT_MID, 18, 0);
-    lv_obj_t *later = create_card(page, 676, 298, 320, 96, 14);
-    weather_day_labels[2] = create_label(later, "+2 DAYS\nWaiting", &lv_font_montserrat_14, COLOR_MIST);
-    lv_obj_set_style_text_line_space(weather_day_labels[2], 10, 0);
-    lv_obj_align(weather_day_labels[2], LV_ALIGN_LEFT_MID, 18, 0);
+    lv_obj_t *summary_label = create_label(now, "TODAY AT A GLANCE", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(summary_label, 530, 18);
+    lv_obj_t *feels_label = create_label(now, "FEELS LIKE", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(feels_label, 530, 60);
+    weather_feels_value_label = create_label(now, "-- C", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_pos(weather_feels_value_label, 530, 88);
+    lv_obj_t *wind_label = create_label(now, "WIND", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(wind_label, 676, 60);
+    weather_wind_value_label = create_label(now, "-- m/s", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_pos(weather_wind_value_label, 676, 88);
+    lv_obj_t *range_label = create_label(now, "HIGH / LOW", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(range_label, 822, 60);
+    weather_today_range_label = create_label(now, "-- / --", &lv_font_montserrat_20, COLOR_MIST);
+    lv_obj_set_pos(weather_today_range_label, 822, 88);
+    weather_next_label = create_label(now, "Next: waiting for the three-day outlook", &lv_font_montserrat_14, COLOR_CYAN);
+    lv_obj_set_pos(weather_next_label, 530, 148);
+    lv_obj_set_width(weather_next_label, 410);
+    lv_label_set_long_mode(weather_next_label, LV_LABEL_LONG_DOT);
+
+    static const int forecast_x[WEATHER_FORECAST_DAYS] = { 22, 352, 676 };
+    static const int forecast_width[WEATHER_FORECAST_DAYS] = { 314, 308, 320 };
+    static const char *day_names[WEATHER_FORECAST_DAYS] = { "TODAY", "TOMORROW", "+2 DAYS" };
+    for (int index = 0; index < WEATHER_FORECAST_DAYS; ++index) {
+        lv_obj_t *forecast = create_card(page, forecast_x[index], 284, forecast_width[index], 110, 14);
+        weather_day_icons[index] = lv_obj_create(forecast);
+        set_clean_box(weather_day_icons[index], COLOR_STEEL, 12);
+        lv_obj_set_size(weather_day_icons[index], 58, 58);
+        lv_obj_set_pos(weather_day_icons[index], 16, 36);
+        lv_obj_clear_flag(weather_day_icons[index], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        weather_icon_draw_status(weather_day_icons[index], LV_SYMBOL_REFRESH, 58, COLOR_FOG);
+        weather_day_labels[index] = create_label(forecast, day_names[index], &lv_font_montserrat_14, COLOR_FOG);
+        lv_obj_set_pos(weather_day_labels[index], 92, 16);
+        weather_day_condition_labels[index] = create_label(forecast, "Waiting", &lv_font_montserrat_14, COLOR_MIST);
+        lv_obj_set_pos(weather_day_condition_labels[index], 92, 44);
+        lv_obj_set_width(weather_day_condition_labels[index], forecast_width[index] - 108);
+        lv_label_set_long_mode(weather_day_condition_labels[index], LV_LABEL_LONG_DOT);
+        weather_day_temperature_labels[index] = create_label(forecast, "-- / --", &lv_font_montserrat_14, COLOR_CYAN);
+        lv_obj_set_pos(weather_day_temperature_labels[index], 92, 73);
+    }
 }
 
 static void show_model_x_news_status(void)
@@ -1335,7 +1470,7 @@ static void render_dashboard_signal(const dashboard_model_t *model)
                 latest_weather_model.location[0] != 0 ? latest_weather_model.location : "Weather",
                 display_temperature(latest_weather_model.temperature_c),
                 temperature_unit(),
-                weather_condition(latest_weather_model.weather_code)
+                weather_condition_for_code(latest_weather_model.weather_code)
             );
         } else if (latest_weather_valid && latest_weather_model.state == WEATHER_STATE_LOADING) {
             snprintf(pulse, sizeof(pulse), "Updating the direct weather forecast");
@@ -2328,13 +2463,8 @@ static void build_ui(void)
     set_clean_box(dashboard_weather_icon_box, COLOR_STEEL, 14);
     lv_obj_set_size(dashboard_weather_icon_box, 52, 52);
     lv_obj_set_pos(dashboard_weather_icon_box, 20, 318);
-    dashboard_weather_icon_label = create_label(
-        dashboard_weather_icon_box,
-        LV_SYMBOL_GPS,
-        &lv_font_montserrat_14,
-        COLOR_FOG
-    );
-    lv_obj_center(dashboard_weather_icon_label);
+    lv_obj_clear_flag(dashboard_weather_icon_box, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    weather_icon_draw_status(dashboard_weather_icon_box, LV_SYMBOL_GPS, 52, COLOR_FOG);
 
     dashboard_weather_location_label = create_label(attention, "WEATHER", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_set_width(dashboard_weather_location_label, 136);
@@ -3003,31 +3133,6 @@ void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t stat
     lvgl_port_unlock();
 }
 
-static const char *weather_condition(int code)
-{
-    if (code == 0) return "Clear";
-    if (code <= 3) return "Partly cloudy";
-    if (code == 45 || code == 48) return "Fog";
-    if (code >= 51 && code <= 57) return "Drizzle";
-    if (code >= 61 && code <= 67) return "Rain";
-    if (code >= 71 && code <= 77) return "Snow";
-    if (code >= 80 && code <= 82) return "Rain showers";
-    if (code == 85 || code == 86) return "Snow showers";
-    if (code >= 95) return "Thunderstorm";
-    return "Mixed conditions";
-}
-
-static const char *dashboard_weather_icon(int code)
-{
-    if (code == 0) return "SUN";
-    if (code <= 3) return "CLOUD";
-    if (code == 45 || code == 48) return "FOG";
-    if ((code >= 51 && code <= 67) || (code >= 80 && code <= 82)) return "RAIN";
-    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return "SNOW";
-    if (code >= 95) return "STORM";
-    return "MIX";
-}
-
 static double display_temperature(float celsius)
 {
     return current_settings.use_fahrenheit ? ((double)celsius * 9.0 / 5.0) + 32.0 : (double)celsius;
@@ -3045,7 +3150,6 @@ static void render_dashboard_weather(const weather_model_t *model)
     const char *location = model->location[0] != 0 ? model->location : "Weather";
     const char *state = "OFFLINE";
     const char *condition = "Forecast unavailable";
-    const char *icon = LV_SYMBOL_GPS;
     lv_color_t color = COLOR_FOG;
 
     if (model->state == WEATHER_STATE_LIVE) {
@@ -3057,7 +3161,6 @@ static void render_dashboard_weather(const weather_model_t *model)
     } else if (model->state == WEATHER_STATE_LOADING) {
         state = "UPDATING";
         condition = "Fetching forecast";
-        icon = LV_SYMBOL_REFRESH;
         color = COLOR_CYAN;
     } else if (model->state == WEATHER_STATE_NOT_CONFIGURED) {
         state = "SETUP";
@@ -3075,28 +3178,31 @@ static void render_dashboard_weather(const weather_model_t *model)
             temperature_unit()
         );
         lv_label_set_text(dashboard_weather_temperature_label, temperature);
-        condition = weather_condition(model->weather_code);
-        icon = dashboard_weather_icon(model->weather_code);
+        condition = weather_condition_for_code(model->weather_code);
+        weather_icon_draw(
+            dashboard_weather_icon_box,
+            model->weather_code,
+            52,
+            model->state == WEATHER_STATE_LIVE ? COLOR_MIST : COLOR_FOG
+        );
     } else {
         lv_label_set_text(
             dashboard_weather_temperature_label,
             current_settings.use_fahrenheit ? "-- F" : "-- C"
         );
+        weather_icon_draw_status(
+            dashboard_weather_icon_box,
+            model->state == WEATHER_STATE_LOADING ? LV_SYMBOL_REFRESH
+                : model->state == WEATHER_STATE_NOT_CONFIGURED ? LV_SYMBOL_GPS
+                : LV_SYMBOL_WARNING,
+            52,
+            color
+        );
     }
     lv_label_set_text(dashboard_weather_location_label, location);
-    lv_label_set_text(dashboard_weather_icon_label, icon);
     lv_label_set_text(dashboard_weather_condition_label, condition);
     lv_label_set_text(dashboard_weather_state_label, state);
-    lv_obj_set_style_bg_color(
-        dashboard_weather_icon_box,
-        model->state == WEATHER_STATE_LIVE ? COLOR_CYAN : color,
-        0
-    );
-    lv_obj_set_style_text_color(
-        dashboard_weather_icon_label,
-        model->state == WEATHER_STATE_LIVE ? COLOR_CARBON : COLOR_MIST,
-        0
-    );
+    lv_obj_set_style_bg_color(dashboard_weather_icon_box, COLOR_STEEL, 0);
     lv_obj_set_style_text_color(dashboard_weather_state_label, color, 0);
 }
 
@@ -3137,39 +3243,100 @@ static void render_weather(const weather_model_t *model)
         char text[96];
         snprintf(text, sizeof(text), "%.0f %s", display_temperature(model->temperature_c), temperature_unit());
         lv_label_set_text(weather_temperature_label, text);
-        lv_label_set_text(weather_condition_label, weather_condition(model->weather_code));
+        lv_label_set_text(weather_condition_label, weather_condition_for_code(model->weather_code));
+        weather_icon_draw(
+            weather_now_icon,
+            model->weather_code,
+            92,
+            model->state == WEATHER_STATE_LIVE ? COLOR_MIST : COLOR_FOG
+        );
         snprintf(
             text,
             sizeof(text),
-            "Feels %.0f %s  /  Wind %.1f m/s",
-            display_temperature(model->apparent_c),
-            temperature_unit(),
-            (double)model->wind_ms
+            "%s conditions in %s",
+            model->state == WEATHER_STATE_STALE ? "Last known" : "Current",
+            model->location[0] != 0 ? model->location : "your area"
         );
         lv_label_set_text(weather_details_label, text);
-        static const char *day_names[WEATHER_FORECAST_DAYS] = { "TODAY", "TOMORROW", "+2 DAYS" };
-        for (int index = 0; index < WEATHER_FORECAST_DAYS && index < model->day_count; ++index) {
+        snprintf(
+            text,
+            sizeof(text),
+            "%.0f %s",
+            display_temperature(model->apparent_c),
+            temperature_unit()
+        );
+        lv_label_set_text(weather_feels_value_label, text);
+        snprintf(text, sizeof(text), "%.1f m/s", (double)model->wind_ms);
+        lv_label_set_text(weather_wind_value_label, text);
+        if (model->day_count > 0) {
             snprintf(
                 text,
                 sizeof(text),
-                "%s\n%s    %.0f %s - %.0f %s",
-                day_names[index],
-                weather_condition(model->days[index].weather_code),
+                "%.0f / %.0f %s",
+                display_temperature(model->days[0].maximum_c),
+                display_temperature(model->days[0].minimum_c),
+                temperature_unit()
+            );
+            lv_label_set_text(weather_today_range_label, text);
+        }
+        static const char *day_names[WEATHER_FORECAST_DAYS] = { "TODAY", "TOMORROW", "+2 DAYS" };
+        for (int index = 0; index < WEATHER_FORECAST_DAYS && index < model->day_count; ++index) {
+            lv_label_set_text(weather_day_labels[index], day_names[index]);
+            lv_label_set_text(
+                weather_day_condition_labels[index],
+                weather_condition_for_code(model->days[index].weather_code)
+            );
+            snprintf(
+                text,
+                sizeof(text),
+                "%.0f / %.0f %s",
                 display_temperature(model->days[index].maximum_c),
-                temperature_unit(),
                 display_temperature(model->days[index].minimum_c),
                 temperature_unit()
             );
-            lv_label_set_text(weather_day_labels[index], text);
+            lv_label_set_text(weather_day_temperature_labels[index], text);
+            weather_icon_draw(
+                weather_day_icons[index],
+                model->days[index].weather_code,
+                58,
+                model->state == WEATHER_STATE_LIVE ? COLOR_MIST : COLOR_FOG
+            );
         }
-    } else if (model->state == WEATHER_STATE_NOT_CONFIGURED) {
+        if (model->day_count > 1) {
+            snprintf(
+                text,
+                sizeof(text),
+                "Tomorrow: %s, %.0f / %.0f %s",
+                weather_condition_for_code(model->days[1].weather_code),
+                display_temperature(model->days[1].maximum_c),
+                display_temperature(model->days[1].minimum_c),
+                temperature_unit()
+            );
+            lv_label_set_text(weather_next_label, text);
+        }
+    } else {
         lv_label_set_text(weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
-        lv_label_set_text(weather_condition_label, "Choose a weather location");
-        lv_label_set_text(weather_details_label, "Use Mac companion location or USB setup");
-    } else if (model->state == WEATHER_STATE_ERROR) {
-        lv_label_set_text(weather_temperature_label, current_settings.use_fahrenheit ? "-- F" : "-- C");
-        lv_label_set_text(weather_condition_label, "Forecast unavailable");
-        lv_label_set_text(weather_details_label, "Retrying automatically in 1 minute");
+        const char *condition = model->state == WEATHER_STATE_NOT_CONFIGURED ? "Choose a weather location"
+            : model->state == WEATHER_STATE_LOADING ? "Updating forecast"
+            : "Forecast unavailable";
+        const char *detail = model->state == WEATHER_STATE_NOT_CONFIGURED ? "Set your location in the Mac companion"
+            : model->state == WEATHER_STATE_LOADING ? "Fresh conditions are on the way"
+            : "Check Wi-Fi; the board will retry automatically";
+        const char *symbol = model->state == WEATHER_STATE_NOT_CONFIGURED ? LV_SYMBOL_GPS
+            : model->state == WEATHER_STATE_LOADING ? LV_SYMBOL_REFRESH
+            : LV_SYMBOL_WARNING;
+        lv_label_set_text(weather_condition_label, condition);
+        lv_label_set_text(weather_details_label, detail);
+        weather_icon_draw_status(weather_now_icon, symbol, 92, state_color);
+        lv_label_set_text(weather_feels_value_label, "--");
+        lv_label_set_text(weather_wind_value_label, "--");
+        lv_label_set_text(weather_today_range_label, "-- / --");
+        lv_label_set_text(weather_next_label, "Forecast details will appear automatically");
+        for (int index = 0; index < WEATHER_FORECAST_DAYS; ++index) {
+            weather_icon_draw_status(weather_day_icons[index], symbol, 58, COLOR_FOG);
+            lv_label_set_text(weather_day_condition_labels[index], "Waiting");
+            lv_label_set_text(weather_day_temperature_labels[index], "-- / --");
+        }
     }
 }
 

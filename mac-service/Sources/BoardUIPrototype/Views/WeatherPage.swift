@@ -19,71 +19,92 @@ struct WeatherPage: View {
                     .font(.board(12, weight: .semibold))
                     .foregroundStyle(BoardPalette.fog)
             }
-            HStack(spacing: 16) {
-                PulseCard {
-                    VStack(alignment: .leading, spacing: 5) {
+            PulseCard {
+                HStack(spacing: 0) {
+                    VStack(alignment: .leading, spacing: 10) {
                         SectionLabel(title: "Now")
-                        HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text("14")
-                                .font(.board(82, weight: .bold))
-                                .foregroundStyle(BoardPalette.mist)
-                            Text("°C")
-                                .font(.board(24, weight: .semibold))
-                                .foregroundStyle(BoardPalette.fog)
+                        HStack(spacing: 20) {
+                            weatherGlyph("cloud.rain.fill", size: 92, tint: BoardPalette.cyan)
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                    Text("14")
+                                        .font(.board(54, weight: .bold))
+                                        .foregroundStyle(BoardPalette.mist)
+                                    Text("°C")
+                                        .font(.board(20, weight: .semibold))
+                                        .foregroundStyle(BoardPalette.fog)
+                                }
+                                Text("Light rain")
+                                    .font(.board(18, weight: .semibold))
+                                    .foregroundStyle(BoardPalette.cyan)
+                                Text("Current conditions in Helsinki")
+                                    .font(.board(12))
+                                    .foregroundStyle(BoardPalette.fog)
+                            }
                         }
-                        Text("Light rain")
-                            .font(.board(18, weight: .semibold))
-                            .foregroundStyle(BoardPalette.cyan)
-                        Spacer()
-                        Text("Feels 12°  ·  Wind 5 m/s")
-                            .font(.board(12))
-                            .foregroundStyle(BoardPalette.fog)
                     }
-                }
-                .frame(width: 350, height: 235)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                PulseCard {
-                    VStack(alignment: .leading, spacing: 16) {
-                        SectionLabel(title: "Independent weather")
-                        VStack(alignment: .leading, spacing: 12) {
-                            architectureRow("HTTPS", "CERTIFICATE VERIFIED")
-                            architectureRow("Clock", "SYNC BEFORE REQUEST")
-                            architectureRow("Refresh", "EVERY 30 MIN")
+                    Divider()
+                        .overlay(BoardPalette.steel)
+                        .padding(.horizontal, 28)
+
+                    VStack(alignment: .leading, spacing: 17) {
+                        SectionLabel(title: "Today at a glance")
+                        HStack(spacing: 34) {
+                            weatherStat("Feels like", "12°C")
+                            weatherStat("Wind", "5.0 m/s")
+                            weatherStat("High / low", "16° / 10°")
                         }
-                        Spacer()
-                        Text("Cached values are visibly marked STALE")
+                        Text("Tomorrow: Cloudy, 18° / 11°")
                             .font(.board(13, weight: .semibold))
                             .foregroundStyle(BoardPalette.cyan)
                     }
+                    .frame(width: 430, alignment: .leading)
                 }
-                .frame(height: 235)
             }
+            .frame(height: 216)
+
             HStack(spacing: 12) {
-                forecast("TODAY", "16° / 10°", "Rain", BoardPalette.cyan)
-                forecast("TUE", "18° / 11°", "Cloudy", BoardPalette.fog)
-                forecast("WED", "20° / 12°", "Clear", BoardPalette.signal)
+                forecast("TODAY", "16° / 10°", "Rain", "cloud.rain.fill", BoardPalette.cyan)
+                forecast("TOMORROW", "18° / 11°", "Cloudy", "cloud.fill", BoardPalette.fog)
+                forecast("+2 DAYS", "20° / 12°", "Clear", "sun.max.fill", BoardPalette.amber)
             }
-            .frame(height: 100)
+            .frame(height: 110)
         }
         .padding(.vertical, 4)
     }
 
-    private func architectureRow(_ title: String, _ value: String) -> some View {
-        HStack {
-            Text(title)
-                .font(.board(13, weight: .semibold))
-                .foregroundStyle(BoardPalette.mist)
-            Spacer()
-            Text(value)
+    private func weatherGlyph(_ symbol: String, size: CGFloat, tint: Color) -> some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.4, weight: .semibold))
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(tint, BoardPalette.mist)
+            .frame(width: size, height: size)
+            .background(BoardPalette.raised, in: RoundedRectangle(cornerRadius: size * 0.18, style: .continuous))
+    }
+
+    private func weatherStat(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label.uppercased())
                 .font(.board(10, weight: .bold))
-                .tracking(0.6)
-                .foregroundStyle(BoardPalette.signal)
+                .tracking(0.8)
+                .foregroundStyle(BoardPalette.fog)
+            Text(value)
+                .font(.board(17, weight: .semibold))
+                .foregroundStyle(BoardPalette.mist)
         }
     }
 
-    private func forecast(_ day: String, _ temperature: String, _ condition: String, _ tint: Color) -> some View {
-        HStack {
-            StatusDot(color: tint)
+    private func forecast(
+        _ day: String,
+        _ temperature: String,
+        _ condition: String,
+        _ symbol: String,
+        _ tint: Color
+    ) -> some View {
+        HStack(spacing: 15) {
+            weatherGlyph(symbol, size: 58, tint: tint)
             VStack(alignment: .leading, spacing: 4) {
                 Text(day)
                     .font(.board(11, weight: .bold))
@@ -92,11 +113,11 @@ struct WeatherPage: View {
                 Text(condition)
                     .font(.board(14, weight: .semibold))
                     .foregroundStyle(BoardPalette.mist)
+                Text(temperature)
+                    .font(.board(13, weight: .semibold))
+                    .foregroundStyle(BoardPalette.cyan)
             }
             Spacer()
-            Text(temperature)
-                .font(.board(16, weight: .semibold))
-                .foregroundStyle(BoardPalette.mist)
         }
         .padding(.horizontal, 17)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
