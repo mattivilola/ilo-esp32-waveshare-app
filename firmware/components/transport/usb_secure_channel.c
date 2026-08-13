@@ -224,9 +224,9 @@ bool usb_secure_channel_accept(
     if (channel->line == NULL) return false;
 
     uint8_t client_nonce[USB_NONCE_SIZE];
+    char client_nonce_hex[USB_NONCE_SIZE * 2 + 1];
     for (;;) {
         if (!read_line(channel, UINT32_MAX)) goto fail;
-        char client_nonce_hex[USB_NONCE_SIZE * 2 + 1];
         char extra[2];
         if (sscanf(channel->line, USB_PREFIX " HELLO %64s %1s", client_nonce_hex, extra) == 1
             && hex_to_bytes(client_nonce_hex, client_nonce, sizeof(client_nonce))) {
@@ -257,7 +257,31 @@ bool usb_secure_channel_accept(
     );
     bool sent = write_line(challenge_line);
     free(challenge_line);
-    if (!sent || !read_line(channel, USB_HANDSHAKE_TIMEOUT_MS)) goto fail;
+    if (!sent) goto fail;
+
+    TickType_t auth_started = xTaskGetTickCount();
+    for (;;) {
+        uint32_t elapsed = pdTICKS_TO_MS(xTaskGetTickCount() - auth_started);
+        if (elapsed >= USB_HANDSHAKE_TIMEOUT_MS
+            || !read_line(channel, USB_HANDSHAKE_TIMEOUT_MS - elapsed)) {
+            goto fail;
+        }
+        // The Mac repeats the same HELLO while native USB is rebooting. A copy
+        // can already be queued when this challenge reaches it; ignore that
+        // duplicate instead of interpreting it as a failed AUTH.
+        char duplicate_nonce_hex[USB_NONCE_SIZE * 2 + 1];
+        char duplicate_extra[2];
+        if (sscanf(
+                channel->line,
+                USB_PREFIX " HELLO %64s %1s",
+                duplicate_nonce_hex,
+                duplicate_extra
+            ) == 1
+            && strcmp(duplicate_nonce_hex, client_nonce_hex) == 0) {
+            continue;
+        }
+        break;
+    }
 
     char received_auth_hex[USB_KEY_SIZE * 2 + 1];
     char extra[2];
