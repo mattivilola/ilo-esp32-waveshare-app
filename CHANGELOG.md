@@ -2,6 +2,24 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.8 - 2026-08-13
+
+### Added
+- Add standalone mode without Codex
+- Add battery-backed RTC clock fallback
+- Add resilient authenticated USB fallback
+
+### Changed
+- Make Wi-Fi scanning deterministic
+- Bump firmware to 0.2.5
+- Scan Finland Wi-Fi channels
+- Bump firmware to 0.2.6
+- Prepare firmware 0.2.7
+- Record RTC hardware write validation
+- Tolerate duplicate USB handshake hello
+- Reduce memory pressure across USB and Wi-Fi
+
+
 ## 0.1.7 - 2026-08-13
 
 ### Added
