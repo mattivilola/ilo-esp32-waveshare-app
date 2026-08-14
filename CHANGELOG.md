@@ -2,6 +2,32 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.10 - 2026-08-14
+
+### Added
+- Confirm companion snapshots only after the board parses and applies them
+- Retry provisioned Wi-Fi automatically when a hotspot appears after boot
+
+### Changed
+- Record signed OTA bridge validation
+- Make OTA update guidance user friendly
+- Record firmware 0.2.9 OTA publication
+- Make OTA updater startup deterministic
+- Right-size OTA worker memory reserve
+- Avoid boot-time OTA resource race
+- Make network clock refresh allocation-free
+- Prepare firmware 0.2.11 OTA candidate
+- Keep firmware update progress awake
+- Confirm OTA in the reserved updater worker
+- Record successful 0.2.14 OTA validation
+- Keep weather, power, time, and X News syncing when Codex history is temporarily unavailable
+- Expand X News to a rolling feed of up to eight directly cited stories
+
+### Fixed
+- Fix OTA first-boot confirmation policy
+- Stop reporting an optimistic sync time before the board has accepted the snapshot
+
+
 ## 0.1.9 - 2026-08-13
 
 ### Added

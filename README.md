@@ -178,7 +178,7 @@ The Make target stores timestamped files under `artifacts/board-screenshots/` by
 
 1. **Dashboard** — the glanceable work pulse: attention count, recent Codex work, connection state, current weather, and a latest-X-news or task-count signal. Tapping a Codex row opens that related chat already selected on the Codex screen.
 2. **Codex** — an optional Mac-backed screen with recent sanitized task status plus a hold-confirmed, fixed “Please continue.” action for eligible idle tasks.
-3. **X News** — an optional rolling 24-hour AI/robotics brief containing only locally validated direct X citations. Vertically scroll up to five stories; horizontal swipes still move between screens.
+3. **X News** — an optional rolling 24-hour AI/robotics brief containing only locally validated direct X citations. Vertically scroll up to eight stories; horizontal swipes still move between screens.
 4. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
 5. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
 
