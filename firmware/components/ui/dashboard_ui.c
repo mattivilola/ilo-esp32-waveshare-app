@@ -213,8 +213,16 @@ static uint32_t wifi_setup_scan_tick;
 static dashboard_wifi_connection_state_t wifi_connection_state = DASHBOARD_WIFI_CONNECTING;
 static dashboard_wifi_update_callback_t wifi_update_callback;
 static dashboard_wifi_scan_callback_t wifi_scan_callback;
+static dashboard_wifi_known_callback_t wifi_known_callback;
+static dashboard_wifi_forget_callback_t wifi_forget_callback;
+static size_t wifi_known_count;
 static lv_obj_t *wifi_network_buttons[4];
 static char wifi_network_ssids[4][33];
+static bool wifi_network_is_known[4];
+static char wifi_known_ssids[3][33];
+static bool wifi_selected_known;
+static bool wifi_network_long_press_consumed;
+static bool wifi_setup_will_remember;
 static lv_obj_t *weather_location_label;
 static lv_obj_t *weather_state_label;
 static lv_obj_t *weather_temperature_label;
@@ -264,6 +272,7 @@ static void show_screensaver_now(void);
 static double display_temperature(float celsius);
 static const char *temperature_unit(void);
 static void wifi_setup_close(void);
+static void refresh_settings_labels(void);
 
 static void show_page(int index, lv_anim_enable_t animation)
 {
@@ -1663,6 +1672,19 @@ static void refresh_settings_labels(void)
         default:
             break;
         }
+        char remembered_text[112];
+        if (wifi_known_count > 0
+            && wifi_connection_state != DASHBOARD_WIFI_AUTH_FAILED
+            && wifi_connection_state != DASHBOARD_WIFI_NOT_FOUND) {
+            snprintf(
+                remembered_text,
+                sizeof(remembered_text),
+                "%s     %u SAVED",
+                text,
+                (unsigned int)wifi_known_count
+            );
+            text = remembered_text;
+        }
         lv_label_set_text(settings_connection_values, text);
         lv_obj_set_style_text_color(settings_connection_values, color, 0);
     }
@@ -2172,6 +2194,89 @@ static void wifi_input_tapped(lv_event_t *event)
     );
 }
 
+static bool wifi_ssid_is_known(const char *ssid)
+{
+    if (ssid == NULL || ssid[0] == 0) return false;
+    for (size_t index = 0; index < wifi_known_count; ++index) {
+        if (strcmp(wifi_known_ssids[index], ssid) == 0) return true;
+    }
+    return false;
+}
+
+static void wifi_setup_update_idle_status(void)
+{
+    char status[96];
+    snprintf(
+        status,
+        sizeof(status),
+        "%u/3 remembered / tap saved to connect / hold saved to forget",
+        (unsigned int)wifi_known_count
+    );
+    lv_label_set_text(wifi_setup_status, status);
+    lv_obj_set_style_text_color(wifi_setup_status, COLOR_FOG, 0);
+}
+
+static void wifi_input_changed(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_VALUE_CHANGED || wifi_ssid_input == NULL
+        || wifi_password_input == NULL) return;
+    const char *ssid = lv_textarea_get_text(wifi_ssid_input);
+    const char *password = lv_textarea_get_text(wifi_password_input);
+    wifi_selected_known = password[0] == 0 && wifi_ssid_is_known(ssid);
+    lv_label_set_text(wifi_setup_save_label, wifi_selected_known ? "Connect" : "Save & connect");
+}
+
+static void wifi_refresh_network_buttons(void)
+{
+    char scanned[4][33] = { 0 };
+    memset(wifi_known_ssids, 0, sizeof(wifi_known_ssids));
+    wifi_known_count = wifi_known_callback != NULL
+        ? wifi_known_callback(wifi_known_ssids, 3)
+        : 0;
+    size_t scanned_count = wifi_scan_callback != NULL
+        ? wifi_scan_callback(scanned, 4)
+        : 0;
+    size_t displayed = 0;
+    for (size_t index = 0; index < wifi_known_count && displayed < 4; ++index) {
+        strlcpy(wifi_network_ssids[displayed], wifi_known_ssids[index], 33);
+        wifi_network_is_known[displayed] = true;
+        ++displayed;
+    }
+    for (size_t index = 0; index < scanned_count && displayed < 4; ++index) {
+        bool duplicate = false;
+        for (size_t existing = 0; existing < displayed; ++existing) {
+            if (strcmp(wifi_network_ssids[existing], scanned[index]) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) continue;
+        strlcpy(wifi_network_ssids[displayed], scanned[index], 33);
+        wifi_network_is_known[displayed] = false;
+        ++displayed;
+    }
+    for (size_t index = 0; index < 4; ++index) {
+        if (index < displayed) {
+            char label[48];
+            snprintf(
+                label,
+                sizeof(label),
+                wifi_network_is_known[index] ? "SAVED  %s" : "%s",
+                wifi_network_ssids[index]
+            );
+            lv_label_set_text(lv_obj_get_child(wifi_network_buttons[index], 0), label);
+            lv_obj_set_style_border_width(wifi_network_buttons[index], wifi_network_is_known[index] ? 1 : 0, 0);
+            lv_obj_set_style_border_color(wifi_network_buttons[index], COLOR_SIGNAL, 0);
+            lv_obj_remove_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        } else {
+            wifi_network_ssids[index][0] = 0;
+            wifi_network_is_known[index] = false;
+            lv_obj_add_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    refresh_settings_labels();
+}
+
 static void wifi_setup_set_inputs_enabled(bool enabled)
 {
     lv_obj_t *objects[] = { wifi_ssid_input, wifi_password_input, wifi_setup_save_button };
@@ -2212,6 +2317,8 @@ static void wifi_setup_close(void)
     wifi_setup_connecting = false;
     wifi_setup_close_pending = false;
     wifi_setup_scan_paused = false;
+    wifi_selected_known = false;
+    wifi_setup_will_remember = false;
     lv_label_set_text(wifi_setup_save_label, "Save & connect");
     wifi_setup_show_editor();
 }
@@ -2226,7 +2333,9 @@ static void wifi_setup_action(lv_event_t *event)
     }
     const char *ssid = lv_textarea_get_text(wifi_ssid_input);
     const char *password = lv_textarea_get_text(wifi_password_input);
-    if (strlen(ssid) == 0 || strlen(ssid) > 32 || strlen(password) < 8 || strlen(password) > 63) {
+    bool remembered = password[0] == 0 && wifi_selected_known && wifi_ssid_is_known(ssid);
+    if (strlen(ssid) == 0 || strlen(ssid) > 32
+        || (!remembered && (strlen(password) < 8 || strlen(password) > 63))) {
         lv_label_set_text(wifi_setup_status, "SSID: 1-32 chars  /  Password: 8-63 chars");
         lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
         return;
@@ -2235,9 +2344,15 @@ static void wifi_setup_action(lv_event_t *event)
     wifi_setup_connecting = true;
     wifi_setup_close_pending = false;
     wifi_setup_scan_paused = true;
+    wifi_setup_will_remember = !remembered;
     wifi_setup_set_inputs_enabled(false);
     lv_label_set_text(wifi_setup_save_label, "Connecting...");
-    lv_label_set_text(wifi_setup_status, "Credentials saved securely on this board");
+    lv_label_set_text(
+        wifi_setup_status,
+        remembered
+            ? "Using the remembered password"
+            : "Testing credentials / saved only after Wi-Fi connects"
+    );
     lv_obj_set_style_text_color(wifi_setup_status, COLOR_SIGNAL, 0);
     wifi_setup_show_progress(
         "Connecting to Wi-Fi",
@@ -2249,7 +2364,7 @@ static void wifi_setup_action(lv_event_t *event)
         // open and visibly busy until DHCP succeeds or a useful error arrives.
     } else {
         wifi_setup_connecting = false;
-        lv_label_set_text(wifi_setup_status, "Could not save Wi-Fi - USB recovery remains available");
+        lv_label_set_text(wifi_setup_status, "Could not start Wi-Fi connection - USB recovery remains available");
         lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
         lv_label_set_text(wifi_setup_save_label, "Try again");
         wifi_setup_show_editor();
@@ -2259,8 +2374,8 @@ static void wifi_setup_action(lv_event_t *event)
 static void wifi_setup_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
-    lv_label_set_text(wifi_setup_status, "2.4 GHz WPA2/WPA3 Personal / password stays on board");
-    lv_obj_set_style_text_color(wifi_setup_status, COLOR_FOG, 0);
+    wifi_refresh_network_buttons();
+    wifi_setup_update_idle_status();
     wifi_setup_connecting = false;
     wifi_setup_close_pending = false;
     wifi_setup_scan_paused = false;
@@ -2269,17 +2384,6 @@ static void wifi_setup_tapped(lv_event_t *event)
     wifi_setup_show_editor();
     lv_obj_remove_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(wifi_setup_overlay);
-    size_t network_count = wifi_scan_callback != NULL
-        ? wifi_scan_callback(wifi_network_ssids, 4)
-        : 0;
-    for (size_t index = 0; index < 4; ++index) {
-        if (index < network_count) {
-            lv_label_set_text(lv_obj_get_child(wifi_network_buttons[index], 0), wifi_network_ssids[index]);
-            lv_obj_remove_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
-        }
-    }
     lv_obj_add_state(wifi_ssid_input, LV_STATE_FOCUSED);
     lv_keyboard_set_textarea(wifi_keyboard, wifi_ssid_input);
     wifi_setup_scan_tick = lv_tick_get();
@@ -2297,27 +2401,53 @@ static void wifi_scan_refresh(lv_timer_t *timer)
     if (wifi_setup_connecting || wifi_setup_close_pending || wifi_setup_scan_paused) return;
     if (lv_tick_elaps(wifi_setup_scan_tick) < 2000U) return;
     wifi_setup_scan_tick = lv_tick_get();
-    size_t network_count = wifi_scan_callback != NULL
-        ? wifi_scan_callback(wifi_network_ssids, 4)
-        : 0;
-    for (size_t index = 0; index < 4; ++index) {
-        if (index < network_count) {
-            lv_label_set_text(lv_obj_get_child(wifi_network_buttons[index], 0), wifi_network_ssids[index]);
-            lv_obj_remove_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
-        }
-    }
+    wifi_refresh_network_buttons();
 }
 
 static void wifi_network_tapped(lv_event_t *event)
 {
-    if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     int index = (int)(intptr_t)lv_event_get_user_data(event);
     if (index < 0 || index >= 4 || wifi_network_ssids[index][0] == 0) return;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        wifi_network_long_press_consumed = false;
+        return;
+    }
+    if (code == LV_EVENT_LONG_PRESSED && wifi_network_is_known[index]) {
+        wifi_network_long_press_consumed = true;
+        char forgotten_ssid[33];
+        strlcpy(forgotten_ssid, wifi_network_ssids[index], sizeof(forgotten_ssid));
+        if (wifi_forget_callback != NULL && wifi_forget_callback(forgotten_ssid)) {
+            if (strcmp(lv_textarea_get_text(wifi_ssid_input), forgotten_ssid) == 0) {
+                lv_textarea_set_text(wifi_ssid_input, "");
+                lv_textarea_set_text(wifi_password_input, "");
+                wifi_selected_known = false;
+            }
+            wifi_refresh_network_buttons();
+            char status[64];
+            snprintf(status, sizeof(status), "Network forgotten / %u/3 remembered", (unsigned int)wifi_known_count);
+            lv_label_set_text(wifi_setup_status, status);
+            lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
+        }
+        return;
+    }
+    if (code != LV_EVENT_CLICKED) return;
+    if (wifi_network_long_press_consumed) {
+        wifi_network_long_press_consumed = false;
+        return;
+    }
     lv_textarea_set_text(wifi_ssid_input, wifi_network_ssids[index]);
-    lv_obj_add_state(wifi_password_input, LV_STATE_FOCUSED);
-    lv_keyboard_set_textarea(wifi_keyboard, wifi_password_input);
+    lv_textarea_set_text(wifi_password_input, "");
+    wifi_selected_known = wifi_network_is_known[index];
+    if (wifi_selected_known) {
+        lv_label_set_text(wifi_setup_save_label, "Connect");
+        lv_label_set_text(wifi_setup_status, "Saved password selected / hold this network to forget");
+        lv_obj_set_style_text_color(wifi_setup_status, COLOR_SIGNAL, 0);
+    } else {
+        lv_label_set_text(wifi_setup_save_label, "Save & connect");
+        lv_obj_add_state(wifi_password_input, LV_STATE_FOCUSED);
+        lv_keyboard_set_textarea(wifi_keyboard, wifi_password_input);
+    }
 }
 
 static void build_wifi_setup(lv_obj_t *screen)
@@ -2333,7 +2463,7 @@ static void build_wifi_setup(lv_obj_t *screen)
     lv_obj_set_pos(title, 30, 20);
     wifi_setup_status = create_label(
         wifi_setup_overlay,
-        "2.4 GHz WPA2/WPA3 Personal / password stays on board",
+        "0/3 remembered / tap saved to connect / hold saved to forget",
         &lv_font_montserrat_14,
         COLOR_FOG
     );
@@ -2346,6 +2476,7 @@ static void build_wifi_setup(lv_obj_t *screen)
     lv_textarea_set_max_length(wifi_ssid_input, 32);
     lv_textarea_set_placeholder_text(wifi_ssid_input, "Wi-Fi network name (SSID)");
     lv_obj_add_event_cb(wifi_ssid_input, wifi_input_tapped, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(wifi_ssid_input, wifi_input_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     wifi_password_input = lv_textarea_create(wifi_setup_overlay);
     lv_obj_set_size(wifi_password_input, 390, 58);
@@ -2356,6 +2487,7 @@ static void build_wifi_setup(lv_obj_t *screen)
     lv_textarea_set_max_length(wifi_password_input, 63);
     lv_textarea_set_placeholder_text(wifi_password_input, "Wi-Fi password");
     lv_obj_add_event_cb(wifi_password_input, wifi_input_tapped, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(wifi_password_input, wifi_input_changed, LV_EVENT_VALUE_CHANGED, NULL);
 
     for (int index = 0; index < 4; ++index) {
         wifi_network_buttons[index] = lv_button_create(wifi_setup_overlay);
@@ -2365,7 +2497,7 @@ static void build_wifi_setup(lv_obj_t *screen)
         lv_obj_add_event_cb(
             wifi_network_buttons[index],
             wifi_network_tapped,
-            LV_EVENT_CLICKED,
+            LV_EVENT_ALL,
             (void *)(intptr_t)index
         );
         lv_obj_t *label = create_label(wifi_network_buttons[index], "", &lv_font_montserrat_14, COLOR_MIST);
@@ -3456,6 +3588,28 @@ void dashboard_ui_set_wifi_scan_callback(dashboard_wifi_scan_callback_t callback
     wifi_scan_callback = callback;
 }
 
+void dashboard_ui_set_wifi_known_callbacks(
+    dashboard_wifi_known_callback_t known_callback,
+    dashboard_wifi_forget_callback_t forget_callback
+)
+{
+    wifi_known_callback = known_callback;
+    wifi_forget_callback = forget_callback;
+}
+
+void dashboard_ui_set_wifi_known_count(size_t count)
+{
+    size_t bounded = count > 3 ? 3 : count;
+    if (ui_display == NULL) {
+        wifi_known_count = bounded;
+        return;
+    }
+    lvgl_port_lock(0);
+    wifi_known_count = bounded;
+    refresh_settings_labels();
+    lvgl_port_unlock();
+}
+
 void dashboard_ui_set_wifi_connection_state(dashboard_wifi_connection_state_t state)
 {
     if (ui_display == NULL) {
@@ -3474,7 +3628,12 @@ void dashboard_ui_set_wifi_connection_state(dashboard_wifi_connection_state_t st
             wifi_setup_connected_tick = lv_tick_get();
             lv_textarea_set_text(wifi_password_input, "");
             lv_label_set_text(wifi_setup_save_label, "Connected");
-            lv_label_set_text(wifi_setup_status, "Wi-Fi connected successfully");
+            lv_label_set_text(
+                wifi_setup_status,
+                wifi_setup_will_remember
+                    ? "Wi-Fi connected and remembered"
+                    : "Wi-Fi connected successfully"
+            );
             lv_obj_set_style_text_color(wifi_setup_status, COLOR_SIGNAL, 0);
             wifi_setup_show_progress("Connected", "Wi-Fi is ready / returning to Settings...", false);
             break;

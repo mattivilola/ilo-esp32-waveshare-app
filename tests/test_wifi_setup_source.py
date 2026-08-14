@@ -66,7 +66,8 @@ class WiFiSetupSourceTests(unittest.TestCase):
         self.assertIn("dashboard_ui_set_wifi_connection_state(state)", TRANSPORT_SOURCE)
 
     def test_transient_hotspot_failures_retry_before_showing_terminal_errors(self):
-        self.assertIn("wifi_auth_failure_count >= 2", TRANSPORT_SOURCE)
+        self.assertIn("#define WIFI_PROFILE_AUTH_FAILURES 2", TRANSPORT_SOURCE)
+        self.assertIn("wifi_auth_failure_count >= WIFI_PROFILE_AUTH_FAILURES", TRANSPORT_SOURCE)
         self.assertIn("wifi_not_found_count >= 3", TRANSPORT_SOURCE)
         self.assertIn("wifi_auth_failure_count = 0", TRANSPORT_SOURCE)
         self.assertIn("wifi_not_found_count = 0", TRANSPORT_SOURCE)
@@ -74,6 +75,71 @@ class WiFiSetupSourceTests(unittest.TestCase):
             "if (sheet_visible && (wifi_setup_connecting || wifi_setup_scan_paused))",
             UI_SOURCE,
         )
+
+    def test_three_successful_networks_are_remembered_in_nvs(self):
+        self.assertIn("#define WIFI_KNOWN_MAX 3", TRANSPORT_SOURCE)
+        for key in (
+            '"wifi_count"',
+            '"wifi0_ssid"',
+            '"wifi0_pwd"',
+            '"wifi1_ssid"',
+            '"wifi1_pwd"',
+            '"wifi2_ssid"',
+            '"wifi2_pwd"',
+        ):
+            self.assertIn(key, TRANSPORT_SOURCE)
+        got_ip = TRANSPORT_SOURCE[
+            TRANSPORT_SOURCE.index("IP_EVENT_STA_GOT_IP"):
+            TRANSPORT_SOURCE.index("static esp_err_t nvs_read_string")
+        ]
+        self.assertIn("remember_current_wifi_network()", got_ip)
+        update = TRANSPORT_SOURCE[
+            TRANSPORT_SOURCE.index("bool mac_transport_update_wifi"):
+            TRANSPORT_SOURCE.index("size_t mac_transport_scan_wifi")
+        ]
+        self.assertNotIn("nvs_set_str", update)
+        self.assertIn("remembered after DHCP succeeds", update)
+
+    def test_remembered_networks_are_unique_by_exact_ssid(self):
+        promotion = TRANSPORT_SOURCE[
+            TRANSPORT_SOURCE.index("static esp_err_t promote_known_wifi_network(const wifi_known_network_t *network)\n{"):
+            TRANSPORT_SOURCE.index("static esp_err_t load_known_wifi_networks(const mac_transport_config_t *legacy_config)\n{")
+        ]
+        self.assertIn(
+            "if (strcmp(previous[index].ssid, network->ssid) == 0) continue",
+            promotion,
+        )
+        loader = TRANSPORT_SOURCE[
+            TRANSPORT_SOURCE.index("static esp_err_t load_known_wifi_networks(const mac_transport_config_t *legacy_config)\n{"):
+            TRANSPORT_SOURCE.index("static esp_err_t remember_current_wifi_network(void)\n{")
+        ]
+        self.assertIn("if (duplicate)", loader)
+        self.assertIn("needs_rewrite = true", loader)
+        self.assertIn("persist_known_wifi_networks()", loader)
+
+    def test_existing_single_network_migrates_and_driver_storage_is_ram_only(self):
+        self.assertIn("Migrated the existing Wi-Fi profile", TRANSPORT_SOURCE)
+        self.assertIn('nvs_read_string(handle, "wifi_ssid"', TRANSPORT_SOURCE)
+        self.assertIn('nvs_read_string(handle, "wifi_password"', TRANSPORT_SOURCE)
+        self.assertIn("esp_wifi_restore()", TRANSPORT_SOURCE)
+        self.assertIn("esp_wifi_set_storage(WIFI_STORAGE_RAM)", TRANSPORT_SOURCE)
+
+    def test_recovery_rotates_remembered_profiles(self):
+        self.assertIn("wifi_rotation_requested = true", TRANSPORT_SOURCE)
+        self.assertIn("apply_next_known_wifi_network()", TRANSPORT_SOURCE)
+        self.assertIn("Trying the next remembered Wi-Fi profile", TRANSPORT_SOURCE)
+        self.assertIn(
+            "wifi_known_network_count_snapshot > 1",
+            TRANSPORT_SOURCE,
+        )
+
+    def test_setup_identifies_connects_and_forgets_saved_networks(self):
+        self.assertIn('"%u/3 remembered / tap saved to connect / hold saved to forget"', UI_SOURCE)
+        self.assertIn('"SAVED  %s"', UI_SOURCE)
+        self.assertIn("LV_EVENT_LONG_PRESSED", UI_SOURCE)
+        self.assertIn("wifi_forget_callback(forgotten_ssid)", UI_SOURCE)
+        self.assertIn('wifi_selected_known ? "Connect" : "Save & connect"', UI_SOURCE)
+        self.assertIn("saved only after Wi-Fi connects", UI_SOURCE)
 
 
 if __name__ == "__main__":

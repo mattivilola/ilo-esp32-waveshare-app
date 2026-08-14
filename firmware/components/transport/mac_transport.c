@@ -36,6 +36,9 @@
 #define HOST_ADDRESS_MAX 254
 #define WIFI_SSID_MAX 33
 #define WIFI_PASSWORD_MAX 64
+#define WIFI_KNOWN_MAX 3
+#define WIFI_PROFILE_AUTH_FAILURES 2
+#define WIFI_PROFILE_NOT_FOUND_FAILURES 2
 #define PSK_SIZE 32
 #define DISCOVERY_TIMEOUT_MS 2000
 #define DISCOVERY_MAX_RESULTS 8
@@ -61,6 +64,11 @@ typedef struct {
     uint16_t host_port;
     uint8_t psk[PSK_SIZE];
 } mac_transport_config_t;
+
+typedef struct {
+    char ssid[WIFI_SSID_MAX];
+    char password[WIFI_PASSWORD_MAX];
+} wifi_known_network_t;
 
 typedef enum {
     MAC_CHANNEL_WIFI,
@@ -103,6 +111,13 @@ static esp_timer_handle_t wifi_recovery_timer;
 static uint32_t wifi_recovery_delay_ms = WIFI_RECONNECT_INITIAL_MS;
 static uint8_t wifi_auth_failure_count;
 static uint8_t wifi_not_found_count;
+static wifi_known_network_t wifi_known_networks[WIFI_KNOWN_MAX];
+static size_t wifi_known_network_count;
+static uint8_t wifi_known_network_count_snapshot;
+static size_t wifi_current_network_index;
+static wifi_known_network_t wifi_pending_network;
+static bool wifi_pending_network_valid;
+static bool wifi_rotation_requested;
 static SemaphoreHandle_t wifi_control_mutex;
 static ota_updater_status_t ota_status_pending;
 static bool ota_status_dirty;
@@ -117,6 +132,9 @@ static bool json_number_equals(cJSON *item, int expected);
 static void copy_json_string(cJSON *object, const char *name, char *destination, size_t size);
 static void copy_json_board_text(cJSON *object, const char *name, char *destination, size_t size);
 static void make_board_text_font_safe(char *text);
+static esp_err_t load_known_wifi_networks(const mac_transport_config_t *legacy_config);
+static esp_err_t remember_current_wifi_network(void);
+static esp_err_t apply_next_known_wifi_network(void);
 
 static bool json_array_contains_string(cJSON *array, const char *value)
 {
@@ -193,7 +211,8 @@ static void wifi_scan_task(void *argument)
         free(records);
         portENTER_CRITICAL(&refresh_lock);
         wifi_scan_in_progress = false;
-        bool should_reconnect = !wifi_update_in_progress;
+        bool should_reconnect = !wifi_update_in_progress
+            && (wifi_known_network_count_snapshot > 0 || wifi_pending_network_valid);
         if (should_reconnect) wifi_reconnect_suspended = false;
         portEXIT_CRITICAL(&refresh_lock);
         if (scan_status != ESP_OK) {
@@ -217,6 +236,12 @@ static void wifi_recovery_timer_callback(void *argument)
     bool reconnect = !wifi_reconnect_suspended;
     portEXIT_CRITICAL(&refresh_lock);
     if (!reconnect) return;
+
+    esp_err_t rotation_status = apply_next_known_wifi_network();
+    if (rotation_status != ESP_OK && rotation_status != ESP_ERR_INVALID_STATE
+        && rotation_status != ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "Could not rotate remembered Wi-Fi profile: %s", esp_err_to_name(rotation_status));
+    }
 
     esp_err_t status = esp_wifi_connect();
     if (status == ESP_OK) {
@@ -258,6 +283,7 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
         if (reconnect) {
             dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
             dashboard_wifi_connection_state_t state = DASHBOARD_WIFI_RETRYING;
+            bool rotate_profile = false;
             if (event != NULL) {
                 switch (event->reason) {
                 case WIFI_REASON_AUTH_FAIL:
@@ -266,7 +292,10 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
                 case WIFI_REASON_802_1X_AUTH_FAILED:
                     portENTER_CRITICAL(&refresh_lock);
                     if (wifi_auth_failure_count < UINT8_MAX) ++wifi_auth_failure_count;
-                    state = wifi_auth_failure_count >= 2
+                    rotate_profile = !wifi_pending_network_valid
+                        && wifi_known_network_count_snapshot > 1
+                        && wifi_auth_failure_count >= WIFI_PROFILE_AUTH_FAILURES;
+                    state = wifi_auth_failure_count >= WIFI_PROFILE_AUTH_FAILURES
                         ? DASHBOARD_WIFI_AUTH_FAILED
                         : DASHBOARD_WIFI_RETRYING;
                     portEXIT_CRITICAL(&refresh_lock);
@@ -277,6 +306,9 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
                 case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
                     portENTER_CRITICAL(&refresh_lock);
                     if (wifi_not_found_count < UINT8_MAX) ++wifi_not_found_count;
+                    rotate_profile = !wifi_pending_network_valid
+                        && wifi_known_network_count_snapshot > 1
+                        && wifi_not_found_count >= WIFI_PROFILE_NOT_FOUND_FAILURES;
                     state = wifi_not_found_count >= 3
                         ? DASHBOARD_WIFI_NOT_FOUND
                         : DASHBOARD_WIFI_RETRYING;
@@ -285,6 +317,15 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
                 default:
                     break;
                 }
+            }
+            if (rotate_profile) {
+                portENTER_CRITICAL(&refresh_lock);
+                wifi_rotation_requested = true;
+                wifi_auth_failure_count = 0;
+                wifi_not_found_count = 0;
+                portEXIT_CRITICAL(&refresh_lock);
+                state = DASHBOARD_WIFI_RETRYING;
+                ESP_LOGI(TAG, "Trying the next remembered Wi-Fi profile");
             }
             dashboard_ui_set_wifi_connection_state(state);
             request_wifi_recovery();
@@ -297,6 +338,10 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
         wifi_not_found_count = 0;
         portEXIT_CRITICAL(&refresh_lock);
         if (wifi_recovery_timer != NULL) (void)esp_timer_stop(wifi_recovery_timer);
+        esp_err_t remember_status = remember_current_wifi_network();
+        if (remember_status != ESP_OK) {
+            ESP_LOGW(TAG, "Connected Wi-Fi profile could not be remembered: %s", esp_err_to_name(remember_status));
+        }
         ESP_LOGI(TAG, "Wi-Fi obtained an IP address");
         dashboard_ui_set_wifi_connection_state(DASHBOARD_WIFI_CONNECTED);
     }
@@ -314,6 +359,226 @@ static esp_err_t nvs_read_string(
     if (status == ESP_OK && (required_size == 0 || required_size > destination_size)) {
         return ESP_ERR_INVALID_SIZE;
     }
+    return status;
+}
+
+static const char *wifi_ssid_keys[WIFI_KNOWN_MAX] = {
+    "wifi0_ssid",
+    "wifi1_ssid",
+    "wifi2_ssid",
+};
+
+static const char *wifi_password_keys[WIFI_KNOWN_MAX] = {
+    "wifi0_pwd",
+    "wifi1_pwd",
+    "wifi2_pwd",
+};
+
+static bool wifi_network_is_valid(const wifi_known_network_t *network)
+{
+    if (network == NULL) return false;
+    size_t ssid_size = strlen(network->ssid);
+    size_t password_size = strlen(network->password);
+    return ssid_size > 0 && ssid_size <= 32 && password_size >= 8 && password_size <= 63;
+}
+
+static void make_wifi_config(const wifi_known_network_t *network, wifi_config_t *config)
+{
+    memset(config, 0, sizeof(*config));
+    if (network == NULL) return;
+    memcpy(config->sta.ssid, network->ssid, strlen(network->ssid));
+    memcpy(config->sta.password, network->password, strlen(network->password));
+    config->sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+}
+
+static esp_err_t erase_nvs_key_if_present(nvs_handle_t handle, const char *key)
+{
+    esp_err_t status = nvs_erase_key(handle, key);
+    return status == ESP_ERR_NVS_NOT_FOUND ? ESP_OK : status;
+}
+
+static esp_err_t persist_known_wifi_networks(void)
+{
+    nvs_handle_t handle = 0;
+    esp_err_t status = nvs_open("ilo_board", NVS_READWRITE, &handle);
+    if (status == ESP_OK) status = nvs_set_u8(handle, "wifi_count", (uint8_t)wifi_known_network_count);
+    for (size_t index = 0; status == ESP_OK && index < WIFI_KNOWN_MAX; ++index) {
+        if (index < wifi_known_network_count) {
+            status = nvs_set_str(handle, wifi_ssid_keys[index], wifi_known_networks[index].ssid);
+            if (status == ESP_OK) {
+                status = nvs_set_str(handle, wifi_password_keys[index], wifi_known_networks[index].password);
+            }
+        } else {
+            status = erase_nvs_key_if_present(handle, wifi_ssid_keys[index]);
+            if (status == ESP_OK) status = erase_nvs_key_if_present(handle, wifi_password_keys[index]);
+        }
+    }
+    if (status == ESP_OK && wifi_known_network_count > 0) {
+        status = nvs_set_str(handle, "wifi_ssid", wifi_known_networks[0].ssid);
+        if (status == ESP_OK) {
+            status = nvs_set_str(handle, "wifi_password", wifi_known_networks[0].password);
+        }
+    } else if (status == ESP_OK) {
+        status = erase_nvs_key_if_present(handle, "wifi_ssid");
+        if (status == ESP_OK) status = erase_nvs_key_if_present(handle, "wifi_password");
+    }
+    if (status == ESP_OK) status = nvs_commit(handle);
+    if (handle != 0) nvs_close(handle);
+    return status;
+}
+
+static esp_err_t promote_known_wifi_network(const wifi_known_network_t *network)
+{
+    if (!wifi_network_is_valid(network)) return ESP_ERR_INVALID_ARG;
+    wifi_known_network_t previous[WIFI_KNOWN_MAX];
+    memcpy(previous, wifi_known_networks, sizeof(previous));
+    size_t previous_count = wifi_known_network_count;
+
+    wifi_known_network_t reordered[WIFI_KNOWN_MAX] = { 0 };
+    reordered[0] = *network;
+    size_t next = 1;
+    for (size_t index = 0; index < previous_count && next < WIFI_KNOWN_MAX; ++index) {
+        if (strcmp(previous[index].ssid, network->ssid) == 0) continue;
+        reordered[next++] = previous[index];
+    }
+    memcpy(wifi_known_networks, reordered, sizeof(reordered));
+    wifi_known_network_count = next;
+    esp_err_t status = persist_known_wifi_networks();
+    if (status != ESP_OK) {
+        memcpy(wifi_known_networks, previous, sizeof(previous));
+        wifi_known_network_count = previous_count;
+        return status;
+    }
+    wifi_current_network_index = 0;
+    portENTER_CRITICAL(&refresh_lock);
+    wifi_known_network_count_snapshot = (uint8_t)wifi_known_network_count;
+    portEXIT_CRITICAL(&refresh_lock);
+    return ESP_OK;
+}
+
+static esp_err_t load_known_wifi_networks(const mac_transport_config_t *legacy_config)
+{
+    memset(wifi_known_networks, 0, sizeof(wifi_known_networks));
+    wifi_known_network_count = 0;
+    nvs_handle_t handle = 0;
+    esp_err_t status = nvs_open("ilo_board", NVS_READONLY, &handle);
+    uint8_t stored_count = 0;
+    bool needs_rewrite = false;
+    if (status == ESP_OK) status = nvs_get_u8(handle, "wifi_count", &stored_count);
+    if (status == ESP_OK && stored_count <= WIFI_KNOWN_MAX) {
+        for (size_t index = 0; index < stored_count; ++index) {
+            wifi_known_network_t loaded = { 0 };
+            status = nvs_read_string(
+                handle,
+                wifi_ssid_keys[index],
+                loaded.ssid,
+                sizeof(loaded.ssid)
+            );
+            if (status == ESP_OK) {
+                status = nvs_read_string(
+                    handle,
+                    wifi_password_keys[index],
+                    loaded.password,
+                    sizeof(loaded.password)
+                );
+            }
+            if (status != ESP_OK || !wifi_network_is_valid(&loaded)) break;
+            bool duplicate = false;
+            for (size_t existing = 0; existing < wifi_known_network_count; ++existing) {
+                if (strcmp(wifi_known_networks[existing].ssid, loaded.ssid) == 0) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) {
+                needs_rewrite = true;
+                continue;
+            }
+            wifi_known_networks[wifi_known_network_count] = loaded;
+            ++wifi_known_network_count;
+        }
+    }
+    if (handle != 0) nvs_close(handle);
+    if (status == ESP_OK && wifi_known_network_count > 0) {
+        return needs_rewrite ? persist_known_wifi_networks() : ESP_OK;
+    }
+    if (status == ESP_OK && stored_count == 0) return ESP_OK;
+
+    memset(wifi_known_networks, 0, sizeof(wifi_known_networks));
+    wifi_known_network_count = 0;
+    if (legacy_config == NULL || legacy_config->wifi_ssid[0] == 0
+        || legacy_config->wifi_password[0] == 0) {
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+    strlcpy(wifi_known_networks[0].ssid, legacy_config->wifi_ssid, WIFI_SSID_MAX);
+    strlcpy(wifi_known_networks[0].password, legacy_config->wifi_password, WIFI_PASSWORD_MAX);
+    if (!wifi_network_is_valid(&wifi_known_networks[0])) return ESP_ERR_INVALID_STATE;
+    wifi_known_network_count = 1;
+    status = persist_known_wifi_networks();
+    if (status == ESP_OK) ESP_LOGI(TAG, "Migrated the existing Wi-Fi profile into remembered networks");
+    return status;
+}
+
+static esp_err_t remember_current_wifi_network(void)
+{
+    if (wifi_control_mutex == NULL
+        || xSemaphoreTake(wifi_control_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    wifi_known_network_t connected = { 0 };
+    portENTER_CRITICAL(&refresh_lock);
+    bool has_pending = wifi_pending_network_valid;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (has_pending) {
+        connected = wifi_pending_network;
+    } else if (wifi_current_network_index < wifi_known_network_count) {
+        connected = wifi_known_networks[wifi_current_network_index];
+    }
+    esp_err_t status = ESP_ERR_INVALID_STATE;
+    if (wifi_network_is_valid(&connected)) {
+        status = !has_pending && wifi_current_network_index == 0
+            ? ESP_OK
+            : promote_known_wifi_network(&connected);
+    }
+    if (status == ESP_OK) {
+        portENTER_CRITICAL(&refresh_lock);
+        wifi_pending_network_valid = false;
+        wifi_rotation_requested = false;
+        portEXIT_CRITICAL(&refresh_lock);
+    }
+    size_t remembered_count = wifi_known_network_count;
+    xSemaphoreGive(wifi_control_mutex);
+    if (status == ESP_OK) dashboard_ui_set_wifi_known_count(remembered_count);
+    return status;
+}
+
+static esp_err_t apply_next_known_wifi_network(void)
+{
+    portENTER_CRITICAL(&refresh_lock);
+    bool rotate = wifi_rotation_requested && !wifi_pending_network_valid;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (!rotate) return ESP_ERR_INVALID_STATE;
+    if (wifi_control_mutex == NULL || xSemaphoreTake(wifi_control_mutex, 0) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (wifi_known_network_count == 0) {
+        portENTER_CRITICAL(&refresh_lock);
+        wifi_rotation_requested = false;
+        portEXIT_CRITICAL(&refresh_lock);
+        xSemaphoreGive(wifi_control_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    size_t next = (wifi_current_network_index + 1) % wifi_known_network_count;
+    wifi_config_t config = { 0 };
+    make_wifi_config(&wifi_known_networks[next], &config);
+    esp_err_t status = esp_wifi_set_config(WIFI_IF_STA, &config);
+    if (status == ESP_OK) {
+        wifi_current_network_index = next;
+        portENTER_CRITICAL(&refresh_lock);
+        wifi_rotation_requested = false;
+        portEXIT_CRITICAL(&refresh_lock);
+    }
+    xSemaphoreGive(wifi_control_mutex);
     return status;
 }
 
@@ -365,6 +630,16 @@ static esp_err_t load_wifi_config(mac_transport_config_t *config)
 
 static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
 {
+    esp_err_t known_status = load_known_wifi_networks(transport_config);
+    if (known_status != ESP_OK && known_status != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Remembered Wi-Fi profiles could not be loaded: %s", esp_err_to_name(known_status));
+    }
+    wifi_current_network_index = 0;
+    portENTER_CRITICAL(&refresh_lock);
+    wifi_known_network_count_snapshot = (uint8_t)wifi_known_network_count;
+    wifi_reconnect_suspended = wifi_known_network_count == 0;
+    portEXIT_CRITICAL(&refresh_lock);
+    dashboard_ui_set_wifi_known_count(wifi_known_network_count);
     wifi_events = xEventGroupCreate();
     if (wifi_events == NULL) {
         return ESP_ERR_NO_MEM;
@@ -374,6 +649,28 @@ static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
     esp_netif_create_default_wifi_sta();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "Wi-Fi init failed");
+
+    nvs_handle_t storage_handle = 0;
+    uint8_t ram_storage_migrated = 0;
+    esp_err_t storage_status = nvs_open("ilo_board", NVS_READWRITE, &storage_handle);
+    if (storage_status == ESP_OK) {
+        storage_status = nvs_get_u8(storage_handle, "wifi_ram_v1", &ram_storage_migrated);
+        if (storage_status == ESP_ERR_NVS_NOT_FOUND) storage_status = ESP_OK;
+    }
+    if (storage_status == ESP_OK && ram_storage_migrated != 1) {
+        storage_status = esp_wifi_restore();
+        if (storage_status == ESP_OK) storage_status = nvs_set_u8(storage_handle, "wifi_ram_v1", 1);
+        if (storage_status == ESP_OK) storage_status = nvs_commit(storage_handle);
+    }
+    if (storage_handle != 0) nvs_close(storage_handle);
+    if (storage_status != ESP_OK) {
+        ESP_LOGW(TAG, "Wi-Fi driver storage migration failed: %s", esp_err_to_name(storage_status));
+    }
+    ESP_RETURN_ON_ERROR(
+        esp_wifi_set_storage(WIFI_STORAGE_RAM),
+        TAG,
+        "Wi-Fi RAM-only storage failed"
+    );
     ESP_RETURN_ON_ERROR(
         esp_wifi_set_country_code("FI", true),
         TAG,
@@ -398,11 +695,9 @@ static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL), TAG, "IP handler failed");
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "Wi-Fi mode failed");
-    if (transport_config->wifi_ssid[0] != 0) {
+    if (wifi_known_network_count > 0) {
         wifi_config_t config = { 0 };
-        memcpy(config.sta.ssid, transport_config->wifi_ssid, strlen(transport_config->wifi_ssid));
-        memcpy(config.sta.password, transport_config->wifi_password, strlen(transport_config->wifi_password));
-        config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+        make_wifi_config(&wifi_known_networks[0], &config);
         ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config failed");
     }
     return esp_wifi_start();
@@ -1895,14 +2190,31 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
     if (wifi_events == NULL || ssid == NULL || password == NULL) return false;
     size_t ssid_size = strlen(ssid);
     size_t password_size = strlen(password);
-    if (ssid_size == 0 || ssid_size > 32 || password_size < 8 || password_size > 63) return false;
+    if (ssid_size == 0 || ssid_size > 32 || password_size > 63) return false;
     if (wifi_control_mutex == NULL
         || xSemaphoreTake(wifi_control_mutex, portMAX_DELAY) != pdTRUE) return false;
 
+    wifi_known_network_t requested = { 0 };
+    size_t requested_known_index = WIFI_KNOWN_MAX;
+    strlcpy(requested.ssid, ssid, sizeof(requested.ssid));
+    if (password_size == 0) {
+        for (size_t index = 0; index < wifi_known_network_count; ++index) {
+            if (strcmp(wifi_known_networks[index].ssid, ssid) == 0) {
+                requested = wifi_known_networks[index];
+                requested_known_index = index;
+                break;
+            }
+        }
+    } else {
+        strlcpy(requested.password, password, sizeof(requested.password));
+    }
+    if (!wifi_network_is_valid(&requested)) {
+        xSemaphoreGive(wifi_control_mutex);
+        return false;
+    }
+
     wifi_config_t config = { 0 };
-    memcpy(config.sta.ssid, ssid, ssid_size);
-    memcpy(config.sta.password, password, password_size);
-    config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    make_wifi_config(&requested, &config);
 
     wifi_config_t previous_config = { 0 };
     esp_err_t status = esp_wifi_get_config(WIFI_IF_STA, &previous_config);
@@ -1920,15 +2232,17 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
     (void)esp_wifi_scan_stop();
     status = esp_wifi_stop();
     if (status == ESP_OK) status = esp_wifi_set_config(WIFI_IF_STA, &config);
-
-    nvs_handle_t handle = 0;
-    if (status == ESP_OK) status = nvs_open("ilo_board", NVS_READWRITE, &handle);
-    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_ssid", ssid);
-    if (status == ESP_OK) status = nvs_set_str(handle, "wifi_password", password);
-    if (status == ESP_OK) status = nvs_commit(handle);
-    if (handle != 0) nvs_close(handle);
     if (status != ESP_OK) {
         (void)esp_wifi_set_config(WIFI_IF_STA, &previous_config);
+    } else {
+        wifi_pending_network = requested;
+        wifi_current_network_index = requested_known_index < wifi_known_network_count
+            ? requested_known_index
+            : 0;
+        portENTER_CRITICAL(&refresh_lock);
+        wifi_pending_network_valid = password_size > 0;
+        wifi_rotation_requested = false;
+        portEXIT_CRITICAL(&refresh_lock);
     }
 
     portENTER_CRITICAL(&refresh_lock);
@@ -1947,7 +2261,11 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
         return false;
     }
     dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_CONNECTING);
-    ESP_LOGI(TAG, "Saved new Wi-Fi credentials; reconnecting");
+    if (password_size > 0) {
+        ESP_LOGI(TAG, "Testing Wi-Fi credentials; they will be remembered after DHCP succeeds");
+    } else {
+        ESP_LOGI(TAG, "Connecting with a remembered Wi-Fi profile");
+    }
     return true;
 }
 
@@ -1972,6 +2290,89 @@ size_t mac_transport_scan_wifi(char (*ssids)[33], size_t maximum_count)
     portEXIT_CRITICAL(&refresh_lock);
     if (should_start) xTaskNotifyGive(wifi_scan_task_handle);
     return available;
+}
+
+size_t mac_transport_known_wifi(char (*ssids)[33], size_t maximum_count)
+{
+    if (ssids == NULL || maximum_count == 0 || wifi_control_mutex == NULL
+        || xSemaphoreTake(wifi_control_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return 0;
+    size_t available = wifi_known_network_count < maximum_count
+        ? wifi_known_network_count
+        : maximum_count;
+    for (size_t index = 0; index < available; ++index) {
+        strlcpy(ssids[index], wifi_known_networks[index].ssid, WIFI_SSID_MAX);
+    }
+    xSemaphoreGive(wifi_control_mutex);
+    return available;
+}
+
+bool mac_transport_forget_wifi(const char *ssid)
+{
+    if (ssid == NULL || ssid[0] == 0 || wifi_control_mutex == NULL
+        || xSemaphoreTake(wifi_control_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) return false;
+    size_t removed = WIFI_KNOWN_MAX;
+    for (size_t index = 0; index < wifi_known_network_count; ++index) {
+        if (strcmp(wifi_known_networks[index].ssid, ssid) == 0) {
+            removed = index;
+            break;
+        }
+    }
+    if (removed == WIFI_KNOWN_MAX) {
+        xSemaphoreGive(wifi_control_mutex);
+        return false;
+    }
+
+    bool removed_current = removed == wifi_current_network_index;
+    wifi_known_network_t previous[WIFI_KNOWN_MAX];
+    memcpy(previous, wifi_known_networks, sizeof(previous));
+    size_t previous_count = wifi_known_network_count;
+    for (size_t index = removed; index + 1 < wifi_known_network_count; ++index) {
+        wifi_known_networks[index] = wifi_known_networks[index + 1];
+    }
+    memset(&wifi_known_networks[wifi_known_network_count - 1], 0, sizeof(wifi_known_networks[0]));
+    --wifi_known_network_count;
+    esp_err_t status = persist_known_wifi_networks();
+    if (status != ESP_OK) {
+        memcpy(wifi_known_networks, previous, sizeof(previous));
+        wifi_known_network_count = previous_count;
+        xSemaphoreGive(wifi_control_mutex);
+        ESP_LOGW(TAG, "Could not forget Wi-Fi profile: %s", esp_err_to_name(status));
+        return false;
+    }
+
+    portENTER_CRITICAL(&refresh_lock);
+    wifi_known_network_count_snapshot = (uint8_t)wifi_known_network_count;
+    if (wifi_pending_network_valid && strcmp(wifi_pending_network.ssid, ssid) == 0) {
+        wifi_pending_network_valid = false;
+    }
+    if (removed_current && wifi_known_network_count > 0) {
+        wifi_current_network_index = wifi_known_network_count - 1;
+        wifi_rotation_requested = true;
+        wifi_reconnect_suspended = true;
+    } else if (removed_current) {
+        wifi_current_network_index = 0;
+        wifi_rotation_requested = false;
+        wifi_reconnect_suspended = true;
+    } else if (removed < wifi_current_network_index) {
+        --wifi_current_network_index;
+    } else if (wifi_current_network_index >= wifi_known_network_count) {
+        wifi_current_network_index = 0;
+    }
+    portEXIT_CRITICAL(&refresh_lock);
+    size_t remaining = wifi_known_network_count;
+    xSemaphoreGive(wifi_control_mutex);
+    if (removed_current) {
+        (void)esp_wifi_disconnect();
+        xEventGroupClearBits(wifi_events, WIFI_READY_BIT);
+        if (remaining > 0) {
+            portENTER_CRITICAL(&refresh_lock);
+            wifi_reconnect_suspended = false;
+            portEXIT_CRITICAL(&refresh_lock);
+            request_wifi_recovery();
+        }
+    }
+    ESP_LOGI(TAG, "Forgot one Wi-Fi profile; %u remembered", (unsigned int)remaining);
+    return true;
 }
 
 bool mac_transport_start_wifi_only(void)

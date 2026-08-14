@@ -108,8 +108,15 @@ esp_err_t dashboard_ui_present_boot(void);
 void dashboard_ui_set_model(const dashboard_model_t *model);
 typedef bool (*dashboard_wifi_update_callback_t)(const char *ssid, const char *password);
 typedef size_t (*dashboard_wifi_scan_callback_t)(char (*ssids)[33], size_t maximum_count);
+typedef size_t (*dashboard_wifi_known_callback_t)(char (*ssids)[33], size_t maximum_count);
+typedef bool (*dashboard_wifi_forget_callback_t)(const char *ssid);
 void dashboard_ui_set_wifi_update_callback(dashboard_wifi_update_callback_t callback);
 void dashboard_ui_set_wifi_scan_callback(dashboard_wifi_scan_callback_t callback);
+void dashboard_ui_set_wifi_known_callbacks(
+    dashboard_wifi_known_callback_t known_callback,
+    dashboard_wifi_forget_callback_t forget_callback
+);
+void dashboard_ui_set_wifi_known_count(size_t count);
 void dashboard_ui_set_wifi_connection_state(dashboard_wifi_connection_state_t state);
 void dashboard_ui_set_connection_state(dashboard_connection_state_t state);
 void dashboard_ui_set_weather(const weather_model_t *model);

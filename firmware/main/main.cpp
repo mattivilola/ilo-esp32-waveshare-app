@@ -57,6 +57,7 @@ extern "C" void app_main()
     dashboard_ui_set_x_news_refresh_callback(mac_transport_request_x_news_refresh);
     dashboard_ui_set_wifi_update_callback(mac_transport_update_wifi);
     dashboard_ui_set_wifi_scan_callback(mac_transport_scan_wifi);
+    dashboard_ui_set_wifi_known_callbacks(mac_transport_known_wifi, mac_transport_forget_wifi);
     dashboard_ui_set_codex_chat_callback(mac_transport_request_codex_chat);
     dashboard_ui_set_codex_continue_callback(mac_transport_request_codex_continue);
     dashboard_ui_set_focus_completion_callback(mac_transport_publish_focus_completion);
