@@ -19,7 +19,7 @@ bool mac_transport_start_wifi_only(void);
 bool mac_transport_wait_for_network(uint32_t timeout_ms);
 bool mac_transport_request_x_news_refresh(void);
 bool mac_transport_request_codex_chat(const char *task_id);
-bool mac_transport_request_codex_continue(const char *task_id);
+bool mac_transport_request_codex_action(const char *task_id, dashboard_codex_action_t action);
 bool mac_transport_update_wifi(const char *ssid, const char *password);
 size_t mac_transport_scan_wifi(char (*ssids)[33], size_t maximum_count);
 size_t mac_transport_known_wifi(char (*ssids)[33], size_t maximum_count);

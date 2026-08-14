@@ -24,7 +24,7 @@ Shared wire contracts live in `protocol/`; board lifecycle tooling lives in `too
 
 ## Current phase
 
-Phase 1 keeps Codex access narrow. Recent task metadata remains read-only, while one fixed board-originated action can resume an eligible idle task with exactly `Please continue.` after a hold and separate confirmation. A second narrowly bounded, rate-limited action can refresh X News after prior Mac-side opt-in. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion reads real recent task history through the supported local Codex App Server and shares only bounded board-facing data: MacBook power state, local timezone, and—only after explicit permission—coarse weather coordinates. Deterministic mock task data remains available for demos and tests. The board still cannot approve commands, apply file changes, answer questions, send arbitrary text, or grant permissions.
+Phase 1 keeps Codex access narrow. The board shows up to ten recent tasks and bounded read-only chat. After explicit Mac opt-in, hold plus separate confirmation can send only fixed Continue or current Plan Approve/Reject actions; the Mac rechecks the task and constructs all text locally. A second narrowly bounded, rate-limited action can refresh X News after prior Mac-side opt-in. The physical 5B display, GT911 touch, USB provisioning, Wi-Fi connection, TLS-PSK authentication, macOS menu-bar status, and recurring board snapshot delivery are hardware-verified. The Mac companion reads real recent task history through the supported local Codex App Server and shares only bounded board-facing data: MacBook power state, local timezone, and—only after explicit permission—coarse weather coordinates. Deterministic mock task data remains available for demos and tests. The board still cannot approve commands, apply file permissions, answer questions, send arbitrary text, or grant permissions.
 
 Hardware-independent development can continue without a board: the Swift service and tests, universal `.app`/DMG packaging, protocol work, generated UI assets, firmware compilation, and desktop UI previews do not require a connected display. Flashing, live touch behavior, RGB timing, backlight control, Wi-Fi behavior, power use, and actual-device screenshots remain hardware verification gates.
 
@@ -177,7 +177,7 @@ The Make target stores timestamped files under `artifacts/board-screenshots/` by
 ### Four- or five-screen information architecture
 
 1. **Dashboard** — the glanceable work pulse: attention count, recent Codex work, connection state, current weather, and a latest-X-news or task-count signal. Tapping a Codex row opens that related chat already selected on the Codex screen.
-2. **Codex** — an optional Mac-backed screen with recent sanitized task status plus a hold-confirmed, fixed “Please continue.” action for eligible idle tasks.
+2. **Codex** — an optional Mac-backed screen with a scrollable ten-task recent list, bounded chat/meta detail, and hold-confirmed fixed Continue or current-plan Approve/Reject actions.
 3. **X News** — an optional rolling 24-hour AI/robotics brief containing bounded direct X posts. Vertically scroll up to fifteen posts, tap any row to read its detail view, and swipe horizontally between screens.
 4. **Weather** — current/near-term conditions, clearly labeling sample, stale, or offline data.
 5. **Settings** — display power, screensaver, connectivity, privacy, and safe setup routes.
@@ -245,7 +245,7 @@ The first real adapter keeps task data read-only and exposes one fixed continuat
 - A separately launched App Server can truthfully list recent stored tasks, including tasks created in Codex Desktop.
 - Codex Desktop-owned tasks currently appear as `notLoaded` to that separate server, so it cannot truthfully claim their live running, approval, or question state.
 - Authoritative live status is available only for tasks loaded/owned by the companion's App Server until OpenAI exposes a supported Desktop attachment.
-- After explicit opt-in in the Mac companion, an idle or unloaded visible task can be resumed only with the Mac-constructed message `Please continue.` after hold-to-arm plus separate confirmation. Disabling the Mac control revokes it on the next snapshot.
+- After explicit opt-in in the Mac companion, an idle/unloaded visible task can receive only the Mac-constructed `Please continue.` message, while a task whose newest completed turn contains a plan can receive only Approve (implement that re-fetched plan in default mode) or Reject (request revision in Plan mode). Every action uses hold-to-arm plus separate confirmation, and disabling Mac control revokes them on the next snapshot.
 - Remote answers, approvals, arbitrary text, command execution, active-turn steering, and permission changes remain disabled in Phase 1.
 
 Do not copy Codex credentials into firmware or NVS. Any future write/control capability must be separately paired, narrowly scoped, visibly confirmed, replay-protected, and auditable.

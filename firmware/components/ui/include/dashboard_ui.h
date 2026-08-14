@@ -63,7 +63,16 @@ typedef enum {
     DASHBOARD_CODEX_CONTINUE_FAILED,
 } dashboard_codex_continue_state_t;
 
-typedef bool (*dashboard_codex_continue_callback_t)(const char *task_id);
+typedef enum {
+    DASHBOARD_CODEX_ACTION_CONTINUE,
+    DASHBOARD_CODEX_ACTION_APPROVE_PLAN,
+    DASHBOARD_CODEX_ACTION_REJECT_PLAN,
+} dashboard_codex_action_t;
+
+typedef bool (*dashboard_codex_action_callback_t)(
+    const char *task_id,
+    dashboard_codex_action_t action
+);
 
 #define DASHBOARD_CODEX_CHAT_MAX_MESSAGES 6
 #define DASHBOARD_CODEX_CHAT_TEXT_MAX 360
@@ -90,6 +99,11 @@ typedef struct {
     char task_id[81];
     char title[81];
     char status_message[96];
+    dashboard_task_state_t task_state;
+    dashboard_attention_t attention;
+    int64_t updated_epoch;
+    uint8_t action_count;
+    dashboard_codex_action_t actions[2];
     uint8_t message_count;
     dashboard_codex_chat_message_t messages[DASHBOARD_CODEX_CHAT_MAX_MESSAGES];
 } dashboard_codex_chat_detail_t;
@@ -122,7 +136,7 @@ void dashboard_ui_set_connection_state(dashboard_connection_state_t state);
 void dashboard_ui_set_weather(const weather_model_t *model);
 void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_t callback);
 void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t state);
-void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_t callback);
+void dashboard_ui_set_codex_action_callback(dashboard_codex_action_callback_t callback);
 void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t state);
 void dashboard_ui_set_codex_chat_callback(dashboard_codex_chat_callback_t callback);
 void dashboard_ui_set_codex_chat_detail(const dashboard_codex_chat_detail_t *detail);

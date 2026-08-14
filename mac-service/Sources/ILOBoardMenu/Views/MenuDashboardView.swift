@@ -60,14 +60,14 @@ struct MenuDashboardView: View {
             store.refreshXNewsStatus()
         }
         .confirmationDialog(
-            "Enable board Continue action?",
+            "Enable fixed board Codex actions?",
             isPresented: $showingCodexContinueConsent,
             titleVisibility: .visible
         ) {
-            Button("Enable Fixed Continue") { store.enableCodexContinue() }
+            Button("Enable Fixed Actions") { store.enableCodexContinue() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("After you hold and separately confirm on the paired board, it may resume one idle visible Codex task with exactly “Please continue.” It cannot approve commands, answer questions, or send other text.")
+            Text("After you hold and separately confirm on the paired board, it may continue an idle task, approve the latest completed Plan-mode plan, or return that plan for revision. The Mac rechecks the task and constructs every fixed message; the board cannot send arbitrary text, approve commands, or grant permissions.")
         }
         .confirmationDialog(
             "Enable X News?",
@@ -319,13 +319,13 @@ struct MenuDashboardView: View {
     private var codexContinueQuickControl: some View {
         HStack(spacing: 9) {
             quickControlIcon("play.circle")
-            Text("Codex Continue")
+            Text("Codex Actions")
                 .font(.caption.weight(.medium))
             Spacer(minLength: 8)
             Text(store.codexContinueEnabled ? "Enabled" : "Off")
                 .font(.caption2)
                 .foregroundStyle(store.codexContinueEnabled ? .green : .secondary)
-            Toggle("Codex Continue", isOn: codexContinueBinding)
+            Toggle("Codex Actions", isOn: codexContinueBinding)
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.mini)
@@ -567,21 +567,21 @@ struct MenuDashboardView: View {
     private var codexContinueControls: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Label("Codex Continue", systemImage: "play.circle")
+                Label("Codex Actions", systemImage: "play.circle")
                     .font(.caption.weight(.semibold))
                 Spacer()
                 Text(store.codexContinueEnabled ? "Enabled" : "Off")
                     .font(.caption)
                     .foregroundStyle(store.codexContinueEnabled ? .green : .secondary)
             }
-            Text("Allows only the fixed “Please continue.” message for an idle visible task after hold plus separate confirmation on the board.")
+            Text("Allows fixed Continue and Plan Approve/Reject actions after hold plus separate confirmation on the board. Command approvals and arbitrary text remain blocked.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             if store.codexContinueEnabled {
                 Button("Disable") { store.disableCodexContinue() }
             } else {
-                Button("Enable Fixed Continue…") { showingCodexContinueConsent = true }
+                Button("Enable Fixed Actions…") { showingCodexContinueConsent = true }
             }
         }
         .padding(.vertical, 10)

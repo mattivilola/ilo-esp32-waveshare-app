@@ -99,6 +99,7 @@ static bool codex_continue_requested;
 static bool codex_continue_in_flight;
 static char codex_continue_task_id[CODEX_TASK_ID_MAX + 1];
 static char codex_continue_request_id[25];
+static dashboard_codex_action_t codex_continue_action;
 static bool wifi_scan_in_progress;
 static bool wifi_scan_requested_once;
 static bool wifi_reconnect_suspended;
@@ -113,6 +114,9 @@ static uint8_t wifi_auth_failure_count;
 static uint8_t wifi_not_found_count;
 static wifi_known_network_t wifi_known_networks[WIFI_KNOWN_MAX];
 static size_t wifi_known_network_count;
+
+static dashboard_task_state_t task_state(const char *value);
+static dashboard_attention_t attention(const char *value);
 static uint8_t wifi_known_network_count_snapshot;
 static size_t wifi_current_network_index;
 static wifi_known_network_t wifi_pending_network;
@@ -1058,13 +1062,20 @@ static bool take_x_news_refresh_request(void)
     return requested;
 }
 
-static bool take_codex_continue_request(char *task_id, size_t task_id_size, char *request_id, size_t request_id_size)
+static bool take_codex_continue_request(
+    char *task_id,
+    size_t task_id_size,
+    char *request_id,
+    size_t request_id_size,
+    dashboard_codex_action_t *action
+)
 {
     portENTER_CRITICAL(&refresh_lock);
     bool requested = codex_continue_requested;
     if (requested) {
         strlcpy(task_id, codex_continue_task_id, task_id_size);
         strlcpy(request_id, codex_continue_request_id, request_id_size);
+        *action = codex_continue_action;
         codex_continue_requested = false;
         codex_continue_in_flight = true;
     }
@@ -1137,6 +1148,31 @@ static void handle_codex_chat_detail(cJSON *message)
     copy_json_string(message, "taskID", detail->task_id, sizeof(detail->task_id));
     copy_json_board_text(message, "title", detail->title, sizeof(detail->title));
     copy_json_board_text(message, "message", detail->status_message, sizeof(detail->status_message));
+    cJSON *task_state_item = cJSON_GetObjectItemCaseSensitive(message, "taskState");
+    cJSON *attention_item = cJSON_GetObjectItemCaseSensitive(message, "attentionKind");
+    cJSON *updated_epoch = cJSON_GetObjectItemCaseSensitive(message, "updatedEpoch");
+    detail->task_state = task_state(cJSON_IsString(task_state_item) ? task_state_item->valuestring : NULL);
+    detail->attention = attention(cJSON_IsString(attention_item) ? attention_item->valuestring : NULL);
+    detail->updated_epoch = cJSON_IsNumber(updated_epoch) ? (int64_t)updated_epoch->valuedouble : 0;
+
+    cJSON *actions = cJSON_GetObjectItemCaseSensitive(message, "availableActions");
+    if (cJSON_IsArray(actions)) {
+        cJSON *action = NULL;
+        cJSON_ArrayForEach(action, actions) {
+            if (detail->action_count >= 2 || !cJSON_IsString(action)) break;
+            dashboard_codex_action_t parsed;
+            if (strcmp(action->valuestring, "continue") == 0) {
+                parsed = DASHBOARD_CODEX_ACTION_CONTINUE;
+            } else if (strcmp(action->valuestring, "approvePlan") == 0) {
+                parsed = DASHBOARD_CODEX_ACTION_APPROVE_PLAN;
+            } else if (strcmp(action->valuestring, "rejectPlan") == 0) {
+                parsed = DASHBOARD_CODEX_ACTION_REJECT_PLAN;
+            } else {
+                continue;
+            }
+            detail->actions[detail->action_count++] = parsed;
+        }
+    }
 
     cJSON *messages = cJSON_GetObjectItemCaseSensitive(message, "messages");
     if (detail->state == DASHBOARD_CODEX_CHAT_READY && cJSON_IsArray(messages)) {
@@ -1163,7 +1199,12 @@ static void handle_codex_chat_detail(cJSON *message)
     free(detail);
 }
 
-static bool send_codex_continue_request(mac_channel_t *channel, const char *task_id, const char *request_id)
+static bool send_codex_continue_request(
+    mac_channel_t *channel,
+    const char *task_id,
+    const char *request_id,
+    dashboard_codex_action_t action
+)
 {
     cJSON *request = cJSON_CreateObject();
     if (request == NULL) return false;
@@ -1171,11 +1212,14 @@ static bool send_codex_continue_request(mac_channel_t *channel, const char *task
     cJSON_AddNumberToObject(request, "version", 1);
     cJSON_AddStringToObject(request, "requestID", request_id);
     cJSON_AddStringToObject(request, "taskID", task_id);
-    cJSON_AddStringToObject(request, "action", "continue");
+    const char *action_name = action == DASHBOARD_CODEX_ACTION_APPROVE_PLAN
+        ? "approvePlan"
+        : (action == DASHBOARD_CODEX_ACTION_REJECT_PLAN ? "rejectPlan" : "continue");
+    cJSON_AddStringToObject(request, "action", action_name);
     bool ok = channel_send_json(channel, request);
     cJSON_Delete(request);
     if (ok) {
-        ESP_LOGI(TAG, "Fixed Codex continue request sent to paired Mac");
+        ESP_LOGI(TAG, "Fixed Codex action request sent to paired Mac");
     }
     return ok;
 }
@@ -1718,6 +1762,8 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
                 legacy_codex_enabled = true;
             } else if (strcmp(capability->valuestring, "tasks.continue.fixed") == 0) {
                 model->codex_continue_enabled = true;
+            } else if (strcmp(capability->valuestring, "tasks.plan.fixed") == 0) {
+                model->codex_plan_enabled = true;
             }
         }
     }
@@ -1727,6 +1773,7 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
     if (!model->codex_enabled) {
         model->task_count = 0;
         model->codex_continue_enabled = false;
+        model->codex_plan_enabled = false;
     }
     cJSON *news_feed = cJSON_GetObjectItemCaseSensitive(snapshot, "newsFeed");
     cJSON *x_news_enabled = cJSON_GetObjectItemCaseSensitive(snapshot, "xNewsEnabled");
@@ -1839,6 +1886,7 @@ static void run_protocol_session(
         cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.read"));
         cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.chat.read"));
         cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.continue.fixed"));
+        cJSON_AddItemToArray(capabilities, cJSON_CreateString("tasks.plan.fixed"));
         cJSON_AddItemToArray(capabilities, cJSON_CreateString("display.capture.rgb565"));
         cJSON_AddItemToArray(capabilities, cJSON_CreateString("xNews.refresh.request"));
 #if CONFIG_ILO_OTA_DELIVERY
@@ -1902,12 +1950,19 @@ static void run_protocol_session(
         }
         char continue_task_id[CODEX_TASK_ID_MAX + 1];
         char continue_request_id[sizeof(codex_continue_request_id)];
+        dashboard_codex_action_t continue_action = DASHBOARD_CODEX_ACTION_CONTINUE;
         if (take_codex_continue_request(
                 continue_task_id,
                 sizeof(continue_task_id),
                 continue_request_id,
-                sizeof(continue_request_id)
-            ) && !send_codex_continue_request(channel, continue_task_id, continue_request_id)) {
+                sizeof(continue_request_id),
+                &continue_action
+            ) && !send_codex_continue_request(
+                channel,
+                continue_task_id,
+                continue_request_id,
+                continue_action
+            )) {
             dashboard_ui_set_codex_continue_state(DASHBOARD_CODEX_CONTINUE_FAILED);
             break;
         }
@@ -2114,7 +2169,7 @@ bool mac_transport_request_codex_chat(const char *task_id)
     return accepted;
 }
 
-bool mac_transport_request_codex_continue(const char *task_id)
+bool mac_transport_request_codex_action(const char *task_id, dashboard_codex_action_t action)
 {
     if (task_id == NULL) return false;
     size_t task_id_size = strlen(task_id);
@@ -2129,10 +2184,15 @@ bool mac_transport_request_codex_continue(const char *task_id)
         }
     }
 
+    if (action != DASHBOARD_CODEX_ACTION_CONTINUE
+        && action != DASHBOARD_CODEX_ACTION_APPROVE_PLAN
+        && action != DASHBOARD_CODEX_ACTION_REJECT_PLAN) return false;
+
     portENTER_CRITICAL(&refresh_lock);
     bool accepted = transport_online && !codex_continue_requested && !codex_continue_in_flight;
     if (accepted) {
         strlcpy(codex_continue_task_id, task_id, sizeof(codex_continue_task_id));
+        codex_continue_action = action;
         snprintf(
             codex_continue_request_id,
             sizeof(codex_continue_request_id),
@@ -2143,7 +2203,7 @@ bool mac_transport_request_codex_continue(const char *task_id)
         codex_continue_requested = true;
     }
     portEXIT_CRITICAL(&refresh_lock);
-    ESP_LOGI(TAG, "Codex continue action %s", accepted ? "queued" : "not queued");
+    ESP_LOGI(TAG, "Codex fixed action %s", accepted ? "queued" : "not queued");
     return accepted;
 }
 

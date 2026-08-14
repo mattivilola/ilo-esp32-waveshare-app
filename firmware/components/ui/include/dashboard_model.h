@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-#define DASHBOARD_MAX_TASKS 6
+#define DASHBOARD_MAX_TASKS 10
 #define DASHBOARD_MAX_NEWS 15
 #define DASHBOARD_NEWS_POST_TEXT_MAX 1800
 #define DASHBOARD_VERSION_MAX 32
@@ -69,6 +69,7 @@ typedef struct {
     dashboard_task_t tasks[DASHBOARD_MAX_TASKS];
     bool codex_enabled;
     bool codex_continue_enabled;
+    bool codex_plan_enabled;
     bool x_news_enabled;
     uint8_t news_count;
     dashboard_news_story_t news[DASHBOARD_MAX_NEWS];
