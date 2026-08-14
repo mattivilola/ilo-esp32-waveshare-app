@@ -37,6 +37,75 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     #expect(wire.stories[0].sources[0].postURL.hasPrefix("https://x.com/example_ai/status/"))
 }
 
+@Test func verifiedXNewsFeedCanCarryEightStories() throws {
+    let topics = (0..<8).map { index in
+        topic(
+            category: index.isMultiple(of: 2) ? "AI" : "Robotics",
+            headline: "Verified development \(index)",
+            handle: "@source\(index)",
+            date: referenceNow.addingTimeInterval(TimeInterval(-600 - index * 60))
+        )
+    }
+    let parsed = try GrokXNewsParser.parse(
+        grokOutput: grokEnvelope(feedDocuments: [feed(topics: topics)]),
+        now: referenceNow
+    )
+
+    #expect(GrokXNewsContract.maximumStories == 8)
+    #expect(parsed.stories.count == 8)
+    #expect(XNewsWireMapper.snapshot(from: parsed).stories.count == 8)
+}
+
+@Test func rollingFeedRetainsCurrentLastGoodStoriesAndDropsResearchNotes() throws {
+    let previous = XNewsFeed(
+        generatedAt: referenceNow.addingTimeInterval(-3_600),
+        stories: (0..<5).map { index in
+            testStory(
+                title: index == 4 ? "Need more robotics primaries" : "Previous \(index)",
+                handle: "@previous\(index)",
+                date: referenceNow.addingTimeInterval(TimeInterval(-3_600 - index * 60))
+            )
+        }
+    )
+    let candidate = XNewsFeed(
+        generatedAt: referenceNow,
+        stories: (0..<2).map { index in
+            testStory(
+                title: "New \(index)",
+                handle: "@new\(index)",
+                date: referenceNow.addingTimeInterval(TimeInterval(-600 - index * 60))
+            )
+        }
+    )
+
+    let merged = try XNewsRollingFeedMerger.merge(candidate: candidate, previous: previous, now: referenceNow)
+    #expect(merged.stories.count == 6)
+    #expect(merged.stories.prefix(2).map(\.title) == ["New 0", "New 1"])
+    #expect(!merged.stories.contains { $0.title.contains("Need more") })
+}
+
+@Test func researchProgressCannotBecomeABoardNewsStory() throws {
+    let output = try grokEnvelope(feedDocuments: [
+        feed(topics: [
+            topic(
+                category: "AI",
+                headline: "Remaining work is more AI primaries",
+                handle: "@notes",
+                date: referenceNow.addingTimeInterval(-600)
+            ),
+            topic(
+                category: "Robotics",
+                headline: "Real verified robotics launch",
+                handle: "@robot",
+                date: referenceNow.addingTimeInterval(-900)
+            ),
+        ]),
+    ])
+    #expect(throws: GrokXNewsError.self) {
+        try GrokXNewsParser.parse(grokOutput: output, now: referenceNow)
+    }
+}
+
 @Test func oneValidDocumentCanBeSelectedFromConcatenatedGrokOutput() throws {
     let unsourced = feed(topics: [
         topic(category: "AI", headline: "Missing source one", handle: "@one", date: referenceNow, includeSource: false),
@@ -271,6 +340,21 @@ private func topic(
             "post_url": "https://x.com/\(bareHandle)/status/\(snowflakeID(for: date))",
         ]] : [],
     ]
+}
+
+private func testStory(title: String, handle: String, date: Date) -> XNewsStory {
+    let bareHandle = String(handle.dropFirst())
+    return XNewsStory(
+        title: title,
+        summary: "A finished verified development for rolling-feed tests.",
+        category: .ai,
+        confidence: .high,
+        sources: [XNewsCitation(
+            handle: handle,
+            postedAt: date,
+            xURL: URL(string: "https://x.com/\(bareHandle)/status/\(snowflakeID(for: date))")!
+        )]
+    )
 }
 
 private func feed(topics: [[String: Any]]) -> [String: Any] {

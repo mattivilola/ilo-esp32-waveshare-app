@@ -237,6 +237,22 @@ import Testing
     }
 }
 
+@Test func xNewsWireFeedKeepsEightBoundedStories() {
+    let stories = (0..<12).map { index in
+        NewsStory(
+            id: "story-\(index)",
+            category: index.isMultiple(of: 2) ? "AI" : "Robotics",
+            headline: "Story \(index)",
+            summary: "Verified summary \(index)",
+            confidence: "high",
+            sources: []
+        )
+    }
+    let feed = NewsFeedSnapshot(generatedAt: Date(), stories: stories)
+    #expect(xNewsMaximumStories == 8)
+    #expect(feed.stories.count == xNewsMaximumStories)
+}
+
 @Test func legacySnapshotInfersCodexVisibilityFromTaskCapability() throws {
     let encoded = try ProtocolJSON.encoder().encode(DashboardSnapshot(revision: 1, tasks: []))
     var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])

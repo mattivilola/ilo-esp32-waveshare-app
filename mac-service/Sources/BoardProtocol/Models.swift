@@ -13,6 +13,7 @@ public let codexChatProtocolVersion = 1
 public let codexChatMaximumMessages = 6
 public let codexChatMaximumMessageCharacters = 360
 public let focusCompletionProtocolVersion = 1
+public let xNewsMaximumStories = 8
 
 public enum BoardDisplayText {
     /// LVGL's bundled Montserrat fonts intentionally cover a compact glyph set.
@@ -200,7 +201,7 @@ public struct NewsFeedSnapshot: Codable, Equatable, Sendable {
 
     public init(generatedAt: Date, stories: [NewsStory]) {
         self.generatedAt = generatedAt
-        self.stories = Array(stories.prefix(5))
+        self.stories = Array(stories.prefix(xNewsMaximumStories))
     }
 }
 

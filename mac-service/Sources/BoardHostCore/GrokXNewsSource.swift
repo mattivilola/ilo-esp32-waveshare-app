@@ -214,7 +214,7 @@ public enum GrokExecutableResolver {
 
 public enum GrokXNewsContract {
     public static let maximumAge: TimeInterval = 24 * 60 * 60
-    public static let maximumStories = 5
+    public static let maximumStories = xNewsMaximumStories
     public static let minimumStories = 2
 
     public static func prompt(now: Date) -> String {
@@ -233,13 +233,15 @@ public enum GrokXNewsContract {
         4) Deduplicate stories. Skip items widely covered before this window unless the cited post contains a new development.
         5) Prefer primary-source posts and omit low-confidence stories.
         6) Return exactly one JSON object and no markdown or commentary.
-        7) Include 2 to 5 unique topics; category must be exactly AI or Robotics and confidence exactly high or medium.
+        7) Aim for 5 to 8 unique topics. Return fewer only when fewer fully cited developments exist; never return fewer than 2. Category must be exactly AI or Robotics and confidence exactly high or medium.
         8) Include 1 to 3 sources per topic. Every post_url must be a direct cited URL shaped https://x.com/<handle>/status/<numeric-id>.
+        9) Before returning, re-check every post_url against that exact shape and remove any topic with a profile, search, redirect, or invented URL.
+        10) Return finished news only. Never include search progress, missing-source notes, "need more" placeholders, or remaining-work commentary as a topic.
         Profile pages, home pages, search pages, missing citations, and invented URLs are forbidden.
         """
     }
 
-    public static let jsonSchema = #"{"type":"object","additionalProperties":false,"required":["window","generated_at","topics"],"properties":{"window":{"type":"object","additionalProperties":false,"required":["since","until"],"properties":{"since":{"type":"string"},"until":{"type":"string"}}},"generated_at":{"type":"string"},"topics":{"type":"array","minItems":2,"maxItems":5,"items":{"type":"object","additionalProperties":false,"required":["category","headline","summary","confidence","posted_at","sources"],"properties":{"category":{"enum":["AI","Robotics"]},"headline":{"type":"string","minLength":1,"maxLength":70},"summary":{"type":"string","minLength":1,"maxLength":220},"confidence":{"enum":["high","medium"]},"posted_at":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["handle","post_url"],"properties":{"handle":{"type":"string","pattern":"^@[A-Za-z0-9_]{1,15}$"},"post_url":{"type":"string","pattern":"^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$"}}}}}}}}}"#
+    public static let jsonSchema = #"{"type":"object","additionalProperties":false,"required":["window","generated_at","topics"],"properties":{"window":{"type":"object","additionalProperties":false,"required":["since","until"],"properties":{"since":{"type":"string"},"until":{"type":"string"}}},"generated_at":{"type":"string"},"topics":{"type":"array","minItems":2,"maxItems":8,"items":{"type":"object","additionalProperties":false,"required":["category","headline","summary","confidence","posted_at","sources"],"properties":{"category":{"enum":["AI","Robotics"]},"headline":{"type":"string","minLength":1,"maxLength":70},"summary":{"type":"string","minLength":1,"maxLength":220},"confidence":{"enum":["high","medium"]},"posted_at":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["handle","post_url"],"properties":{"handle":{"type":"string","pattern":"^@[A-Za-z0-9_]{1,15}$"},"post_url":{"type":"string","pattern":"^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$"}}}}}}}}}"#
 
     public static func processArguments(now: Date) -> [String] {
         [
@@ -375,7 +377,7 @@ public enum GrokXNewsParser {
             throw GrokXNewsError.invalidFeed("window and generated_at must match the requested rolling 24 hours")
         }
         guard (GrokXNewsContract.minimumStories...GrokXNewsContract.maximumStories).contains(raw.topics.count) else {
-            throw GrokXNewsError.invalidFeed("expected 2 to 5 stories")
+            throw GrokXNewsError.invalidFeed("expected 2 to \(GrokXNewsContract.maximumStories) stories")
         }
 
         var seenURLs = Set<String>()
@@ -405,6 +407,9 @@ public enum GrokXNewsParser {
     ) throws -> XNewsStory {
             let title = try bounded(topic.headline, field: "headline", maximum: 70)
             let summary = try bounded(topic.summary, field: "summary", maximum: 220)
+            guard XNewsStoryQuality.isPublishable(title: title, summary: summary) else {
+                throw GrokXNewsError.invalidFeed("research notes and search-progress placeholders are not news stories")
+            }
             guard let category = XNewsCategory(rawValue: topic.category) else {
                 throw GrokXNewsError.invalidFeed("category must be AI or Robotics")
             }
@@ -651,23 +656,74 @@ public struct GrokXNewsSource: Sendable {
             throw GrokXNewsError.invalidFeed("response exceeds the one-megabyte safety limit")
         }
         let candidate = try GrokXNewsParser.parse(grokOutput: Data(contentsOf: stdoutURL), now: now)
-        let feed = deduplicating(candidate, against: try? cache.loadIncludingStale())
-        guard !feed.stories.isEmpty else {
-            throw GrokXNewsError.invalidFeed("no newly cited development remains after cache deduplication")
-        }
+        let feed = try XNewsRollingFeedMerger.merge(
+            candidate: candidate,
+            previous: try? cache.loadIncludingStale(),
+            now: now
+        )
         try cache.save(feed)
         return feed
     }
+}
 
-    private func deduplicating(_ candidate: XNewsFeed, against previous: XNewsFeed?) -> XNewsFeed {
+enum XNewsStoryQuality {
+    private static let researchNotePhrases = [
+        "need more",
+        "remaining work",
+        "searching for",
+        "searching noetix",
+        "in-window primaries",
+        "could not find",
+        "missing sources",
+    ]
+
+    static func isPublishable(title: String, summary: String) -> Bool {
+        let text = "\(title) \(summary)".lowercased()
+        return !researchNotePhrases.contains { text.contains($0) }
+    }
+}
+
+enum XNewsRollingFeedMerger {
+    static func merge(candidate: XNewsFeed, previous: XNewsFeed?, now: Date) throws -> XNewsFeed {
         let previousURLs = Set(previous?.stories.flatMap(\.sources).map { $0.xURL.absoluteString } ?? [])
-        guard !previousURLs.isEmpty else { return candidate }
-        return XNewsFeed(
-            generatedAt: candidate.generatedAt,
-            stories: candidate.stories.filter { story in
-                story.sources.contains { !previousURLs.contains($0.xURL.absoluteString) }
+        let newCandidates = candidate.stories.filter { story in
+            story.sources.contains { !previousURLs.contains($0.xURL.absoluteString) }
+        }
+        guard previousURLs.isEmpty || !newCandidates.isEmpty else {
+            throw GrokXNewsError.invalidFeed("no newly cited development remains after cache deduplication")
+        }
+
+        var seenURLs = Set<String>()
+        var seenHeadlines = Set<String>()
+        var stories = [XNewsStory]()
+        let earliest = now.addingTimeInterval(-GrokXNewsContract.maximumAge)
+
+        func append(_ story: XNewsStory) {
+            guard stories.count < GrokXNewsContract.maximumStories,
+                  XNewsStoryQuality.isPublishable(title: story.title, summary: story.summary)
+            else { return }
+            let headlineKey = story.title.lowercased()
+                .filter { $0.isLetter || $0.isNumber || $0.isWhitespace }
+                .split(whereSeparator: \.isWhitespace)
+                .joined(separator: " ")
+            guard seenHeadlines.insert(headlineKey).inserted else { return }
+            let currentSources = story.sources.filter { source in
+                source.postedAt >= earliest && source.postedAt <= now
+                    && seenURLs.insert(source.xURL.absoluteString).inserted
             }
-        )
+            guard !currentSources.isEmpty else { return }
+            stories.append(XNewsStory(
+                title: story.title,
+                summary: story.summary,
+                category: story.category,
+                confidence: story.confidence,
+                sources: currentSources
+            ))
+        }
+
+        candidate.stories.forEach(append)
+        previous?.stories.forEach(append)
+        return XNewsFeed(generatedAt: candidate.generatedAt, stories: stories)
     }
 }
 

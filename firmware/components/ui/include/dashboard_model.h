@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #define DASHBOARD_MAX_TASKS 6
-#define DASHBOARD_MAX_NEWS 5
+#define DASHBOARD_MAX_NEWS 8
 #define DASHBOARD_VERSION_MAX 32
 
 typedef enum {

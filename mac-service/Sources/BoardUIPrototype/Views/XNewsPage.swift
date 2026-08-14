@@ -26,7 +26,7 @@ struct XNewsPage: View {
                 }
                 Spacer()
                 refreshIndicator
-                verificationChip("5 CITED STORIES", tint: BoardPalette.signal)
+                verificationChip("8 CITED STORIES", tint: BoardPalette.signal)
                 verificationChip("08:00", tint: BoardPalette.cyan)
             }
 
@@ -36,7 +36,7 @@ struct XNewsPage: View {
 
                     scrollIndicator(viewportHeight: geometry.size.height)
 
-                    Text("SWIPE UP · 2 MORE  ↓")
+                    Text("SWIPE UP · 5 MORE  ↓")
                         .font(.board(9, weight: .bold))
                         .tracking(0.55)
                         .foregroundStyle(BoardPalette.cyan)
@@ -215,6 +215,30 @@ struct XNewsPage: View {
                     tint: BoardPalette.signal
                 )
             }
+            .frame(height: 148)
+
+            HStack(spacing: 14) {
+                compactStory(
+                    category: "AI",
+                    title: "Agent tooling release adds a bounded local execution mode",
+                    source: "@agent_lab · 8 hr",
+                    tint: BoardPalette.signal
+                )
+                compactStory(
+                    category: "ROBOTICS",
+                    title: "Mobile manipulator benchmark publishes new field results",
+                    source: "@robot_bench · 10 hr",
+                    tint: BoardPalette.cyan
+                )
+            }
+            .frame(height: 148)
+
+            compactStory(
+                category: "AI",
+                title: "Open evaluation suite expands tests for multimodal reasoning",
+                source: "@eval_group · 12 hr",
+                tint: BoardPalette.signal
+            )
             .frame(height: 148)
             .padding(.bottom, 24)
         }
