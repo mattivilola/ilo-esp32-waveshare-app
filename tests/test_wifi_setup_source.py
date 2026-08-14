@@ -65,6 +65,16 @@ class WiFiSetupSourceTests(unittest.TestCase):
             self.assertIn(state, TRANSPORT_SOURCE)
         self.assertIn("dashboard_ui_set_wifi_connection_state(state)", TRANSPORT_SOURCE)
 
+    def test_transient_hotspot_failures_retry_before_showing_terminal_errors(self):
+        self.assertIn("wifi_auth_failure_count >= 2", TRANSPORT_SOURCE)
+        self.assertIn("wifi_not_found_count >= 3", TRANSPORT_SOURCE)
+        self.assertIn("wifi_auth_failure_count = 0", TRANSPORT_SOURCE)
+        self.assertIn("wifi_not_found_count = 0", TRANSPORT_SOURCE)
+        self.assertIn(
+            "if (sheet_visible && (wifi_setup_connecting || wifi_setup_scan_paused))",
+            UI_SOURCE,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

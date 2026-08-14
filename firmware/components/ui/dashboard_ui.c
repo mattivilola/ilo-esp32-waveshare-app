@@ -3216,7 +3216,7 @@ void dashboard_ui_set_wifi_connection_state(dashboard_wifi_connection_state_t st
     refresh_settings_labels();
     bool sheet_visible = wifi_setup_overlay != NULL
         && !lv_obj_has_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
-    if (sheet_visible && wifi_setup_connecting) {
+    if (sheet_visible && (wifi_setup_connecting || wifi_setup_scan_paused)) {
         switch (state) {
         case DASHBOARD_WIFI_CONNECTED:
             wifi_setup_close_pending = true;

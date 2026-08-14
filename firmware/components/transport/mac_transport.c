@@ -1,6 +1,7 @@
 #include "mac_transport.h"
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
@@ -100,6 +101,8 @@ static char wifi_scan_ssids[4][33];
 static TaskHandle_t wifi_scan_task_handle;
 static esp_timer_handle_t wifi_recovery_timer;
 static uint32_t wifi_recovery_delay_ms = WIFI_RECONNECT_INITIAL_MS;
+static uint8_t wifi_auth_failure_count;
+static uint8_t wifi_not_found_count;
 static SemaphoreHandle_t wifi_control_mutex;
 static ota_updater_status_t ota_status_pending;
 static bool ota_status_dirty;
@@ -261,13 +264,23 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
                 case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
                 case WIFI_REASON_HANDSHAKE_TIMEOUT:
                 case WIFI_REASON_802_1X_AUTH_FAILED:
-                    state = DASHBOARD_WIFI_AUTH_FAILED;
+                    portENTER_CRITICAL(&refresh_lock);
+                    if (wifi_auth_failure_count < UINT8_MAX) ++wifi_auth_failure_count;
+                    state = wifi_auth_failure_count >= 2
+                        ? DASHBOARD_WIFI_AUTH_FAILED
+                        : DASHBOARD_WIFI_RETRYING;
+                    portEXIT_CRITICAL(&refresh_lock);
                     break;
                 case WIFI_REASON_NO_AP_FOUND:
                 case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
                 case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
                 case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
-                    state = DASHBOARD_WIFI_NOT_FOUND;
+                    portENTER_CRITICAL(&refresh_lock);
+                    if (wifi_not_found_count < UINT8_MAX) ++wifi_not_found_count;
+                    state = wifi_not_found_count >= 3
+                        ? DASHBOARD_WIFI_NOT_FOUND
+                        : DASHBOARD_WIFI_RETRYING;
+                    portEXIT_CRITICAL(&refresh_lock);
                     break;
                 default:
                     break;
@@ -278,7 +291,11 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(wifi_events, WIFI_READY_BIT);
+        portENTER_CRITICAL(&refresh_lock);
         wifi_recovery_delay_ms = WIFI_RECONNECT_INITIAL_MS;
+        wifi_auth_failure_count = 0;
+        wifi_not_found_count = 0;
+        portEXIT_CRITICAL(&refresh_lock);
         if (wifi_recovery_timer != NULL) (void)esp_timer_stop(wifi_recovery_timer);
         ESP_LOGI(TAG, "Wi-Fi obtained an IP address");
         dashboard_ui_set_wifi_connection_state(DASHBOARD_WIFI_CONNECTED);
@@ -1891,6 +1908,8 @@ bool mac_transport_update_wifi(const char *ssid, const char *password)
     portENTER_CRITICAL(&refresh_lock);
     wifi_update_in_progress = true;
     wifi_reconnect_suspended = true;
+    wifi_auth_failure_count = 0;
+    wifi_not_found_count = 0;
     portEXIT_CRITICAL(&refresh_lock);
     (void)esp_wifi_scan_stop();
     status = esp_wifi_stop();
