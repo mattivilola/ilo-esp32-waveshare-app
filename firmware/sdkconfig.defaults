@@ -54,7 +54,11 @@ CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_USE_LOG=y
-CONFIG_LV_MEM_SIZE_KILOBYTES=128
+# The complete dashboard no longer fits LVGL's fixed 128 KB built-in pool.
+# Use ESP-IDF's malloc so UI objects can spill safely into the board's 8 MB
+# PSRAM instead of returning NULL during startup.
+# CONFIG_LV_USE_BUILTIN_MALLOC is not set
+CONFIG_LV_USE_CLIB_MALLOC=y
 
 # Dual OTA slots and first-boot validation provide rollback safety. Signed OTA
 # verification is intentionally enabled only in the separate release profile;

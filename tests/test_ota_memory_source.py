@@ -26,6 +26,11 @@ class OTAMemorySourceTests(unittest.TestCase):
         self.assertIn("static const dashboard_model_t initial = {};", MAIN)
         self.assertIn("-Werror=frame-larger-than=8192", MAIN_CMAKE)
 
+    def test_lvgl_uses_the_psram_capable_system_heap(self):
+        self.assertIn("# CONFIG_LV_USE_BUILTIN_MALLOC is not set", DEFAULTS)
+        self.assertIn("CONFIG_LV_USE_CLIB_MALLOC=y", DEFAULTS)
+        self.assertNotIn("CONFIG_LV_MEM_SIZE_KILOBYTES=128", DEFAULTS)
+
 
 if __name__ == "__main__":
     unittest.main()
