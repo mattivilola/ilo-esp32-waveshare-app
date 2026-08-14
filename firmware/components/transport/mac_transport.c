@@ -14,6 +14,7 @@
 #include "esp_netif.h"
 #include "esp_random.h"
 #include "esp_tls.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -97,7 +98,8 @@ static TickType_t wifi_scan_last_started;
 static size_t wifi_scan_count;
 static char wifi_scan_ssids[4][33];
 static TaskHandle_t wifi_scan_task_handle;
-static TaskHandle_t wifi_recovery_task_handle;
+static esp_timer_handle_t wifi_recovery_timer;
+static uint32_t wifi_recovery_delay_ms = WIFI_RECONNECT_INITIAL_MS;
 static SemaphoreHandle_t wifi_control_mutex;
 static ota_updater_status_t ota_status_pending;
 static bool ota_status_dirty;
@@ -204,41 +206,40 @@ static void wifi_scan_task(void *argument)
     }
 }
 
-static void wifi_recovery_task(void *argument)
+static void wifi_recovery_timer_callback(void *argument)
 {
     (void)argument;
-    uint32_t retry_delay_ms = WIFI_RECONNECT_INITIAL_MS;
-    for (;;) {
-        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(retry_delay_ms));
-        if ((xEventGroupGetBits(wifi_events) & WIFI_READY_BIT) != 0) {
-            retry_delay_ms = WIFI_RECONNECT_INITIAL_MS;
-            continue;
-        }
-        portENTER_CRITICAL(&refresh_lock);
-        bool reconnect = !wifi_reconnect_suspended;
-        portEXIT_CRITICAL(&refresh_lock);
-        if (!reconnect) continue;
+    if ((xEventGroupGetBits(wifi_events) & WIFI_READY_BIT) != 0) return;
+    portENTER_CRITICAL(&refresh_lock);
+    bool reconnect = !wifi_reconnect_suspended;
+    portEXIT_CRITICAL(&refresh_lock);
+    if (!reconnect) return;
 
-        esp_err_t status = esp_wifi_connect();
-        if (status == ESP_OK) {
-            ESP_LOGI(TAG, "Wi-Fi recovery attempt started");
-        } else if (status != ESP_ERR_WIFI_CONN) {
-            ESP_LOGW(TAG, "Wi-Fi recovery attempt failed to start: %s", esp_err_to_name(status));
-        }
-        retry_delay_ms = retry_delay_ms < WIFI_RECONNECT_MAX_MS / 2
-            ? retry_delay_ms * 2
-            : WIFI_RECONNECT_MAX_MS;
+    esp_err_t status = esp_wifi_connect();
+    if (status == ESP_OK) {
+        ESP_LOGI(TAG, "Wi-Fi recovery attempt started");
+    } else if (status != ESP_ERR_WIFI_CONN) {
+        ESP_LOGW(TAG, "Wi-Fi recovery attempt failed to start: %s", esp_err_to_name(status));
+    }
+    wifi_recovery_delay_ms = wifi_recovery_delay_ms < WIFI_RECONNECT_MAX_MS / 2
+        ? wifi_recovery_delay_ms * 2
+        : WIFI_RECONNECT_MAX_MS;
+    if ((xEventGroupGetBits(wifi_events) & WIFI_READY_BIT) == 0 && wifi_recovery_timer != NULL) {
+        (void)esp_timer_start_once(wifi_recovery_timer, wifi_recovery_delay_ms * 1000ULL);
     }
 }
 
 static void request_wifi_recovery(void)
 {
-    if (wifi_recovery_task_handle != NULL) xTaskNotifyGive(wifi_recovery_task_handle);
+    if (wifi_recovery_timer == NULL) return;
+    (void)esp_timer_stop(wifi_recovery_timer);
+    (void)esp_timer_start_once(wifi_recovery_timer, 1000);
 }
 
 static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        dashboard_ui_set_wifi_connection_state(DASHBOARD_WIFI_CONNECTING);
         request_wifi_recovery();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(wifi_events, WIFI_READY_BIT);
@@ -253,11 +254,34 @@ static void wifi_event(void *argument, esp_event_base_t base, int32_t id, void *
         portEXIT_CRITICAL(&refresh_lock);
         if (reconnect) {
             dashboard_ui_set_connection_state(DASHBOARD_CONNECTION_OFFLINE);
+            dashboard_wifi_connection_state_t state = DASHBOARD_WIFI_RETRYING;
+            if (event != NULL) {
+                switch (event->reason) {
+                case WIFI_REASON_AUTH_FAIL:
+                case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+                case WIFI_REASON_HANDSHAKE_TIMEOUT:
+                case WIFI_REASON_802_1X_AUTH_FAILED:
+                    state = DASHBOARD_WIFI_AUTH_FAILED;
+                    break;
+                case WIFI_REASON_NO_AP_FOUND:
+                case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+                case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+                case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+                    state = DASHBOARD_WIFI_NOT_FOUND;
+                    break;
+                default:
+                    break;
+                }
+            }
+            dashboard_ui_set_wifi_connection_state(state);
             request_wifi_recovery();
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupSetBits(wifi_events, WIFI_READY_BIT);
+        wifi_recovery_delay_ms = WIFI_RECONNECT_INITIAL_MS;
+        if (wifi_recovery_timer != NULL) (void)esp_timer_stop(wifi_recovery_timer);
         ESP_LOGI(TAG, "Wi-Fi obtained an IP address");
+        dashboard_ui_set_wifi_connection_state(DASHBOARD_WIFI_CONNECTED);
     }
 }
 
@@ -344,10 +368,15 @@ static esp_err_t wifi_start(const mac_transport_config_t *transport_config)
         wifi_scan_task_handle = NULL;
         return ESP_ERR_NO_MEM;
     }
-    if (xTaskCreate(wifi_recovery_task, "wifi_recovery", 3072, NULL, 3, &wifi_recovery_task_handle) != pdPASS) {
-        wifi_recovery_task_handle = NULL;
-        return ESP_ERR_NO_MEM;
-    }
+    const esp_timer_create_args_t recovery_timer_args = {
+        .callback = wifi_recovery_timer_callback,
+        .name = "wifi_retry",
+    };
+    ESP_RETURN_ON_ERROR(
+        esp_timer_create(&recovery_timer_args, &wifi_recovery_timer),
+        TAG,
+        "Wi-Fi recovery timer failed"
+    );
     ESP_RETURN_ON_ERROR(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL), TAG, "Wi-Fi handler failed");
     ESP_RETURN_ON_ERROR(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL), TAG, "IP handler failed");
 

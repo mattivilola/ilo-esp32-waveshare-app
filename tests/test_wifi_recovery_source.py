@@ -8,11 +8,15 @@ SOURCE = (ROOT / "firmware" / "components" / "transport" / "mac_transport.c").re
 
 class WiFiRecoverySourceTests(unittest.TestCase):
     def test_late_hotspot_recovery_keeps_retrying_with_bounded_backoff(self):
-        self.assertIn("wifi_recovery_task", SOURCE)
+        self.assertIn("wifi_recovery_timer_callback", SOURCE)
         self.assertIn("WIFI_RECONNECT_INITIAL_MS 1000", SOURCE)
         self.assertIn("WIFI_RECONNECT_MAX_MS 15000", SOURCE)
-        self.assertIn("ulTaskNotifyTake", SOURCE)
+        self.assertIn("esp_timer_start_once", SOURCE)
         self.assertIn("esp_wifi_connect()", SOURCE)
+
+    def test_recovery_reuses_timer_service_instead_of_reserving_another_task_stack(self):
+        self.assertIn("esp_timer_create", SOURCE)
+        self.assertNotIn('xTaskCreate(wifi_recovery_task', SOURCE)
 
     def test_disconnect_records_reason_and_wakes_recovery_worker(self):
         self.assertIn("wifi_event_sta_disconnected_t", SOURCE)

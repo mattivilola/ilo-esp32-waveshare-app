@@ -10,6 +10,7 @@
 
 #include "esp_check.h"
 #include "esp_app_desc.h"
+#include "esp_system.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "board_waveshare_5.h"
@@ -42,6 +43,8 @@
 #define CODEX_RESULT_HOLD_MS 8000U
 #define FOCUS_ACTION_HOLD_MS 900U
 #define SCREENSAVER_ACTION_HOLD_MS 900U
+#define REBOOT_ACTION_HOLD_MS 1500U
+#define WIFI_CONNECTED_HOLD_MS 1500U
 #define MINIMUM_TRUSTED_EPOCH 1704067200LL
 #define MINUTE_MS 60000U
 #define SCREENSAVER_POSITION_INTERVAL_SECONDS 20U
@@ -164,6 +167,10 @@ static lv_obj_t *settings_connection_values;
 static lv_obj_t *settings_versions_value;
 static lv_obj_t *settings_ota_value;
 static lv_obj_t *settings_ota_note;
+static lv_obj_t *settings_reboot_value;
+static lv_obj_t *settings_reboot_progress;
+static uint32_t reboot_hold_started_tick;
+static bool reboot_hold_consumed;
 static dashboard_ota_callback_t ota_check_callback;
 static dashboard_ota_callback_t ota_install_callback;
 static dashboard_ota_state_t settings_ota_state = DASHBOARD_OTA_DISABLED;
@@ -174,6 +181,19 @@ static lv_obj_t *wifi_ssid_input;
 static lv_obj_t *wifi_password_input;
 static lv_obj_t *wifi_keyboard;
 static lv_obj_t *wifi_setup_status;
+static lv_obj_t *wifi_setup_back_label;
+static lv_obj_t *wifi_setup_save_button;
+static lv_obj_t *wifi_setup_save_label;
+static lv_obj_t *wifi_setup_progress;
+static lv_obj_t *wifi_setup_spinner;
+static lv_obj_t *wifi_setup_progress_title;
+static lv_obj_t *wifi_setup_progress_detail;
+static bool wifi_setup_connecting;
+static bool wifi_setup_close_pending;
+static bool wifi_setup_scan_paused;
+static uint32_t wifi_setup_connected_tick;
+static uint32_t wifi_setup_scan_tick;
+static dashboard_wifi_connection_state_t wifi_connection_state = DASHBOARD_WIFI_CONNECTING;
 static dashboard_wifi_update_callback_t wifi_update_callback;
 static dashboard_wifi_scan_callback_t wifi_scan_callback;
 static lv_obj_t *wifi_network_buttons[4];
@@ -225,6 +245,7 @@ static bool start_focus_session(const char *title);
 static void show_screensaver_now(void);
 static double display_temperature(float celsius);
 static const char *temperature_unit(void);
+static void wifi_setup_close(void);
 
 static void show_page(int index, lv_anim_enable_t animation)
 {
@@ -1377,12 +1398,34 @@ static void refresh_settings_labels(void)
             && (latest_model.codex_enabled
                 || latest_model.x_news_enabled
                 || latest_model.companion_version[0] != 0);
-        lv_label_set_text(
-            settings_connection_values,
-            mac_present
-                ? "WI-FI  TAP TO CHANGE     MAC  PAIRED     WEATHER  DIRECT"
-                : "WI-FI  TAP TO CHANGE     MAC  OPTIONAL     WEATHER  DIRECT"
-        );
+        const char *text = mac_present
+            ? "WI-FI  CONNECTING     MAC  PAIRED     WEATHER  DIRECT"
+            : "WI-FI  CONNECTING     MAC  OPTIONAL     WEATHER  DIRECT";
+        lv_color_t color = COLOR_FOG;
+        switch (wifi_connection_state) {
+        case DASHBOARD_WIFI_CONNECTED:
+            text = mac_present
+                ? "WI-FI  CONNECTED     MAC  PAIRED     WEATHER  DIRECT"
+                : "WI-FI  CONNECTED     MAC  OPTIONAL     WEATHER  DIRECT";
+            color = COLOR_SIGNAL;
+            break;
+        case DASHBOARD_WIFI_AUTH_FAILED:
+            text = "WI-FI  WRONG PASSWORD     TAP TO FIX";
+            color = COLOR_AMBER;
+            break;
+        case DASHBOARD_WIFI_NOT_FOUND:
+            text = "WI-FI  NETWORK NOT FOUND     TAP TO FIX";
+            color = COLOR_AMBER;
+            break;
+        case DASHBOARD_WIFI_RETRYING:
+            text = "WI-FI  RETRYING     TAP TO VIEW";
+            break;
+        case DASHBOARD_WIFI_CONNECTING:
+        default:
+            break;
+        }
+        lv_label_set_text(settings_connection_values, text);
+        lv_obj_set_style_text_color(settings_connection_values, color, 0);
     }
     if (settings_versions_value != NULL) {
         const char *companion_version = latest_model_valid && latest_model.companion_version[0] != 0
@@ -1842,6 +1885,43 @@ static void sleep_now_tapped(lv_event_t *event)
     }
 }
 
+static void reboot_restart_timer(lv_timer_t *timer)
+{
+    (void)timer;
+    esp_restart();
+}
+
+static void reboot_setting_tapped(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_PRESSED) {
+        reboot_hold_started_tick = lv_tick_get();
+        reboot_hold_consumed = false;
+        lv_label_set_text(settings_reboot_value, "KEEP HOLDING...");
+        lv_bar_set_value(settings_reboot_progress, 0, LV_ANIM_OFF);
+        return;
+    }
+    if (code == LV_EVENT_PRESSING && !reboot_hold_consumed) {
+        uint32_t elapsed = lv_tick_elaps(reboot_hold_started_tick);
+        uint32_t progress = elapsed >= REBOOT_ACTION_HOLD_MS
+            ? 100
+            : (elapsed * 100U) / REBOOT_ACTION_HOLD_MS;
+        lv_bar_set_value(settings_reboot_progress, (int32_t)progress, LV_ANIM_OFF);
+        if (elapsed >= REBOOT_ACTION_HOLD_MS) {
+            reboot_hold_consumed = true;
+            lv_label_set_text(settings_reboot_value, "REBOOTING...");
+            lv_timer_t *timer = lv_timer_create(reboot_restart_timer, 350, NULL);
+            if (timer != NULL) lv_timer_set_repeat_count(timer, 1);
+            else esp_restart();
+        }
+        return;
+    }
+    if ((code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) && !reboot_hold_consumed) {
+        lv_label_set_text(settings_reboot_value, "HOLD 1.5 SEC");
+        lv_bar_set_value(settings_reboot_progress, 0, LV_ANIM_OFF);
+    }
+}
+
 static void wifi_input_tapped(lv_event_t *event)
 {
     if (lv_event_get_code(event) != LV_EVENT_FOCUSED) return;
@@ -1853,11 +1933,48 @@ static void wifi_input_tapped(lv_event_t *event)
     );
 }
 
+static void wifi_setup_set_inputs_enabled(bool enabled)
+{
+    lv_obj_t *objects[] = { wifi_ssid_input, wifi_password_input, wifi_setup_save_button };
+    for (size_t index = 0; index < sizeof(objects) / sizeof(objects[0]); ++index) {
+        if (objects[index] == NULL) continue;
+        if (enabled) lv_obj_remove_state(objects[index], LV_STATE_DISABLED);
+        else lv_obj_add_state(objects[index], LV_STATE_DISABLED);
+    }
+    for (size_t index = 0; index < 4; ++index) {
+        if (wifi_network_buttons[index] == NULL) continue;
+        if (enabled) lv_obj_remove_state(wifi_network_buttons[index], LV_STATE_DISABLED);
+        else lv_obj_add_state(wifi_network_buttons[index], LV_STATE_DISABLED);
+    }
+}
+
+static void wifi_setup_show_progress(const char *title, const char *detail, bool spinning)
+{
+    lv_label_set_text(wifi_setup_progress_title, title);
+    lv_label_set_text(wifi_setup_progress_detail, detail);
+    if (spinning) lv_obj_remove_flag(wifi_setup_spinner, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(wifi_setup_spinner, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(wifi_setup_progress, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void wifi_setup_show_editor(void)
+{
+    lv_obj_add_flag(wifi_setup_progress, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(wifi_keyboard, LV_OBJ_FLAG_HIDDEN);
+    wifi_setup_set_inputs_enabled(true);
+}
+
 static void wifi_setup_close(void)
 {
     if (wifi_setup_overlay != NULL) lv_obj_add_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_keyboard_set_textarea(wifi_keyboard, NULL);
     lv_textarea_set_text(wifi_password_input, "");
+    wifi_setup_connecting = false;
+    wifi_setup_close_pending = false;
+    wifi_setup_scan_paused = false;
+    lv_label_set_text(wifi_setup_save_label, "Save & connect");
+    wifi_setup_show_editor();
 }
 
 static void wifi_setup_action(lv_event_t *event)
@@ -1875,13 +1992,28 @@ static void wifi_setup_action(lv_event_t *event)
         lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
         return;
     }
+    if (wifi_setup_connecting) return;
+    wifi_setup_connecting = true;
+    wifi_setup_close_pending = false;
+    wifi_setup_scan_paused = true;
+    wifi_setup_set_inputs_enabled(false);
+    lv_label_set_text(wifi_setup_save_label, "Connecting...");
+    lv_label_set_text(wifi_setup_status, "Credentials saved securely on this board");
+    lv_obj_set_style_text_color(wifi_setup_status, COLOR_SIGNAL, 0);
+    wifi_setup_show_progress(
+        "Connecting to Wi-Fi",
+        "Authenticating and requesting an address...",
+        true
+    );
     if (wifi_update_callback != NULL && wifi_update_callback(ssid, password)) {
-        lv_label_set_text(wifi_setup_status, "Saved securely - reconnecting...");
-        lv_obj_set_style_text_color(wifi_setup_status, COLOR_SIGNAL, 0);
-        lv_textarea_set_text(wifi_password_input, "");
+        // The Wi-Fi event handler reports the actual result. Keep the sheet
+        // open and visibly busy until DHCP succeeds or a useful error arrives.
     } else {
+        wifi_setup_connecting = false;
         lv_label_set_text(wifi_setup_status, "Could not save Wi-Fi - USB recovery remains available");
         lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
+        lv_label_set_text(wifi_setup_save_label, "Try again");
+        wifi_setup_show_editor();
     }
 }
 
@@ -1890,6 +2022,12 @@ static void wifi_setup_tapped(lv_event_t *event)
     if (lv_event_get_code(event) != LV_EVENT_CLICKED) return;
     lv_label_set_text(wifi_setup_status, "2.4 GHz WPA2/WPA3 Personal / password stays on board");
     lv_obj_set_style_text_color(wifi_setup_status, COLOR_FOG, 0);
+    wifi_setup_connecting = false;
+    wifi_setup_close_pending = false;
+    wifi_setup_scan_paused = false;
+    wifi_setup_set_inputs_enabled(true);
+    lv_label_set_text(wifi_setup_save_label, "Save & connect");
+    wifi_setup_show_editor();
     lv_obj_remove_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(wifi_setup_overlay);
     size_t network_count = wifi_scan_callback != NULL
@@ -1905,12 +2043,21 @@ static void wifi_setup_tapped(lv_event_t *event)
     }
     lv_obj_add_state(wifi_ssid_input, LV_STATE_FOCUSED);
     lv_keyboard_set_textarea(wifi_keyboard, wifi_ssid_input);
+    wifi_setup_scan_tick = lv_tick_get();
 }
 
 static void wifi_scan_refresh(lv_timer_t *timer)
 {
     (void)timer;
     if (wifi_setup_overlay == NULL || lv_obj_has_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN)) return;
+    if (wifi_setup_close_pending
+        && lv_tick_elaps(wifi_setup_connected_tick) >= WIFI_CONNECTED_HOLD_MS) {
+        wifi_setup_close();
+        return;
+    }
+    if (wifi_setup_connecting || wifi_setup_close_pending || wifi_setup_scan_paused) return;
+    if (lv_tick_elaps(wifi_setup_scan_tick) < 2000U) return;
+    wifi_setup_scan_tick = lv_tick_get();
     size_t network_count = wifi_scan_callback != NULL
         ? wifi_scan_callback(wifi_network_ssids, 4)
         : 0;
@@ -1989,26 +2136,56 @@ static void build_wifi_setup(lv_obj_t *screen)
         lv_obj_add_flag(wifi_network_buttons[index], LV_OBJ_FLAG_HIDDEN);
     }
 
-    lv_obj_t *cancel = lv_button_create(wifi_setup_overlay);
-    set_clean_box(cancel, COLOR_STEEL, 12);
-    lv_obj_set_size(cancel, 140, 52);
-    lv_obj_set_pos(cancel, 478, 97);
-    lv_obj_add_event_cb(cancel, wifi_setup_action, LV_EVENT_CLICKED, (void *)0);
-    lv_obj_t *cancel_label = create_label(cancel, "Cancel", &lv_font_montserrat_14, COLOR_MIST);
-    lv_obj_center(cancel_label);
+    lv_obj_t *back = lv_button_create(wifi_setup_overlay);
+    set_clean_box(back, COLOR_STEEL, 12);
+    lv_obj_set_size(back, 140, 52);
+    lv_obj_set_pos(back, 478, 97);
+    lv_obj_add_event_cb(back, wifi_setup_action, LV_EVENT_CLICKED, (void *)0);
+    wifi_setup_back_label = create_label(back, "Back", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_center(wifi_setup_back_label);
 
-    lv_obj_t *save = lv_button_create(wifi_setup_overlay);
-    set_clean_box(save, COLOR_SIGNAL, 12);
-    lv_obj_set_size(save, 180, 52);
-    lv_obj_set_pos(save, 630, 97);
-    lv_obj_add_event_cb(save, wifi_setup_action, LV_EVENT_CLICKED, (void *)1);
-    lv_obj_t *save_label = create_label(save, "Save & connect", &lv_font_montserrat_14, COLOR_CARBON);
-    lv_obj_center(save_label);
+    wifi_setup_save_button = lv_button_create(wifi_setup_overlay);
+    set_clean_box(wifi_setup_save_button, COLOR_SIGNAL, 12);
+    lv_obj_set_size(wifi_setup_save_button, 180, 52);
+    lv_obj_set_pos(wifi_setup_save_button, 630, 97);
+    lv_obj_add_event_cb(wifi_setup_save_button, wifi_setup_action, LV_EVENT_CLICKED, (void *)1);
+    wifi_setup_save_label = create_label(
+        wifi_setup_save_button,
+        "Save & connect",
+        &lv_font_montserrat_14,
+        COLOR_CARBON
+    );
+    lv_obj_center(wifi_setup_save_label);
 
     wifi_keyboard = lv_keyboard_create(wifi_setup_overlay);
     lv_obj_set_size(wifi_keyboard, 964, 330);
     lv_obj_align(wifi_keyboard, LV_ALIGN_BOTTOM_MID, 0, -10);
-    lv_timer_create(wifi_scan_refresh, 2000, NULL);
+
+    wifi_setup_progress = create_card(wifi_setup_overlay, 30, 246, 964, 324, 16);
+    wifi_setup_spinner = lv_spinner_create(wifi_setup_progress);
+    lv_obj_set_size(wifi_setup_spinner, 86, 86);
+    lv_spinner_set_anim_params(wifi_setup_spinner, 900, 250);
+    lv_obj_set_style_arc_width(wifi_setup_spinner, 7, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(wifi_setup_spinner, COLOR_STEEL, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(wifi_setup_spinner, 7, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(wifi_setup_spinner, COLOR_SIGNAL, LV_PART_INDICATOR);
+    lv_obj_align(wifi_setup_spinner, LV_ALIGN_CENTER, 0, -62);
+    wifi_setup_progress_title = create_label(
+        wifi_setup_progress,
+        "Connecting to Wi-Fi",
+        &lv_font_montserrat_20,
+        COLOR_MIST
+    );
+    lv_obj_align(wifi_setup_progress_title, LV_ALIGN_CENTER, 0, 18);
+    wifi_setup_progress_detail = create_label(
+        wifi_setup_progress,
+        "Authenticating and requesting an address...",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_align(wifi_setup_progress_detail, LV_ALIGN_CENTER, 0, 56);
+    lv_obj_add_flag(wifi_setup_progress, LV_OBJ_FLAG_HIDDEN);
+    lv_timer_create(wifi_scan_refresh, 100, NULL);
 }
 
 static lv_obj_t *create_setting_row(
@@ -2053,21 +2230,29 @@ static void create_compact_setting_row(
 static void build_settings_page(lv_obj_t *page)
 {
     lv_obj_t *display = create_card(page, 22, 8, 480, 386, 16);
-    lv_obj_t *display_title = create_label(display, "DISPLAY", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_t *display_title = create_label(display, "DEVICE & DISPLAY", &lv_font_montserrat_14, COLOR_FOG);
     lv_obj_align(display_title, LV_ALIGN_TOP_LEFT, 18, 18);
-    create_setting_row(display, 50, "Pulse screensaver", screensaver_setting_tapped, &settings_screensaver_value);
-    create_setting_row(display, 120, "Display off", display_off_setting_tapped, &settings_display_off_value);
+    create_setting_row(display, 42, "Pulse screensaver", screensaver_setting_tapped, &settings_screensaver_value);
+    create_setting_row(display, 108, "Display off", display_off_setting_tapped, &settings_display_off_value);
     lv_obj_t *sleep_value = NULL;
-    create_setting_row(display, 190, "Turn display off now", sleep_now_tapped, &sleep_value);
+    create_setting_row(display, 174, "Turn display off now", sleep_now_tapped, &sleep_value);
     lv_label_set_text(sleep_value, "SLEEP");
-    create_setting_row(display, 260, "Firmware update", ota_setting_tapped, &settings_ota_value);
-    settings_ota_note = create_label(
+    create_setting_row(display, 240, "Firmware update", ota_setting_tapped, &settings_ota_value);
+    lv_obj_t *reboot_button = create_setting_row(
         display,
-        "Tap to check / installs only when you choose",
-        &lv_font_montserrat_14,
-        COLOR_FOG
+        306,
+        "Reboot board",
+        reboot_setting_tapped,
+        &settings_reboot_value
     );
-    lv_obj_align(settings_ota_note, LV_ALIGN_BOTTOM_LEFT, 18, -12);
+    lv_label_set_text(settings_reboot_value, "HOLD 1.5 SEC");
+    settings_reboot_progress = lv_bar_create(reboot_button);
+    lv_obj_set_size(settings_reboot_progress, 404, 4);
+    lv_obj_align(settings_reboot_progress, LV_ALIGN_BOTTOM_MID, 0, -3);
+    lv_bar_set_range(settings_reboot_progress, 0, 100);
+    lv_bar_set_value(settings_reboot_progress, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(settings_reboot_progress, COLOR_CARBON, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(settings_reboot_progress, COLOR_SIGNAL, LV_PART_INDICATOR);
 
     lv_obj_t *pulse = create_card(page, 518, 8, 478, 194, 16);
     lv_obj_t *pulse_title = create_label(pulse, "PULSE & UNITS", &lv_font_montserrat_14, COLOR_FOG);
@@ -3018,6 +3203,60 @@ void dashboard_ui_set_wifi_update_callback(dashboard_wifi_update_callback_t call
 void dashboard_ui_set_wifi_scan_callback(dashboard_wifi_scan_callback_t callback)
 {
     wifi_scan_callback = callback;
+}
+
+void dashboard_ui_set_wifi_connection_state(dashboard_wifi_connection_state_t state)
+{
+    if (ui_display == NULL) {
+        wifi_connection_state = state;
+        return;
+    }
+    lvgl_port_lock(0);
+    wifi_connection_state = state;
+    refresh_settings_labels();
+    bool sheet_visible = wifi_setup_overlay != NULL
+        && !lv_obj_has_flag(wifi_setup_overlay, LV_OBJ_FLAG_HIDDEN);
+    if (sheet_visible && wifi_setup_connecting) {
+        switch (state) {
+        case DASHBOARD_WIFI_CONNECTED:
+            wifi_setup_close_pending = true;
+            wifi_setup_connected_tick = lv_tick_get();
+            lv_textarea_set_text(wifi_password_input, "");
+            lv_label_set_text(wifi_setup_save_label, "Connected");
+            lv_label_set_text(wifi_setup_status, "Wi-Fi connected successfully");
+            lv_obj_set_style_text_color(wifi_setup_status, COLOR_SIGNAL, 0);
+            wifi_setup_show_progress("Connected", "Wi-Fi is ready / returning to Settings...", false);
+            break;
+        case DASHBOARD_WIFI_AUTH_FAILED:
+            wifi_setup_connecting = false;
+            wifi_setup_scan_paused = true;
+            lv_label_set_text(wifi_setup_save_label, "Try again");
+            lv_label_set_text(wifi_setup_status, "Wrong password or authentication failed");
+            lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
+            wifi_setup_show_editor();
+            break;
+        case DASHBOARD_WIFI_NOT_FOUND:
+            wifi_setup_connecting = false;
+            wifi_setup_scan_paused = true;
+            lv_label_set_text(wifi_setup_save_label, "Try again");
+            lv_label_set_text(wifi_setup_status, "Network not found - check that the hotspot is on");
+            lv_obj_set_style_text_color(wifi_setup_status, COLOR_AMBER, 0);
+            wifi_setup_show_editor();
+            break;
+        case DASHBOARD_WIFI_RETRYING:
+            lv_label_set_text(wifi_setup_save_label, "Retrying...");
+            wifi_setup_show_progress(
+                "Still trying to connect",
+                "The board will keep retrying automatically...",
+                true
+            );
+            break;
+        case DASHBOARD_WIFI_CONNECTING:
+        default:
+            break;
+        }
+    }
+    lvgl_port_unlock();
 }
 
 void dashboard_ui_set_codex_continue_callback(dashboard_codex_continue_callback_t callback)

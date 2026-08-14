@@ -22,6 +22,14 @@ typedef enum {
 } dashboard_connection_state_t;
 
 typedef enum {
+    DASHBOARD_WIFI_CONNECTING,
+    DASHBOARD_WIFI_CONNECTED,
+    DASHBOARD_WIFI_RETRYING,
+    DASHBOARD_WIFI_AUTH_FAILED,
+    DASHBOARD_WIFI_NOT_FOUND,
+} dashboard_wifi_connection_state_t;
+
+typedef enum {
     DASHBOARD_X_NEWS_REFRESH_FETCHING,
     DASHBOARD_X_NEWS_REFRESH_UPDATED,
     DASHBOARD_X_NEWS_REFRESH_DISABLED,
@@ -102,6 +110,7 @@ typedef bool (*dashboard_wifi_update_callback_t)(const char *ssid, const char *p
 typedef size_t (*dashboard_wifi_scan_callback_t)(char (*ssids)[33], size_t maximum_count);
 void dashboard_ui_set_wifi_update_callback(dashboard_wifi_update_callback_t callback);
 void dashboard_ui_set_wifi_scan_callback(dashboard_wifi_scan_callback_t callback);
+void dashboard_ui_set_wifi_connection_state(dashboard_wifi_connection_state_t state);
 void dashboard_ui_set_connection_state(dashboard_connection_state_t state);
 void dashboard_ui_set_weather(const weather_model_t *model);
 void dashboard_ui_set_x_news_refresh_callback(dashboard_x_news_refresh_callback_t callback);
