@@ -63,7 +63,10 @@ extern "C" void app_main()
     dashboard_ui_set_focus_completion_callback(mac_transport_publish_focus_completion);
     dashboard_ui_set_ota_callbacks(ota_updater_request_check, ota_updater_request_install);
 
-    dashboard_model_t initial = dashboard_model_demo();
+    // The dashboard model includes the bounded X News post cache and is much
+    // larger than the main task stack. Keep the empty startup snapshot in
+    // read-only firmware storage so model growth cannot corrupt the stack.
+    static const dashboard_model_t initial = {};
     dashboard_ui_set_model(&initial);
     ESP_ERROR_CHECK(dashboard_ui_present_boot());
     ESP_LOGI(TAG, "First interactive frame presented after %lld ms",
