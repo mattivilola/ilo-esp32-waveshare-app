@@ -41,6 +41,7 @@ Notable ILO Board macOS companion changes are documented here.
 - Fix OTA first-boot confirmation policy
 - Stop reporting an optimistic sync time before the board has accepted the snapshot
 - Prevent the enlarged board snapshot from overflowing the firmware startup stack during OTA
+- Let the complete board UI use the PSRAM-capable heap instead of a fixed 128 KB LVGL pool
 
 
 ## 0.1.9 - 2026-08-13
