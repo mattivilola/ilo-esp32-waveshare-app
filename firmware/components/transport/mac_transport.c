@@ -1446,11 +1446,17 @@ static bool parse_snapshot(cJSON *message, dashboard_model_t *model)
             copy_json_string(story, "category", target->category, sizeof(target->category));
             copy_json_board_text(story, "headline", target->headline, sizeof(target->headline));
             copy_json_board_text(story, "summary", target->summary, sizeof(target->summary));
+            copy_json_board_text(story, "postText", target->post_text, sizeof(target->post_text));
+            if (target->post_text[0] == 0) {
+                strlcpy(target->post_text, target->summary, sizeof(target->post_text));
+            }
             copy_json_string(story, "confidence", target->confidence, sizeof(target->confidence));
             cJSON *sources = cJSON_GetObjectItemCaseSensitive(story, "sources");
             cJSON *source = cJSON_IsArray(sources) ? cJSON_GetArrayItem(sources, 0) : NULL;
             if (cJSON_IsObject(source)) {
                 copy_json_string(source, "handle", target->handle, sizeof(target->handle));
+                copy_json_string(source, "postedAt", target->posted_at, sizeof(target->posted_at));
+                copy_json_string(source, "postURL", target->post_url, sizeof(target->post_url));
             }
         }
     }

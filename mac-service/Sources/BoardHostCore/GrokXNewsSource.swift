@@ -37,6 +37,7 @@ public struct XNewsCitation: Codable, Equatable, Sendable {
 public struct XNewsStory: Codable, Equatable, Sendable {
     public let title: String
     public let summary: String
+    public let postText: String?
     public let category: XNewsCategory
     public let confidence: XNewsConfidence
     public let sources: [XNewsCitation]
@@ -44,12 +45,14 @@ public struct XNewsStory: Codable, Equatable, Sendable {
     public init(
         title: String,
         summary: String,
+        postText: String? = nil,
         category: XNewsCategory,
         confidence: XNewsConfidence,
         sources: [XNewsCitation]
     ) {
         self.title = title
         self.summary = summary
+        self.postText = postText
         self.category = category
         self.confidence = confidence
         self.sources = sources
@@ -177,11 +180,11 @@ public enum GrokXNewsError: Error, LocalizedError, Sendable {
         case .malformedEnvelope:
             "Grok did not return its expected outer JSON envelope."
         case .malformedFeed:
-            "Grok did not return one strict X-news JSON document. The previous verified feed was preserved."
+            "Grok did not return one strict X-news JSON document. The previous feed was preserved."
         case let .invalidFeed(reason):
-            "Grok X-news output was rejected: \(reason). The previous verified feed was preserved."
+            "Grok X-news output was rejected: \(reason). The previous feed was preserved."
         case .noCachedFeed:
-            "No verified X-news feed is cached yet."
+            "No X-news feed is cached yet."
         case .refreshCooldown:
             "Wait 15 minutes before starting another X-news refresh."
         }
@@ -227,28 +230,27 @@ public enum GrokXNewsContract {
         - generated_at: \(until)
 
         Hard rules:
-        1) Use keyword search with since:\(String(since.prefix(10))) until:\(String(until.prefix(10))).
-        2) Use semantic search with from_date=\(since) to_date=\(until).
-        3) Drop every post with a timestamp before \(since) or after \(until).
-        4) Deduplicate stories. Skip items widely covered before this window unless the cited post contains a new development.
-        5) Prefer primary-source posts and omit low-confidence stories.
-        6) Return exactly one JSON object and no markdown or commentary.
-        7) Aim for 5 to 8 unique topics. Return fewer only when fewer fully cited developments exist; never return fewer than 2. Category must be exactly AI or Robotics and confidence exactly high or medium.
-        8) Include 1 to 3 sources per topic. Every post_url must be a direct cited URL shaped https://x.com/<handle>/status/<numeric-id>.
-        9) Before returning, re-check every post_url against that exact shape and remove any topic with a profile, search, redirect, or invented URL.
-        10) Return finished news only. Never include search progress, missing-source notes, "need more" placeholders, or remaining-work commentary as a topic.
+        1) Search X once for recent AI and humanoid/robotics posts in this window.
+        2) Drop every post with a timestamp before \(since) or after \(until).
+        3) Deduplicate stories. Skip items widely covered before this window unless the cited post contains a new development.
+        4) Prefer the original poster, but do not spend turns independently verifying or cross-checking the claim.
+        5) Return exactly one JSON object and no markdown or commentary.
+        6) Aim for 10 to 15 unique topics. Return fewer only when fewer relevant direct posts exist; never return fewer than 2. Category must be exactly AI or Robotics and confidence exactly high or medium.
+        7) Include the complete available text of the primary X post in post_text, bounded to \(xNewsMaximumPostCharacters) characters.
+        8) Include 1 to 3 sources per topic. Put the primary post first. Every post_url must be a direct URL shaped https://x.com/<handle>/status/<numeric-id>.
+        9) Return finished news only. Never include search progress, missing-source notes, "need more" placeholders, or remaining-work commentary as a topic.
         Profile pages, home pages, search pages, missing citations, and invented URLs are forbidden.
         """
     }
 
-    public static let jsonSchema = #"{"type":"object","additionalProperties":false,"required":["window","generated_at","topics"],"properties":{"window":{"type":"object","additionalProperties":false,"required":["since","until"],"properties":{"since":{"type":"string"},"until":{"type":"string"}}},"generated_at":{"type":"string"},"topics":{"type":"array","minItems":2,"maxItems":8,"items":{"type":"object","additionalProperties":false,"required":["category","headline","summary","confidence","posted_at","sources"],"properties":{"category":{"enum":["AI","Robotics"]},"headline":{"type":"string","minLength":1,"maxLength":70},"summary":{"type":"string","minLength":1,"maxLength":220},"confidence":{"enum":["high","medium"]},"posted_at":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["handle","post_url"],"properties":{"handle":{"type":"string","pattern":"^@[A-Za-z0-9_]{1,15}$"},"post_url":{"type":"string","pattern":"^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$"}}}}}}}}}"#
+    public static let jsonSchema = #"{"type":"object","additionalProperties":false,"required":["window","generated_at","topics"],"properties":{"window":{"type":"object","additionalProperties":false,"required":["since","until"],"properties":{"since":{"type":"string"},"until":{"type":"string"}}},"generated_at":{"type":"string"},"topics":{"type":"array","minItems":2,"maxItems":15,"items":{"type":"object","additionalProperties":false,"required":["category","headline","summary","post_text","confidence","posted_at","sources"],"properties":{"category":{"enum":["AI","Robotics"]},"headline":{"type":"string","minLength":1,"maxLength":70},"summary":{"type":"string","minLength":1,"maxLength":220},"post_text":{"type":"string","minLength":1,"maxLength":1800},"confidence":{"enum":["high","medium"]},"posted_at":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["handle","post_url"],"properties":{"handle":{"type":"string","pattern":"^@[A-Za-z0-9_]{1,15}$"},"post_url":{"type":"string","pattern":"^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$"}}}}}}}}}"#
 
     public static func processArguments(now: Date) -> [String] {
         [
             "-p", prompt(now: now),
             "--output-format", "json",
             "--json-schema", jsonSchema,
-            "--max-turns", "15",
+            "--max-turns", "8",
             "--no-subagents",
             "--no-memory",
             "--yolo",
@@ -288,12 +290,14 @@ public enum GrokXNewsParser {
         let category: String
         let headline: String
         let summary: String
+        let postText: String?
         let confidence: String
         let postedAt: String
         let sources: [RawSource]
 
         enum CodingKeys: String, CodingKey {
             case category, headline, summary, confidence, sources
+            case postText = "post_text"
             case postedAt = "posted_at"
         }
     }
@@ -351,6 +355,7 @@ public enum GrokXNewsParser {
                 stories.append(XNewsStory(
                     title: story.title,
                     summary: story.summary,
+                    postText: story.postText,
                     category: story.category,
                     confidence: story.confidence,
                     sources: newSources
@@ -393,7 +398,7 @@ public enum GrokXNewsParser {
         }
         guard (GrokXNewsContract.minimumStories...GrokXNewsContract.maximumStories).contains(stories.count) else {
             if let firstTopicError { throw firstTopicError }
-            throw GrokXNewsError.invalidFeed("expected at least 2 fully verified stories")
+            throw GrokXNewsError.invalidFeed("expected at least 2 structurally valid stories")
         }
         return XNewsFeed(generatedAt: generatedAt, stories: stories)
     }
@@ -407,6 +412,9 @@ public enum GrokXNewsParser {
     ) throws -> XNewsStory {
             let title = try bounded(topic.headline, field: "headline", maximum: 70)
             let summary = try bounded(topic.summary, field: "summary", maximum: 220)
+            let postText = try topic.postText.map {
+                try boundedMultiline($0, field: "post_text", maximum: xNewsMaximumPostCharacters)
+            }
             guard XNewsStoryQuality.isPublishable(title: title, summary: summary) else {
                 throw GrokXNewsError.invalidFeed("research notes and search-progress placeholders are not news stories")
             }
@@ -450,7 +458,14 @@ public enum GrokXNewsParser {
                 return XNewsCitation(handle: expectedHandle, postedAt: parsed.postedAt, xURL: parsed.url)
             }
             seenURLs.formUnion(topicURLs)
-            return XNewsStory(title: title, summary: summary, category: category, confidence: confidence, sources: citations)
+            return XNewsStory(
+                title: title,
+                summary: summary,
+                postText: postText,
+                category: category,
+                confidence: confidence,
+                sources: citations
+            )
     }
 
     private static func bounded(_ value: String, field: String, maximum: Int) throws -> String {
@@ -461,6 +476,14 @@ public enum GrokXNewsParser {
               normalized.count <= maximum
         else {
             throw GrokXNewsError.invalidFeed("\(field) is empty, multiline, or too long")
+        }
+        return normalized
+    }
+
+    private static func boundedMultiline(_ value: String, field: String, maximum: Int) throws -> String {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, normalized.count <= maximum else {
+            throw GrokXNewsError.invalidFeed("\(field) is empty or too long")
         }
         return normalized
     }
@@ -558,6 +581,7 @@ public enum XNewsWireMapper {
                     category: story.category.rawValue,
                     headline: boardSafeText(story.title),
                     summary: boardSafeText(story.summary),
+                    postText: story.postText.map { boardSafePostText($0) },
                     confidence: story.confidence.rawValue,
                     sources: story.sources.map {
                         NewsCitation(handle: $0.handle, postedAt: $0.postedAt, postURL: $0.xURL.absoluteString)
@@ -568,9 +592,13 @@ public enum XNewsWireMapper {
     }
 
     /// LVGL's compact built-in Montserrat fonts cover a deliberately small glyph set.
-    /// Keep the verified cache unchanged while making the board wire text predictable.
+    /// Keep the source cache unchanged while making the board wire text predictable.
     static func boardSafeText(_ value: String) -> String {
         BoardDisplayText.sanitized(value, maximum: 220)
+    }
+
+    static func boardSafePostText(_ value: String) -> String {
+        BoardDisplayText.sanitized(value, maximum: xNewsMaximumPostCharacters)
     }
 
     public static func cachedSnapshot(now: Date = Date(), cache: XNewsFeedCache = XNewsFeedCache()) -> NewsFeedSnapshot? {
@@ -715,6 +743,7 @@ enum XNewsRollingFeedMerger {
             stories.append(XNewsStory(
                 title: story.title,
                 summary: story.summary,
+                postText: story.postText,
                 category: story.category,
                 confidence: story.confidence,
                 sources: currentSources

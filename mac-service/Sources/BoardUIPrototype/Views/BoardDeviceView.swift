@@ -16,13 +16,15 @@ public struct BoardDeviceView: View {
     private let codexEnabled: Bool
     private let xNewsEnabled: Bool
     private let codexChatOpen: Bool
+    private let xNewsDetailOpen: Bool
 
     public init(
         page: BoardPage = .dashboard,
         interactive: Bool = true,
         codexEnabled: Bool = true,
         xNewsEnabled: Bool = true,
-        codexChatOpen: Bool = false
+        codexChatOpen: Bool = false,
+        xNewsDetailOpen: Bool = false
     ) {
         let initialPage = (!codexEnabled && page == .codex) || (!xNewsEnabled && page == .xNews)
             ? .weather
@@ -34,6 +36,7 @@ public struct BoardDeviceView: View {
         self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled
         self.codexChatOpen = codexChatOpen
+        self.xNewsDetailOpen = xNewsDetailOpen
     }
 
     public init(scenario: BoardPreviewScenario) {
@@ -44,6 +47,7 @@ public struct BoardDeviceView: View {
         codexEnabled = true
         xNewsEnabled = true
         codexChatOpen = false
+        xNewsDetailOpen = false
     }
 
     public init(focusMinutes: Int, focusTitle: String) {
@@ -55,6 +59,7 @@ public struct BoardDeviceView: View {
         codexEnabled = true
         xNewsEnabled = true
         codexChatOpen = false
+        xNewsDetailOpen = false
     }
 
     public var body: some View {
@@ -185,7 +190,8 @@ public struct BoardDeviceView: View {
                     initiallyShowingChat: codexChatOpen,
                     interactive: interactive
                 )
-            case .xNews: XNewsPage(interactive: interactive)
+            case .xNews:
+                XNewsPage(interactive: interactive, initiallyShowingDetail: xNewsDetailOpen)
             case .weather: WeatherPage()
             case .settings:
                 SettingsPage(

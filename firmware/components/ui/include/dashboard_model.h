@@ -8,7 +8,8 @@ extern "C" {
 #endif
 
 #define DASHBOARD_MAX_TASKS 6
-#define DASHBOARD_MAX_NEWS 8
+#define DASHBOARD_MAX_NEWS 15
+#define DASHBOARD_NEWS_POST_TEXT_MAX 1800
 #define DASHBOARD_VERSION_MAX 32
 
 typedef enum {
@@ -44,8 +45,11 @@ typedef struct {
     char category[10];
     char headline[71];
     char summary[221];
+    char post_text[DASHBOARD_NEWS_POST_TEXT_MAX + 1];
     char confidence[7];
     char handle[17];
+    char posted_at[32];
+    char post_url[96];
 } dashboard_news_story_t;
 
 typedef struct {

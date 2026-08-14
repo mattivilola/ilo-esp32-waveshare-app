@@ -724,7 +724,7 @@ struct MenuDashboardView: View {
 
     private var xNewsCacheDescription: String {
         guard let generatedAt = store.xNewsCacheGeneratedAt, store.xNewsCachedStoryCount > 0 else {
-            return "No verified cache"
+            return "No cached posts"
         }
         return "\(store.xNewsCachedStoryCount) stories · \(generatedAt.formatted(.relative(presentation: .named)))"
     }

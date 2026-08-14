@@ -71,7 +71,7 @@
         "generatedAt": { "type": "string", "format": "date-time" },
         "stories": {
           "type": "array",
-          "maxItems": 5,
+          "maxItems": 15,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -81,6 +81,7 @@
               "category": { "enum": ["AI", "Robotics"] },
               "headline": { "type": "string", "maxLength": 70 },
               "summary": { "type": "string", "maxLength": 220 },
+              "postText": { "type": ["string", "null"], "maxLength": 1800 },
               "confidence": { "enum": ["high", "medium"] },
               "sources": {
                 "type": "array",

@@ -13,7 +13,8 @@ public let codexChatProtocolVersion = 1
 public let codexChatMaximumMessages = 6
 public let codexChatMaximumMessageCharacters = 360
 public let focusCompletionProtocolVersion = 1
-public let xNewsMaximumStories = 8
+public let xNewsMaximumStories = 15
+public let xNewsMaximumPostCharacters = 1_800
 
 public enum BoardDisplayText {
     /// LVGL's bundled Montserrat fonts intentionally cover a compact glyph set.
@@ -175,6 +176,7 @@ public struct NewsStory: Codable, Equatable, Sendable, Identifiable {
     public let category: String
     public let headline: String
     public let summary: String
+    public let postText: String?
     public let confidence: String
     public let sources: [NewsCitation]
 
@@ -183,6 +185,7 @@ public struct NewsStory: Codable, Equatable, Sendable, Identifiable {
         category: String,
         headline: String,
         summary: String,
+        postText: String? = nil,
         confidence: String,
         sources: [NewsCitation]
     ) {
@@ -190,6 +193,7 @@ public struct NewsStory: Codable, Equatable, Sendable, Identifiable {
         self.category = category
         self.headline = headline
         self.summary = summary
+        self.postText = postText.map { String($0.prefix(xNewsMaximumPostCharacters)) }
         self.confidence = confidence
         self.sources = Array(sources.prefix(3))
     }

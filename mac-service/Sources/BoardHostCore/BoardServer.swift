@@ -516,7 +516,7 @@ private final class BoardConnection: @unchecked Sendable {
             let outcome = await xNewsRefreshCoordinator.requestManualRefresh()
             guard let self else { return }
             let response: (XNewsRefreshStatus, String) = switch outcome {
-            case .updated: (.updated, "Latest verified stories are ready")
+            case .updated: (.updated, "Latest X posts are ready")
             case .disabled: (.disabled, "Enable X News on the Mac first")
             case .cooldown: (.cooldown, "Refresh available after the 15 minute cooldown")
             case .busy: (.busy, "A news refresh is already running")

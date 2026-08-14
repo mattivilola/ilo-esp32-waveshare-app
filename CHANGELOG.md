@@ -22,6 +22,8 @@ Notable ILO Board macOS companion changes are documented here.
 - Record successful 0.2.14 OTA validation
 - Keep weather, power, time, and X News syncing when Codex history is temporarily unavailable
 - Expand X News to a rolling feed of up to eight directly cited stories
+- Expand X News to fifteen scannable posts with metadata chips and full post-detail reading
+- Shorten X News refreshes by removing the independent claim-verification pass
 
 ### Fixed
 - Fix OTA first-boot confirmation policy

@@ -107,6 +107,23 @@ static lv_obj_t *x_news_rows[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_titles[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_summaries[X_NEWS_VISIBLE_STORIES];
 static lv_obj_t *x_news_meta[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_category_chips[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_category_labels[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_confidence_chips[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_confidence_labels[X_NEWS_VISIBLE_STORIES];
+static lv_obj_t *x_news_detail_overlay;
+static lv_obj_t *x_news_detail_title;
+static lv_obj_t *x_news_detail_handle;
+static lv_obj_t *x_news_detail_posted_at;
+static lv_obj_t *x_news_detail_category_chip;
+static lv_obj_t *x_news_detail_category_label;
+static lv_obj_t *x_news_detail_confidence_chip;
+static lv_obj_t *x_news_detail_confidence_label;
+static lv_obj_t *x_news_detail_scroll;
+static lv_obj_t *x_news_detail_summary;
+static lv_obj_t *x_news_detail_post_text;
+static lv_obj_t *x_news_detail_url;
+static int x_news_selected_index = -1;
 static dashboard_x_news_refresh_callback_t x_news_refresh_callback;
 static int32_t x_news_pull_distance;
 static int32_t x_news_pull_start_x;
@@ -239,6 +256,7 @@ static void render_codex_detail(void);
 static void render_dashboard_signal(const dashboard_model_t *model);
 static void open_codex_chat(void);
 static void build_codex_chat_overlay(lv_obj_t *screen);
+static void build_x_news_detail_overlay(lv_obj_t *screen);
 static void build_focus_overlay(lv_obj_t *screen);
 static void refresh_focus_overlay(void);
 static bool start_focus_session(const char *title);
@@ -1148,12 +1166,12 @@ static void show_model_x_news_status(void)
     if (x_news_status_label == NULL || !latest_model_valid) return;
     if (latest_model.news_count > 0) {
         char status[40];
-        snprintf(status, sizeof(status), "%u VERIFIED STORIES", (unsigned int)latest_model.news_count);
+        snprintf(status, sizeof(status), "%u DIRECT X POSTS", (unsigned int)latest_model.news_count);
         lv_label_set_text(x_news_status_label, status);
         lv_obj_set_style_text_color(x_news_status_label, COLOR_SIGNAL, 0);
         if (x_news_empty_card != NULL) lv_obj_add_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
     } else {
-        lv_label_set_text(x_news_status_label, "WAITING FOR VERIFIED MAC FEED");
+        lv_label_set_text(x_news_status_label, "WAITING FOR MAC FEED");
         lv_obj_set_style_text_color(x_news_status_label, COLOR_AMBER, 0);
         if (x_news_empty_card != NULL) {
             lv_obj_remove_flag(x_news_empty_card, LV_OBJ_FLAG_HIDDEN);
@@ -1268,11 +1286,103 @@ static void x_news_scroll_event(lv_event_t *event)
     finish_x_news_pull();
 }
 
+static void style_x_news_chip(
+    lv_obj_t *chip,
+    lv_obj_t *label,
+    const char *text,
+    lv_color_t color
+)
+{
+    if (chip == NULL || label == NULL) return;
+    lv_label_set_text(label, text);
+    lv_obj_set_style_bg_color(chip, color, 0);
+    lv_obj_set_style_bg_opa(chip, LV_OPA_20, 0);
+    lv_obj_set_style_border_color(chip, color, 0);
+    lv_obj_set_style_border_opa(chip, LV_OPA_40, 0);
+    lv_obj_set_style_text_color(label, color, 0);
+}
+
+static void style_x_news_metadata(
+    const dashboard_news_story_t *story,
+    lv_obj_t *category_chip,
+    lv_obj_t *category_label,
+    lv_obj_t *confidence_chip,
+    lv_obj_t *confidence_label
+)
+{
+    bool robotics = story != NULL && strcmp(story->category, "Robotics") == 0;
+    bool medium = story != NULL && strcmp(story->confidence, "medium") == 0;
+    style_x_news_chip(
+        category_chip,
+        category_label,
+        robotics ? "ROBOTICS" : "AI",
+        robotics ? COLOR_CYAN : COLOR_SIGNAL
+    );
+    style_x_news_chip(
+        confidence_chip,
+        confidence_label,
+        medium ? "MEDIUM" : "HIGH",
+        medium ? COLOR_AMBER : COLOR_SIGNAL
+    );
+}
+
+static void x_news_detail_back_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || x_news_detail_overlay == NULL) return;
+    x_news_selected_index = -1;
+    lv_obj_add_flag(x_news_detail_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_display_trigger_activity(ui_display);
+}
+
+static void render_x_news_detail(void)
+{
+    if (x_news_detail_overlay == NULL || !latest_model_valid
+        || x_news_selected_index < 0 || x_news_selected_index >= latest_model.news_count) return;
+    const dashboard_news_story_t *story = &latest_model.news[x_news_selected_index];
+    lv_label_set_text(x_news_detail_title, story->headline);
+    lv_label_set_text(x_news_detail_handle, story->handle[0] != 0 ? story->handle : "X post");
+    char posted_at[32] = "TIME UNAVAILABLE";
+    if (strlen(story->posted_at) >= 16) {
+        snprintf(posted_at, sizeof(posted_at), "%.10s / %.5s UTC", story->posted_at, story->posted_at + 11);
+    }
+    lv_label_set_text(x_news_detail_posted_at, posted_at);
+    lv_label_set_text(x_news_detail_summary, story->summary);
+    lv_label_set_text(
+        x_news_detail_post_text,
+        story->post_text[0] != 0 ? story->post_text : story->summary
+    );
+    lv_label_set_text(
+        x_news_detail_url,
+        story->post_url[0] != 0 ? story->post_url : "Direct X URL unavailable"
+    );
+    style_x_news_metadata(
+        story,
+        x_news_detail_category_chip,
+        x_news_detail_category_label,
+        x_news_detail_confidence_chip,
+        x_news_detail_confidence_label
+    );
+    lv_obj_scroll_to_y(x_news_detail_scroll, 0, LV_ANIM_OFF);
+}
+
+static void x_news_row_tapped(lv_event_t *event)
+{
+    if (lv_event_get_code(event) != LV_EVENT_CLICKED || !latest_model_valid
+        || x_news_detail_overlay == NULL) return;
+    int index = (int)(intptr_t)lv_event_get_user_data(event);
+    if (index < 0 || index >= latest_model.news_count) return;
+    x_news_selected_index = index;
+    render_x_news_detail();
+    lv_obj_move_foreground(x_news_detail_overlay);
+    lv_obj_remove_flag(x_news_detail_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_display_trigger_activity(ui_display);
+}
+
 static void build_x_news_page(lv_obj_t *page)
 {
     lv_obj_t *title = create_label(page, "AI + humanoid robotics", &lv_font_montserrat_20, COLOR_MIST);
     lv_obj_set_pos(title, 22, 8);
-    x_news_status_label = create_label(page, "WAITING FOR VERIFIED MAC FEED", &lv_font_montserrat_14, COLOR_AMBER);
+    x_news_status_label = create_label(page, "WAITING FOR MAC FEED", &lv_font_montserrat_14, COLOR_AMBER);
     lv_obj_align(x_news_status_label, LV_ALIGN_TOP_RIGHT, -22, 12);
 
     x_news_scroll = lv_obj_create(page);
@@ -1288,20 +1398,50 @@ static void build_x_news_page(lv_obj_t *page)
         x_news_rows[i] = create_card(x_news_scroll, 12, 4 + (i * 126), 964, 116, 14);
         lv_obj_add_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_event_cb(x_news_rows[i], x_news_scroll_event, LV_EVENT_ALL, NULL);
+        lv_obj_add_event_cb(x_news_rows[i], x_news_row_tapped, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        lv_obj_set_style_bg_color(x_news_rows[i], COLOR_STEEL, LV_STATE_PRESSED);
         x_news_titles[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_16, COLOR_MIST);
-        lv_obj_set_width(x_news_titles[i], 700);
+        lv_obj_set_width(x_news_titles[i], 690);
         lv_label_set_long_mode(x_news_titles[i], LV_LABEL_LONG_DOT);
         lv_obj_align(x_news_titles[i], LV_ALIGN_TOP_LEFT, 18, 14);
         x_news_summaries[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_FOG);
-        lv_obj_set_size(x_news_summaries[i], 928, 42);
+        lv_obj_set_size(x_news_summaries[i], 760, 38);
         lv_label_set_long_mode(x_news_summaries[i], LV_LABEL_LONG_CLIP);
         lv_obj_set_style_text_line_space(x_news_summaries[i], 4, 0);
         lv_obj_align(x_news_summaries[i], LV_ALIGN_TOP_LEFT, 18, 48);
-        x_news_meta[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_SIGNAL);
-        lv_obj_set_width(x_news_meta[i], 220);
+        x_news_meta[i] = create_label(x_news_rows[i], "", &lv_font_montserrat_14, COLOR_CYAN);
+        lv_obj_set_width(x_news_meta[i], 600);
         lv_label_set_long_mode(x_news_meta[i], LV_LABEL_LONG_DOT);
-        lv_obj_align(x_news_meta[i], LV_ALIGN_TOP_RIGHT, -18, 16);
-        lv_obj_set_style_text_align(x_news_meta[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_align(x_news_meta[i], LV_ALIGN_BOTTOM_LEFT, 18, -10);
+
+        x_news_category_chips[i] = lv_obj_create(x_news_rows[i]);
+        set_clean_box(x_news_category_chips[i], COLOR_SIGNAL, 10);
+        lv_obj_set_size(x_news_category_chips[i], 112, 30);
+        lv_obj_set_pos(x_news_category_chips[i], 724, 12);
+        lv_obj_clear_flag(x_news_category_chips[i], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        x_news_category_labels[i] = create_label(
+            x_news_category_chips[i],
+            "AI",
+            &lv_font_montserrat_14,
+            COLOR_SIGNAL
+        );
+        lv_obj_center(x_news_category_labels[i]);
+
+        x_news_confidence_chips[i] = lv_obj_create(x_news_rows[i]);
+        set_clean_box(x_news_confidence_chips[i], COLOR_SIGNAL, 10);
+        lv_obj_set_size(x_news_confidence_chips[i], 92, 30);
+        lv_obj_set_pos(x_news_confidence_chips[i], 846, 12);
+        lv_obj_clear_flag(x_news_confidence_chips[i], LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+        x_news_confidence_labels[i] = create_label(
+            x_news_confidence_chips[i],
+            "HIGH",
+            &lv_font_montserrat_14,
+            COLOR_SIGNAL
+        );
+        lv_obj_center(x_news_confidence_labels[i]);
+
+        lv_obj_t *read = create_label(x_news_rows[i], "TAP TO READ  " LV_SYMBOL_RIGHT, &lv_font_montserrat_14, COLOR_FOG);
+        lv_obj_align(read, LV_ALIGN_BOTTOM_RIGHT, -18, -10);
     }
 
     x_news_empty_card = create_card(x_news_scroll, 12, 4, 964, 326, 16);
@@ -1336,6 +1476,105 @@ static void build_x_news_page(lv_obj_t *page)
     x_news_scroll_hint = create_label(page, "SWIPE UP FOR MORE", &lv_font_montserrat_14, COLOR_CYAN);
     lv_obj_align(x_news_scroll_hint, LV_ALIGN_BOTTOM_RIGHT, -28, -4);
     lv_obj_add_flag(x_news_scroll_hint, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void build_x_news_detail_overlay(lv_obj_t *screen)
+{
+    x_news_detail_overlay = lv_obj_create(screen);
+    set_clean_box(x_news_detail_overlay, COLOR_CARBON, 0);
+    lv_obj_set_size(x_news_detail_overlay, ILO_BOARD_WIDTH, ILO_BOARD_HEIGHT);
+    lv_obj_set_pos(x_news_detail_overlay, 0, 0);
+    lv_obj_add_flag(x_news_detail_overlay, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *back = lv_button_create(x_news_detail_overlay);
+    set_clean_box(back, COLOR_STEEL, 12);
+    lv_obj_set_size(back, 122, 46);
+    lv_obj_set_pos(back, 22, 18);
+    lv_obj_add_event_cb(back, x_news_detail_back_tapped, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *back_label = create_label(back, LV_SYMBOL_LEFT "  BACK", &lv_font_montserrat_14, COLOR_MIST);
+    lv_obj_center(back_label);
+
+    x_news_detail_handle = create_label(x_news_detail_overlay, "@source", &lv_font_montserrat_20, COLOR_CYAN);
+    lv_obj_set_width(x_news_detail_handle, 260);
+    lv_label_set_long_mode(x_news_detail_handle, LV_LABEL_LONG_DOT);
+    lv_obj_set_pos(x_news_detail_handle, 166, 14);
+    x_news_detail_posted_at = create_label(x_news_detail_overlay, "TIME UNAVAILABLE", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_pos(x_news_detail_posted_at, 166, 44);
+
+    x_news_detail_category_chip = lv_obj_create(x_news_detail_overlay);
+    set_clean_box(x_news_detail_category_chip, COLOR_SIGNAL, 10);
+    lv_obj_set_size(x_news_detail_category_chip, 112, 32);
+    lv_obj_set_pos(x_news_detail_category_chip, 766, 24);
+    lv_obj_clear_flag(x_news_detail_category_chip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    x_news_detail_category_label = create_label(
+        x_news_detail_category_chip,
+        "AI",
+        &lv_font_montserrat_14,
+        COLOR_SIGNAL
+    );
+    lv_obj_center(x_news_detail_category_label);
+
+    x_news_detail_confidence_chip = lv_obj_create(x_news_detail_overlay);
+    set_clean_box(x_news_detail_confidence_chip, COLOR_SIGNAL, 10);
+    lv_obj_set_size(x_news_detail_confidence_chip, 92, 32);
+    lv_obj_set_pos(x_news_detail_confidence_chip, 888, 24);
+    lv_obj_clear_flag(x_news_detail_confidence_chip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    x_news_detail_confidence_label = create_label(
+        x_news_detail_confidence_chip,
+        "HIGH",
+        &lv_font_montserrat_14,
+        COLOR_SIGNAL
+    );
+    lv_obj_center(x_news_detail_confidence_label);
+
+    x_news_detail_scroll = lv_obj_create(x_news_detail_overlay);
+    lv_obj_remove_style_all(x_news_detail_scroll);
+    lv_obj_set_size(x_news_detail_scroll, 980, 444);
+    lv_obj_set_pos(x_news_detail_scroll, 22, 82);
+    lv_obj_set_scroll_dir(x_news_detail_scroll, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(x_news_detail_scroll, LV_SCROLLBAR_MODE_ACTIVE);
+    lv_obj_set_flex_flow(x_news_detail_scroll, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(
+        x_news_detail_scroll,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START,
+        LV_FLEX_ALIGN_START
+    );
+    lv_obj_set_style_pad_all(x_news_detail_scroll, 14, 0);
+    lv_obj_set_style_pad_row(x_news_detail_scroll, 12, 0);
+
+    x_news_detail_title = create_label(x_news_detail_scroll, "X post", &lv_font_montserrat_28, COLOR_MIST);
+    lv_obj_set_width(x_news_detail_title, 930);
+    lv_label_set_long_mode(x_news_detail_title, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *summary_label = create_label(x_news_detail_scroll, "WHY IT MATTERS", &lv_font_montserrat_14, COLOR_SIGNAL);
+    lv_obj_set_style_text_letter_space(summary_label, 1, 0);
+    x_news_detail_summary = create_label(x_news_detail_scroll, "", &lv_font_montserrat_16, COLOR_FOG);
+    lv_obj_set_width(x_news_detail_summary, 930);
+    lv_label_set_long_mode(x_news_detail_summary, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_line_space(x_news_detail_summary, 5, 0);
+
+    lv_obj_t *post_label = create_label(x_news_detail_scroll, "X POST", &lv_font_montserrat_14, COLOR_CYAN);
+    lv_obj_set_style_text_letter_space(post_label, 1, 0);
+    x_news_detail_post_text = create_label(x_news_detail_scroll, "", &lv_font_montserrat_16, COLOR_MIST);
+    lv_obj_set_width(x_news_detail_post_text, 930);
+    lv_label_set_long_mode(x_news_detail_post_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_line_space(x_news_detail_post_text, 6, 0);
+
+    lv_obj_t *source_label = create_label(x_news_detail_scroll, "DIRECT SOURCE", &lv_font_montserrat_14, COLOR_FOG);
+    lv_obj_set_style_text_letter_space(source_label, 1, 0);
+    x_news_detail_url = create_label(x_news_detail_scroll, "", &lv_font_montserrat_14, COLOR_CYAN);
+    lv_obj_set_width(x_news_detail_url, 930);
+    lv_label_set_long_mode(x_news_detail_url, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *hint = create_label(
+        x_news_detail_overlay,
+        "SWIPE TO READ / COMPLETE AVAILABLE POST TEXT / READ ONLY",
+        &lv_font_montserrat_14,
+        COLOR_FOG
+    );
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -14);
+    lv_obj_add_flag(x_news_detail_overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void format_minutes(char *buffer, size_t size, uint16_t minutes)
@@ -2837,6 +3076,7 @@ static void build_ui(void)
 
     build_screensaver(screen);
     build_codex_chat_overlay(screen);
+    build_x_news_detail_overlay(screen);
     build_focus_overlay(screen);
 
     boot_ring_outer = lv_obj_create(screen);
@@ -3106,6 +3346,11 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
             lv_obj_set_scrollbar_mode(x_news_scroll, LV_SCROLLBAR_MODE_OFF);
         }
     }
+    if ((!model->x_news_enabled || x_news_selected_index >= model->news_count)
+        && x_news_detail_overlay != NULL) {
+        x_news_selected_index = -1;
+        lv_obj_add_flag(x_news_detail_overlay, LV_OBJ_FLAG_HIDDEN);
+    }
     for (int i = 0; i < X_NEWS_VISIBLE_STORIES; ++i) {
         if (i >= model->news_count) {
             lv_obj_add_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
@@ -3115,10 +3360,16 @@ void dashboard_ui_set_model(const dashboard_model_t *model)
         lv_obj_remove_flag(x_news_rows[i], LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(x_news_titles[i], story->headline);
         lv_label_set_text(x_news_summaries[i], story->summary);
-        char meta[48];
-        snprintf(meta, sizeof(meta), "%s / %s / %s", story->category, story->confidence, story->handle);
-        lv_label_set_text(x_news_meta[i], meta);
+        lv_label_set_text(x_news_meta[i], story->handle);
+        style_x_news_metadata(
+            story,
+            x_news_category_chips[i],
+            x_news_category_labels[i],
+            x_news_confidence_chips[i],
+            x_news_confidence_labels[i]
+        );
     }
+    if (x_news_selected_index >= 0) render_x_news_detail();
     char count[8];
     snprintf(count, sizeof(count), "%d", attention_count);
     lv_label_set_text(attention_count_label, count);
@@ -3396,7 +3647,7 @@ void dashboard_ui_set_codex_continue_state(dashboard_codex_continue_state_t stat
 void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t state)
 {
     if (x_news_status_label == NULL) return;
-    const char *text = "NO VERIFIED UPDATE ACCEPTED";
+    const char *text = "NO USABLE UPDATE ACCEPTED";
     lv_color_t color = COLOR_AMBER;
     switch (state) {
     case DASHBOARD_X_NEWS_REFRESH_FETCHING:
@@ -3404,7 +3655,7 @@ void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t stat
         color = COLOR_SIGNAL;
         break;
     case DASHBOARD_X_NEWS_REFRESH_UPDATED:
-        text = "LATEST VERIFIED STORIES READY";
+        text = "LATEST X POSTS READY";
         color = COLOR_SIGNAL;
         break;
     case DASHBOARD_X_NEWS_REFRESH_DISABLED:
@@ -3438,7 +3689,7 @@ void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t stat
         break;
     case DASHBOARD_X_NEWS_REFRESH_UPDATED:
         show_x_news_empty_activity(
-            "Verified brief ready",
+            "Latest posts ready",
             "Syncing the latest accepted stories from your Mac",
             COLOR_SIGNAL,
             false
@@ -3471,7 +3722,7 @@ void dashboard_ui_set_x_news_refresh_state(dashboard_x_news_refresh_state_t stat
     case DASHBOARD_X_NEWS_REFRESH_FAILED:
     default:
         show_x_news_empty_activity(
-            "No verified update accepted",
+            "No usable update accepted",
             "Nothing unsafe was cached  /  pull down to try again later",
             COLOR_AMBER,
             false

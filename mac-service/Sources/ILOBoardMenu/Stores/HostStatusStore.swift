@@ -237,11 +237,11 @@ final class HostStatusStore: ObservableObject {
             self.xNewsRefreshActivity = await xNewsRefreshCoordinator.activity()
             self.refreshXNewsStatus()
             self.xNewsNotice = switch outcome {
-            case .updated: "Latest verified stories are ready and will sync to the board."
+            case .updated: "Latest X posts are ready and will sync to the board."
             case .disabled: "Enable X News before refreshing."
             case .cooldown: "Refresh is rate-limited to once every 15 minutes."
             case .busy: "An X News refresh is already running."
-            case .failed: "No verified update was accepted; the previous cache was preserved."
+            case .failed: "No usable update was accepted; the previous cache was preserved."
             }
         }
     }

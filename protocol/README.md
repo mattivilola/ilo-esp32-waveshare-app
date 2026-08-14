@@ -14,7 +14,7 @@ Phase-1 client flow:
 
 1. Board establishes an authenticated Wi-Fi TLS or USB session using its opaque board ID and provisioned PSK.
 2. Board sends `hello`, including its optional bounded `firmwareVersion` metadata.
-3. Host replies `helloAck` with `tasks.read`, bounded `tasks.chat.read`, fixed `tasks.continue.fixed`, `macPower.read`, and the gated `xNews.refresh.request` capability. Dashboard snapshots add `xNews.read` only when a verified cache is present.
+3. Host replies `helloAck` with `tasks.read`, bounded `tasks.chat.read`, fixed `tasks.continue.fixed`, `macPower.read`, and the gated `xNews.refresh.request` capability. Dashboard snapshots add `xNews.read` only when a bounded X News cache is present.
 4. Board sends `subscribe` and advertises `tasks.read`, bounded `tasks.chat.read`, fixed `tasks.continue.fixed`, diagnostic `display.capture.rgb565`, and gated `xNews.refresh.request` support in `hello`.
 5. Host sends complete `snapshot` frames, including optional bounded `hostTime` and `companionVersion` metadata.
 

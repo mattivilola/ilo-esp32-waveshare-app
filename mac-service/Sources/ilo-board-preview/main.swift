@@ -22,6 +22,7 @@ enum ILOBoardPreviewCommand {
                     codexEnabled: !arguments.contains("--without-codex"),
                     xNewsEnabled: !arguments.contains("--without-x-news"),
                     codexChatOpen: arguments.contains("--chat"),
+                    xNewsDetailOpen: arguments.contains("--detail"),
                     to: output
                 )
             case "screenshots":
@@ -87,6 +88,7 @@ enum ILOBoardPreviewCommand {
         codexEnabled: Bool = true,
         xNewsEnabled: Bool = true,
         codexChatOpen: Bool = false,
+        xNewsDetailOpen: Bool = false,
         to path: String
     ) throws {
         try render(
@@ -95,9 +97,10 @@ enum ILOBoardPreviewCommand {
                 interactive: false,
                 codexEnabled: codexEnabled,
                 xNewsEnabled: xNewsEnabled,
-                codexChatOpen: codexChatOpen
+                codexChatOpen: codexChatOpen,
+                xNewsDetailOpen: xNewsDetailOpen
             ),
-            label: codexChatOpen ? "Codex chat" : page.title,
+            label: codexChatOpen ? "Codex chat" : (xNewsDetailOpen ? "X News detail" : page.title),
             to: path
         )
     }

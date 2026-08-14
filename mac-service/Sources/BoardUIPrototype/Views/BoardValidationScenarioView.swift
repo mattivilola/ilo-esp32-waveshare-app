@@ -33,7 +33,7 @@ struct BoardValidationScenarioView: View {
                 badge: "STALE · 47 MIN",
                 headline: "14°C",
                 condition: "Last known: light rain",
-                detail: "Showing the latest verified cache while the board retries.",
+                detail: "Showing the latest cached X posts while the board retries.",
                 tint: BoardPalette.amber
             )
         case .error:

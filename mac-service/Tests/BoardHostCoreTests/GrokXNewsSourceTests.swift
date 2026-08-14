@@ -37,11 +37,11 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     #expect(wire.stories[0].sources[0].postURL.hasPrefix("https://x.com/example_ai/status/"))
 }
 
-@Test func verifiedXNewsFeedCanCarryEightStories() throws {
-    let topics = (0..<8).map { index in
+@Test func directXNewsFeedCanCarryFifteenStoriesWithReadablePostText() throws {
+    let topics = (0..<15).map { index in
         topic(
             category: index.isMultiple(of: 2) ? "AI" : "Robotics",
-            headline: "Verified development \(index)",
+            headline: "Direct development \(index)",
             handle: "@source\(index)",
             date: referenceNow.addingTimeInterval(TimeInterval(-600 - index * 60))
         )
@@ -51,9 +51,11 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
         now: referenceNow
     )
 
-    #expect(GrokXNewsContract.maximumStories == 8)
-    #expect(parsed.stories.count == 8)
-    #expect(XNewsWireMapper.snapshot(from: parsed).stories.count == 8)
+    #expect(GrokXNewsContract.maximumStories == 15)
+    #expect(parsed.stories.count == 15)
+    let wire = XNewsWireMapper.snapshot(from: parsed)
+    #expect(wire.stories.count == 15)
+    #expect(wire.stories[0].postText == "Complete synthetic X post text for the detail reader.")
 }
 
 @Test func rollingFeedRetainsCurrentLastGoodStoriesAndDropsResearchNotes() throws {
@@ -333,6 +335,7 @@ private func topic(
         "category": category,
         "headline": headline,
         "summary": "A bounded synthetic summary used only by the validator test.",
+        "post_text": "Complete synthetic X post text for the detail reader.",
         "confidence": "high",
         "posted_at": ISO8601DateFormatter().string(from: date),
         "sources": includeSource ? [[
@@ -346,7 +349,8 @@ private func testStory(title: String, handle: String, date: Date) -> XNewsStory 
     let bareHandle = String(handle.dropFirst())
     return XNewsStory(
         title: title,
-        summary: "A finished verified development for rolling-feed tests.",
+        summary: "A finished development for rolling-feed tests.",
+        postText: "Complete rolling-feed post text.",
         category: .ai,
         confidence: .high,
         sources: [XNewsCitation(

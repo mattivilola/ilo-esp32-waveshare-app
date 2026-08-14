@@ -237,20 +237,59 @@ import Testing
     }
 }
 
-@Test func xNewsWireFeedKeepsEightBoundedStories() {
-    let stories = (0..<12).map { index in
+@Test func xNewsWireFeedKeepsFifteenBoundedStories() {
+    let stories = (0..<18).map { index in
         NewsStory(
             id: "story-\(index)",
             category: index.isMultiple(of: 2) ? "AI" : "Robotics",
             headline: "Story \(index)",
-            summary: "Verified summary \(index)",
+            summary: "Summary \(index)",
+            postText: "Full available post text \(index)",
             confidence: "high",
             sources: []
         )
     }
     let feed = NewsFeedSnapshot(generatedAt: Date(), stories: stories)
-    #expect(xNewsMaximumStories == 8)
+    #expect(xNewsMaximumStories == 15)
     #expect(feed.stories.count == xNewsMaximumStories)
+}
+
+@Test func maximumReadableXNewsSnapshotFitsTheBoundedWireFrame() throws {
+    let postedAt = Date(timeIntervalSince1970: 1_700_000_000)
+    let stories = (0..<xNewsMaximumStories).map { index in
+        NewsStory(
+            id: "https://x.com/source\(index)/status/1950000000000000000",
+            category: index.isMultiple(of: 2) ? "AI" : "Robotics",
+            headline: String(repeating: "H", count: 70),
+            summary: String(repeating: "S", count: 220),
+            postText: String(repeating: "P", count: xNewsMaximumPostCharacters),
+            confidence: index.isMultiple(of: 3) ? "medium" : "high",
+            sources: [NewsCitation(
+                handle: "@source\(index)",
+                postedAt: postedAt,
+                postURL: "https://x.com/source\(index)/status/1950000000000000000"
+            )]
+        )
+    }
+    let tasks = (0..<12).map { index in
+        TaskCard(
+            id: String(repeating: "i", count: 79) + "\(index % 10)",
+            title: String(repeating: "T", count: 80),
+            state: .active,
+            attentionKind: .none,
+            updatedAt: postedAt,
+            shortSummary: String(repeating: "D", count: 180)
+        )
+    }
+    let message = SnapshotMessage(snapshot: DashboardSnapshot(
+        revision: 99,
+        tasks: tasks,
+        newsFeed: NewsFeedSnapshot(generatedAt: postedAt, stories: stories)
+    ))
+    let payload = try ProtocolJSON.encoder().encode(message)
+
+    #expect(payload.count < boardProtocolMaximumFrameBytes)
+    #expect(try FrameEncoder.encode(payload).count == payload.count + 4)
 }
 
 @Test func legacySnapshotInfersCodexVisibilityFromTaskCapability() throws {

@@ -142,7 +142,7 @@ struct ILOBoardHostCommand {
             print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")
             print("  Desktop task status: recent history only unless owned by this App Server")
             print("  Optional Grok adapter: \(GrokExecutableResolver.resolve()?.path ?? "CLI not found")")
-            print("  X News: opt-in; verified cache only; daily policy available")
+            print("  X News: opt-in; bounded direct-post cache; daily policy available")
             print("  USB: \(usbPresence.displayText)\(usbPresence.path.map { " (\($0))" } ?? "")")
             if let power = await CachedMacPowerStatusSource().currentStatus() {
                 print("  Mac power: \(power.levelPercent)% \(power.state.rawValue)")
@@ -189,9 +189,9 @@ struct ILOBoardHostCommand {
             print("Grok CLI: \(GrokExecutableResolver.resolve()?.path ?? "not found")")
             if let feed = try? XNewsFeedCache().load() {
                 let timestamp = ISO8601DateFormatter().string(from: feed.generatedAt)
-                print("Verified cache: \(feed.stories.count) stories generated \(timestamp)")
+                print("X News cache: \(feed.stories.count) posts generated \(timestamp)")
             } else {
-                print("Verified cache: unavailable")
+                print("X News cache: unavailable")
             }
             let settings = XNewsRefreshSettingsStore().load()
             let feature = XNewsFeatureController().status()
@@ -233,7 +233,7 @@ struct ILOBoardHostCommand {
                 : "Enabled X News at 08:00 and 14:00 local each day.")
         case "disable":
             try XNewsFeatureController().disable()
-            print("Disabled automatic X News refresh. The last verified cache was preserved.")
+            print("Disabled automatic X News refresh. The last cache was preserved.")
         default:
             throw XNewsCommandError.invalidAction
         }
