@@ -10,6 +10,10 @@ TRANSPORT = (
 ).read_text()
 MAIN = (ROOT / "firmware" / "main" / "main.cpp").read_text()
 MAIN_CMAKE = (ROOT / "firmware" / "main" / "CMakeLists.txt").read_text()
+PROJECT_CMAKE = (ROOT / "firmware" / "CMakeLists.txt").read_text()
+LVGL_PSRAM_POOL = (
+    ROOT / "firmware" / "components" / "ui" / "include" / "lvgl_psram_pool.h"
+).read_text()
 
 
 class OTAMemorySourceTests(unittest.TestCase):
@@ -26,10 +30,12 @@ class OTAMemorySourceTests(unittest.TestCase):
         self.assertIn("static const dashboard_model_t initial = {};", MAIN)
         self.assertIn("-Werror=frame-larger-than=8192", MAIN_CMAKE)
 
-    def test_lvgl_uses_the_psram_capable_system_heap(self):
-        self.assertIn("# CONFIG_LV_USE_BUILTIN_MALLOC is not set", DEFAULTS)
-        self.assertIn("CONFIG_LV_USE_CLIB_MALLOC=y", DEFAULTS)
-        self.assertNotIn("CONFIG_LV_MEM_SIZE_KILOBYTES=128", DEFAULTS)
+    def test_lvgl_pool_is_large_and_pinned_to_psram(self):
+        self.assertIn("CONFIG_LV_USE_BUILTIN_MALLOC=y", DEFAULTS)
+        self.assertIn("# CONFIG_LV_USE_CLIB_MALLOC is not set", DEFAULTS)
+        self.assertIn("CONFIG_LV_MEM_SIZE_KILOBYTES=256", DEFAULTS)
+        self.assertIn('LV_MEM_POOL_INCLUDE=\\\"lvgl_psram_pool.h\\\"', PROJECT_CMAKE)
+        self.assertIn("MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT", LVGL_PSRAM_POOL)
 
 
 if __name__ == "__main__":
