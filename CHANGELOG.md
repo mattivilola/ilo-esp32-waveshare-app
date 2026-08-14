@@ -2,6 +2,18 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.11 - 2026-08-14
+
+### Added
+- Browse up to ten recent Codex tasks on the board with clearer task, chat, and plan details
+- Review completed Codex plans using bounded Approve or Reject actions with explicit confirmation
+- Open full X News posts from the rolling feed
+
+### Changed
+- Keep Codex task handles and plan actions bounded, revalidated, and free of arbitrary prompt text
+- Pair companion 0.1.11 with firmware 0.2.17 for the improved Codex browsing and action UI
+
+
 ## 0.1.10 - 2026-08-14
 
 ### Added
