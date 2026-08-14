@@ -243,7 +243,7 @@ struct MenuDashboardView: View {
             Divider()
             detailRow("USB", value: store.usbDescription)
             Divider()
-            detailRow("Last sync", value: lastSyncDescription)
+            detailRow("Board applied", value: lastSyncDescription)
             Divider()
             detailRow("MacBook", value: macPowerDescription)
             Divider()

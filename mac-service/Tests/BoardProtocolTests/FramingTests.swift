@@ -2,6 +2,15 @@ import BoardProtocol
 import Foundation
 import Testing
 
+@Test func snapshotAcknowledgementRoundTripsWithProtocolVersion() throws {
+    let acknowledgement = SnapshotAcknowledgement(revision: 42)
+    let data = try ProtocolJSON.encoder().encode(acknowledgement)
+    let decoded = try ProtocolJSON.decoder().decode(SnapshotAcknowledgement.self, from: data)
+    #expect(decoded == acknowledgement)
+    #expect(decoded.type == "snapshotAck")
+    #expect(decoded.protocolVersion == boardProtocolVersion)
+}
+
 @Test func focusCompletionProtocolRoundTripsBoundedReceipt() throws {
     let message = FocusCompletionMessage(
         eventID: "focus-1770000000",

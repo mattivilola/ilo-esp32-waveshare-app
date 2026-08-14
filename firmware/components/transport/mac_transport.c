@@ -594,6 +594,18 @@ static bool channel_send_json(mac_channel_t *channel, cJSON *json)
     return channel->send_json(channel->context, json);
 }
 
+static bool send_snapshot_ack(mac_channel_t *channel, uint64_t revision)
+{
+    cJSON *ack = cJSON_CreateObject();
+    if (ack == NULL) return false;
+    cJSON_AddStringToObject(ack, "type", "snapshotAck");
+    cJSON_AddNumberToObject(ack, "protocolVersion", 1);
+    cJSON_AddNumberToObject(ack, "revision", (double)revision);
+    bool sent = channel_send_json(channel, ack);
+    cJSON_Delete(ack);
+    return sent;
+}
+
 static cJSON *channel_read_json(mac_channel_t *channel)
 {
     return channel->read_json(channel->context);
@@ -1604,9 +1616,12 @@ static void run_protocol_session(
             cJSON_Delete(message);
             break;
         }
-        if (parse_snapshot(message, model) && model_callback != NULL) model_callback(model);
+        bool snapshot_applied = parse_snapshot(message, model) && model_callback != NULL;
+        if (snapshot_applied) model_callback(model);
+        uint64_t applied_revision = model->revision;
         free(model);
         cJSON_Delete(message);
+        if (snapshot_applied && !send_snapshot_ack(channel, applied_revision)) break;
     }
 }
 

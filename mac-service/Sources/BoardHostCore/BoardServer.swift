@@ -302,6 +302,7 @@ private final class BoardConnection: @unchecked Sendable {
     private var captureAssembler: ScreenCaptureAssembler?
     private var captureFinished = false
     private var lastWeatherLocationPresence: Bool?
+    private var snapshotAcknowledgements = SnapshotAcknowledgementTracker()
 
     init(
         channel: any BoardConnectionChannel,
@@ -442,6 +443,8 @@ private final class BoardConnection: @unchecked Sendable {
             handleCodexChatRequest(payload)
         case "codexContinueRequest":
             handleCodexContinueRequest(payload)
+        case "snapshotAck":
+            handleSnapshotAcknowledgement(payload)
         case "focusCompletion":
             guard helloAccepted, subscribed,
                   let completion = try? ProtocolJSON.decoder().decode(FocusCompletionMessage.self, from: payload),
@@ -649,6 +652,18 @@ private final class BoardConnection: @unchecked Sendable {
         }
     }
 
+    private func handleSnapshotAcknowledgement(_ payload: Data) {
+        guard let acknowledgement = try? ProtocolJSON.decoder().decode(
+            SnapshotAcknowledgement.self,
+            from: payload
+        ), snapshotAcknowledgements.accept(acknowledgement) else {
+            send(ErrorMessage(code: "invalidSnapshotAck", message: "Snapshot acknowledgement was not valid."))
+            channel.cancel()
+            return
+        }
+        onSnapshot(Date())
+    }
+
     private func handleCaptureMessage<Message: Decodable>(
         _ payload: Data,
         as type: Message.Type,
@@ -710,7 +725,7 @@ private final class BoardConnection: @unchecked Sendable {
                 companionVersion: companionVersion
             )
             send(SnapshotMessage(snapshot: snapshot))
-            onSnapshot(Date())
+            snapshotAcknowledgements.sent(revision: snapshot.revision)
         } catch {
             send(ErrorMessage(code: "sourceUnavailable", message: "Task status is temporarily unavailable."))
         }
@@ -724,5 +739,23 @@ private final class BoardConnection: @unchecked Sendable {
         } catch {
             channel.cancel()
         }
+    }
+}
+
+struct SnapshotAcknowledgementTracker {
+    private(set) var lastSentRevision: UInt64 = 0
+    private(set) var lastAppliedRevision: UInt64 = 0
+
+    mutating func sent(revision: UInt64) {
+        if revision > lastSentRevision { lastSentRevision = revision }
+    }
+
+    mutating func accept(_ acknowledgement: SnapshotAcknowledgement) -> Bool {
+        guard acknowledgement.protocolVersion == boardProtocolVersion,
+              acknowledgement.revision > lastAppliedRevision,
+              acknowledgement.revision <= lastSentRevision
+        else { return false }
+        lastAppliedRevision = acknowledgement.revision
+        return true
     }
 }

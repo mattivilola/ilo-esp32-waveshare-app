@@ -38,7 +38,7 @@ public enum DiagnosticSummary {
             "Hardware profile: Waveshare ESP32-S3-Touch-LCD-5B (1024x600)",
             "Service: \(snapshot.serviceState)",
             "Launch at login: \(snapshot.launchAtLoginState.title)",
-            "Last successful board sync: \(snapshot.lastSync.map(timestamp) ?? "Never")",
+            "Last board-applied sync: \(snapshot.lastSync.map(timestamp) ?? "Never")",
             "",
             "Recent activity:",
         ]

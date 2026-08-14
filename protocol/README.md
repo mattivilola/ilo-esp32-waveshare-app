@@ -4,6 +4,8 @@ The reference device implementation is the Waveshare ESP32-S3-Touch-LCD-5B (SKU 
 
 Protocol version `1` uses a four-byte big-endian payload length followed by UTF-8 JSON. A frame is rejected when it is empty, larger than 65,536 bytes, malformed JSON, or uses an unsupported protocol version.
 
+After the board parses and applies a `snapshot`, it returns `snapshotAck` with the same revision. The companion advances its user-visible board sync time only for a valid, increasing acknowledgement that does not exceed a revision it sent. A queued write is never presented as a successful board sync.
+
 Application frames can use either of two authenticated transports. Wi-Fi is primary and uses TLS 1.2 with a unique 32-byte PSK per board; Bonjour advertises `_iloboard._tcp` and never carries credentials or private task data. When no authenticated Wi-Fi session exists, a physically attached paired ESP32-S3 may use the encrypted USB Serial/JTAG fallback described below. Wi-Fi preempts an active USB session.
 
 Firmware OTA control is defined separately in `firmware-update-v1.schema.json`. The paired Mac may send only `check` or `install`; all manifest, origin, artifact, signature, version, and rollback decisions remain on the board. Status exposes only bounded versions, state, percentage, and user-readable progress.

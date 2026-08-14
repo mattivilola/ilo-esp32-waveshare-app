@@ -544,6 +544,18 @@ public struct SnapshotMessage: Encodable, Equatable, Sendable {
     }
 }
 
+public struct SnapshotAcknowledgement: Codable, Equatable, Sendable {
+    public let type: String
+    public let protocolVersion: Int
+    public let revision: UInt64
+
+    public init(revision: UInt64) {
+        type = "snapshotAck"
+        protocolVersion = boardProtocolVersion
+        self.revision = revision
+    }
+}
+
 public struct ErrorMessage: Encodable, Equatable, Sendable {
     public let type = "error"
     public let code: String
