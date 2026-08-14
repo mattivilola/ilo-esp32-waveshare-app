@@ -40,6 +40,7 @@ Notable ILO Board macOS companion changes are documented here.
 ### Fixed
 - Fix OTA first-boot confirmation policy
 - Stop reporting an optimistic sync time before the board has accepted the snapshot
+- Prevent the enlarged board snapshot from overflowing the firmware startup stack during OTA
 
 
 ## 0.1.9 - 2026-08-13
