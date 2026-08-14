@@ -8,12 +8,55 @@ private actor UnavailableCodexAppServer: CodexAppServerAccess {
         throw CodexSourceError.requestTimedOut
     }
 
-    func recentChat(threadID: String, turnLimit: Int) async throws -> [CodexChatMessage] {
+    func recentTurns(threadID: String, turnLimit: Int) async throws -> [CodexTurnRecord] {
         throw CodexSourceError.requestTimedOut
     }
 
     func continueThread(id threadID: String, requestID: String) async throws {
         throw CodexSourceError.requestTimedOut
+    }
+
+    func respondToPlan(
+        id threadID: String,
+        plan: String,
+        model: String,
+        action: CodexTaskAction,
+        requestID: String
+    ) async throws {
+        throw CodexSourceError.requestTimedOut
+    }
+}
+
+private actor RecordingCodexAppServer: CodexAppServerAccess {
+    let threads: [CodexThreadRecord]
+    let turns: [CodexTurnRecord]
+    private(set) var requestedLimits = [Int]()
+    private(set) var planActions = [CodexTaskAction]()
+
+    init(threads: [CodexThreadRecord], turns: [CodexTurnRecord] = []) {
+        self.threads = threads
+        self.turns = turns
+    }
+
+    func listThreads(limit: Int) async throws -> [CodexThreadRecord] {
+        requestedLimits.append(limit)
+        return threads
+    }
+
+    func recentTurns(threadID: String, turnLimit: Int) async throws -> [CodexTurnRecord] {
+        Array(turns.prefix(turnLimit))
+    }
+
+    func continueThread(id threadID: String, requestID: String) async throws {}
+
+    func respondToPlan(
+        id threadID: String,
+        plan: String,
+        model: String,
+        action: CodexTaskAction,
+        requestID: String
+    ) async throws {
+        planActions.append(action)
     }
 }
 
@@ -97,6 +140,96 @@ private actor UnavailableCodexAppServer: CodexAppServerAccess {
     #expect(!messages.contains { $0.text.contains("secret") || $0.text.contains("reasoning") })
 }
 
+@Test func latestCompletedPlanOffersOnlyApproveAndRejectWithConsent() throws {
+    let thread = CodexThreadRecord(
+        id: "plan",
+        name: "Review this plan",
+        updatedAt: 1,
+        status: CodexThreadStatus(type: "idle", activeFlags: nil)
+    )
+    let turns = try JSONDecoder().decode([CodexTurnRecord].self, from: Data(#"""
+    [{"status":"completed","model":"gpt-5.6","items":[
+      {"id":"plan-item","type":"plan","text":"1. Make the bounded change\n2. Verify it"}
+    ]}]
+    """#.utf8))
+
+    #expect(CodexPlanPolicy.availableActions(
+        thread: thread,
+        newestFirst: turns,
+        consentEnabled: true
+    ) == [.approvePlan, .rejectPlan])
+    #expect(CodexPlanPolicy.availableActions(
+        thread: thread,
+        newestFirst: turns,
+        consentEnabled: false
+    ).isEmpty)
+    #expect(CodexPlanPolicy.responseContext(thread: thread, newestFirst: turns) == CodexPlanResponseContext(
+        text: "1. Make the bounded change\n2. Verify it",
+        model: "gpt-5.6"
+    ))
+}
+
+@Test func staleOrIncompletePlanCannotBeActioned() throws {
+    let thread = CodexThreadRecord(
+        id: "plan",
+        name: "Review this plan",
+        updatedAt: 1,
+        status: CodexThreadStatus(type: "idle", activeFlags: nil)
+    )
+    let turns = try JSONDecoder().decode([CodexTurnRecord].self, from: Data(#"""
+    [
+      {"status":"completed","model":"gpt-5.6","items":[{"type":"agentMessage","text":"Newer final answer"}]},
+      {"status":"completed","model":"gpt-5.6","items":[{"type":"plan","text":"Old plan"}]}
+    ]
+    """#.utf8))
+    #expect(CodexPlanPolicy.responseContext(thread: thread, newestFirst: turns) == nil)
+}
+
+@Test func planResponsesUseExplicitCollaborationModesAndFixedText() throws {
+    let approve = CodexPlanTurnRequestBuilder.parameters(
+        threadID: "plan-task",
+        plan: "1. Implement safely",
+        model: "gpt-5.6",
+        action: .approvePlan,
+        requestID: "approve-1"
+    )
+    let reject = CodexPlanTurnRequestBuilder.parameters(
+        threadID: "plan-task",
+        plan: "must not be sent on reject",
+        model: "gpt-5.6",
+        action: .rejectPlan,
+        requestID: "reject-1"
+    )
+    let approveMode = try #require(approve["collaborationMode"] as? [String: Any])
+    let rejectMode = try #require(reject["collaborationMode"] as? [String: Any])
+    let approveInput = try #require(approve["input"] as? [[String: String]])
+    let rejectInput = try #require(reject["input"] as? [[String: String]])
+
+    #expect(approveMode["mode"] as? String == "default")
+    #expect(rejectMode["mode"] as? String == "plan")
+    #expect(approveInput.first?["text"] == "PLEASE IMPLEMENT THIS PLAN:\n\n1. Implement safely")
+    #expect(rejectInput.first?["text"] == "Please revise the proposed plan before implementation.")
+}
+
+@Test func taskSourceRequestsAndReturnsTenMostRecentThreads() async throws {
+    let threads = (0..<12).map { index in
+        CodexThreadRecord(
+            id: "task-\(index)",
+            name: "Task \(index)",
+            updatedAt: Int64(100 - index),
+            status: CodexThreadStatus(type: "idle", activeFlags: nil)
+        )
+    }
+    let client = RecordingCodexAppServer(threads: threads)
+    let source = CodexHistoryTaskSource(client: client)
+    let snapshot = try await source.snapshot(revision: 1)
+
+    #expect(snapshot.tasks.count == codexTaskMaximumCount)
+    #expect(snapshot.tasks.first?.id == "task-0")
+    #expect(snapshot.tasks.last?.id == "task-9")
+    #expect(await client.requestedLimits == [codexTaskMaximumCount])
+}
+
 @Test func packagedAppCodexResolverSupportsExplicitPath() {
     let resolved = CodexExecutableResolver.resolve(environment: ["ILO_BOARD_CODEX_PATH": "/bin/sh"])
     #expect(resolved?.path == "/bin/sh")
@@ -134,10 +267,41 @@ private actor UnavailableCodexAppServer: CodexAppServerAccess {
     let suite = "CodexContinueFeatureControllerTests-\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(true, forKey: "ilo-board.codex-fixed-continue.v1")
     let controller = CodexContinueFeatureController(defaults: defaults)
     #expect(!controller.isEnabled)
     controller.setEnabled(true)
     #expect(controller.isEnabled)
     controller.setEnabled(false)
     #expect(!controller.isEnabled)
+}
+
+@Test func planActionIsRevalidatedBeforeTheClientReceivesIt() async throws {
+    let suite = "CodexPlanActionTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let consent = CodexContinueFeatureController(defaults: defaults)
+    consent.setEnabled(true)
+    let thread = CodexThreadRecord(
+        id: "plan-task",
+        name: "Plan task",
+        updatedAt: 1,
+        status: CodexThreadStatus(type: "idle", activeFlags: nil)
+    )
+    let turns = try JSONDecoder().decode([CodexTurnRecord].self, from: Data(#"""
+    [{"status":"completed","model":"gpt-5.6","items":[{"type":"plan","text":"Safe plan"}]}]
+    """#.utf8))
+    let client = RecordingCodexAppServer(threads: [thread], turns: turns)
+    let source = CodexHistoryTaskSource(continueFeature: consent, client: client)
+
+    let outcome = await source.performCodexAction(
+        id: thread.id,
+        action: .approvePlan,
+        requestID: "board-plan-safe"
+    )
+    guard case .accepted = outcome else {
+        Issue.record("A current completed plan should be accepted")
+        return
+    }
+    #expect(await client.planActions == [.approvePlan])
 }

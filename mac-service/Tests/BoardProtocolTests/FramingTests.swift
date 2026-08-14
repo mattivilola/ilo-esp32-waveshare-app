@@ -74,9 +74,14 @@ import Testing
         title: "Board chat detail",
         messages: (0..<8).map { index in
             CodexChatMessage(role: index.isMultiple(of: 2) ? .user : .assistant, text: "Message \(index)")
-        }
+        },
+        taskState: .idle,
+        attentionKind: AttentionKind.none,
+        updatedEpoch: 1_786_000_000,
+        availableActions: [.approvePlan, .rejectPlan, .continue]
     )
     #expect(response.messages.count == codexChatMaximumMessages)
+    #expect(response.availableActions == [.approvePlan, .rejectPlan])
     let decoded = try ProtocolJSON.decoder().decode(
         CodexChatDetailMessage.self,
         from: ProtocolJSON.encoder().encode(response)
@@ -89,6 +94,7 @@ import Testing
     let enabled = DashboardSnapshot(revision: 2, tasks: [], codexContinueEnabled: true)
     #expect(!disabled.capabilities.contains("tasks.continue.fixed"))
     #expect(enabled.capabilities.contains("tasks.continue.fixed"))
+    #expect(enabled.capabilities.contains("tasks.plan.fixed"))
 }
 
 @Test func disabledCodexScreenOmitsTaskDataAndCapabilities() throws {
@@ -112,6 +118,7 @@ import Testing
     #expect(!snapshot.capabilities.contains("tasks.read"))
     #expect(!snapshot.capabilities.contains("tasks.chat.read"))
     #expect(!snapshot.capabilities.contains("tasks.continue.fixed"))
+    #expect(!snapshot.capabilities.contains("tasks.plan.fixed"))
 }
 
 @Test func codexContinueMessagesCarryOnlyFixedBoundedActionData() throws {
@@ -134,6 +141,37 @@ import Testing
         from: ProtocolJSON.encoder().encode(response)
     )
     #expect(decoded == response)
+}
+
+@Test func fixedCodexPlanActionsCarryNoPlanText() throws {
+    for action in [CodexTaskAction.approvePlan, .rejectPlan] {
+        let request = CodexContinueRequest(
+            requestID: "board-plan-1",
+            taskID: "019f-task-7",
+            action: action
+        )
+        let data = try ProtocolJSON.encoder().encode(request)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["action"] as? String == action.rawValue)
+        #expect(object["plan"] == nil)
+        #expect(object["text"] == nil)
+    }
+}
+
+@Test func snapshotKeepsExactlyTenMostRecentCodexTasks() {
+    let tasks = (0..<12).map { index in
+        TaskCard(
+            id: "task-\(index)",
+            title: "Task \(index)",
+            state: .idle,
+            attentionKind: .none,
+            updatedAt: Date(timeIntervalSince1970: TimeInterval(index)),
+            shortSummary: "Recent task"
+        )
+    }
+    let snapshot = DashboardSnapshot(revision: 1, tasks: tasks)
+    #expect(snapshot.tasks.count == codexTaskMaximumCount)
+    #expect(snapshot.tasks.last?.id == "task-9")
 }
 
 @Test func hostTimeSnapshotContainsOnlyBoundedTimezoneInformation() throws {

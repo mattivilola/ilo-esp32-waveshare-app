@@ -65,6 +65,8 @@ private struct ThreadListResult: Decodable, Sendable {
 }
 
 struct CodexTurnRecord: Decodable, Equatable, Sendable {
+    let status: String?
+    let model: String?
     let items: [CodexThreadItemRecord]
 }
 
@@ -95,7 +97,7 @@ struct CodexThreadItemRecord: Decodable, Equatable, Sendable {
                 item.type == "text" ? item.text : nil
             }
             text = parts.isEmpty ? nil : parts.joined(separator: "\n")
-        } else if type == "agentMessage" {
+        } else if type == "agentMessage" || type == "plan" {
             text = try container.decodeIfPresent(String.self, forKey: .text)
         } else {
             text = nil
@@ -116,10 +118,44 @@ private struct CodexTurnStartResult: Decodable, Sendable {
     let turn: Turn
 }
 
+enum CodexPlanTurnRequestBuilder {
+    static func parameters(
+        threadID: String,
+        plan: String,
+        model: String,
+        action: CodexTaskAction,
+        requestID: String
+    ) -> [String: Any] {
+        let mode = action == .approvePlan ? "default" : "plan"
+        let text = action == .approvePlan
+            ? "PLEASE IMPLEMENT THIS PLAN:\n\n\(plan)"
+            : "Please revise the proposed plan before implementation."
+        return [
+            "threadId": threadID,
+            "input": [["type": "text", "text": text]],
+            "clientUserMessageId": "ilo-board-\(requestID)",
+            "collaborationMode": [
+                "mode": mode,
+                "settings": [
+                    "model": model,
+                    "developer_instructions": NSNull(),
+                ] as [String: Any],
+            ] as [String: Any],
+        ]
+    }
+}
+
 protocol CodexAppServerAccess: Sendable {
     func listThreads(limit: Int) async throws -> [CodexThreadRecord]
-    func recentChat(threadID: String, turnLimit: Int) async throws -> [CodexChatMessage]
+    func recentTurns(threadID: String, turnLimit: Int) async throws -> [CodexTurnRecord]
     func continueThread(id threadID: String, requestID: String) async throws
+    func respondToPlan(
+        id threadID: String,
+        plan: String,
+        model: String,
+        action: CodexTaskAction,
+        requestID: String
+    ) async throws
 }
 
 actor CodexAppServerClient: CodexAppServerAccess {
@@ -134,7 +170,7 @@ actor CodexAppServerClient: CodexAppServerAccess {
 
     func listThreads(limit: Int) async throws -> [CodexThreadRecord] {
         let data = try await request(method: "thread/list", params: [
-            "limit": max(1, min(limit, 12)),
+            "limit": max(1, min(limit, codexTaskMaximumCount)),
             "archived": false,
             "sortKey": "updated_at",
             "sortDirection": "desc",
@@ -145,7 +181,7 @@ actor CodexAppServerClient: CodexAppServerAccess {
         return result.data
     }
 
-    func recentChat(threadID: String, turnLimit: Int = 4) async throws -> [CodexChatMessage] {
+    func recentTurns(threadID: String, turnLimit: Int = 4) async throws -> [CodexTurnRecord] {
         let data = try await request(method: "thread/turns/list", params: [
             "threadId": threadID,
             "limit": max(1, min(turnLimit, 6)),
@@ -155,7 +191,7 @@ actor CodexAppServerClient: CodexAppServerAccess {
         guard let result = try? JSONDecoder().decode(ThreadTurnsListResult.self, from: data) else {
             throw CodexSourceError.invalidResponse
         }
-        return CodexChatHistoryMapper.messages(fromNewestFirst: result.data)
+        return result.data
     }
 
     func continueThread(id threadID: String, requestID: String) async throws {
@@ -168,6 +204,38 @@ actor CodexAppServerClient: CodexAppServerAccess {
             "input": [["type": "text", "text": "Please continue."]],
             "clientUserMessageId": "ilo-board-\(requestID)",
         ] as [String: Any])
+        guard let result = try? JSONDecoder().decode(CodexTurnStartResult.self, from: data),
+              !result.turn.id.isEmpty,
+              result.turn.status == "inProgress" || result.turn.status == "completed"
+        else {
+            throw CodexSourceError.invalidResponse
+        }
+    }
+
+    func respondToPlan(
+        id threadID: String,
+        plan: String,
+        model: String,
+        action: CodexTaskAction,
+        requestID: String
+    ) async throws {
+        guard action == .approvePlan || action == .rejectPlan else {
+            throw CodexSourceError.invalidResponse
+        }
+        _ = try await request(method: "thread/resume", params: [
+            "threadId": threadID,
+            "excludeTurns": true,
+        ] as [String: Any])
+        let data = try await request(
+            method: "turn/start",
+            params: CodexPlanTurnRequestBuilder.parameters(
+                threadID: threadID,
+                plan: plan,
+                model: model,
+                action: action,
+                requestID: requestID
+            )
+        )
         guard let result = try? JSONDecoder().decode(CodexTurnStartResult.self, from: data),
               !result.turn.id.isEmpty,
               result.turn.status == "inProgress" || result.turn.status == "completed"
@@ -386,6 +454,43 @@ enum CodexChatHistoryMapper {
     }
 }
 
+struct CodexPlanResponseContext: Equatable, Sendable {
+    let text: String
+    let model: String
+}
+
+enum CodexPlanPolicy {
+    static func responseContext(
+        thread: CodexThreadRecord,
+        newestFirst turns: [CodexTurnRecord]
+    ) -> CodexPlanResponseContext? {
+        guard CodexContinuationPolicy.allows(thread),
+              let newest = turns.first,
+              newest.status == "completed",
+              let model = newest.model?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !model.isEmpty,
+              let plan = newest.items.last(where: { $0.type == "plan" })?.text?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !plan.isEmpty
+        else {
+            return nil
+        }
+        return CodexPlanResponseContext(text: plan, model: model)
+    }
+
+    static func availableActions(
+        thread: CodexThreadRecord,
+        newestFirst turns: [CodexTurnRecord],
+        consentEnabled: Bool
+    ) -> [CodexTaskAction] {
+        guard consentEnabled else { return [] }
+        if responseContext(thread: thread, newestFirst: turns) != nil {
+            return [.approvePlan, .rejectPlan]
+        }
+        return CodexContinuationPolicy.allows(thread) ? [.continue] : []
+    }
+}
+
 enum CodexContinuationPolicy {
     static func allows(_ thread: CodexThreadRecord) -> Bool {
         thread.status.type == "idle" || thread.status.type == "notLoaded"
@@ -428,7 +533,7 @@ public actor CodexHistoryTaskSource: TaskSource {
             threads = cachedThreads
         } else {
             do {
-                threads = try await client.listThreads(limit: 6)
+                threads = try await client.listThreads(limit: codexTaskMaximumCount)
                 cachedThreads = threads
                 cachedAt = now
             } catch {
@@ -442,7 +547,7 @@ public actor CodexHistoryTaskSource: TaskSource {
         return DashboardSnapshot(
             revision: revision,
             generatedAt: now,
-            tasks: threads.prefix(6).map(CodexHistoryMapper.task),
+            tasks: threads.prefix(codexTaskMaximumCount).map(CodexHistoryMapper.task),
             codexContinueEnabled: continueFeature.isEnabled,
             xNewsEnabled: xNewsStatus.isEnabled,
             newsFeed: xNewsStatus.isEnabled ? XNewsWireMapper.cachedSnapshot(now: now) : nil
@@ -455,11 +560,16 @@ public actor CodexHistoryTaskSource: TaskSource {
             return .unavailable
         }
         do {
-            let messages = try await client.recentChat(threadID: id, turnLimit: 4)
+            let turns = try await client.recentTurns(threadID: id, turnLimit: 4)
+            let task = CodexHistoryMapper.task(from: thread)
             return .ready(
-                title: thread.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-                    ?? "Untitled Codex task",
-                messages: messages
+                task: task,
+                messages: CodexChatHistoryMapper.messages(fromNewestFirst: turns),
+                actions: CodexPlanPolicy.availableActions(
+                    thread: thread,
+                    newestFirst: turns,
+                    consentEnabled: continueFeature.isEnabled
+                )
             )
         } catch CodexSourceError.requestAlreadyRunning {
             return .busy
@@ -471,7 +581,11 @@ public actor CodexHistoryTaskSource: TaskSource {
         }
     }
 
-    public func continueTask(id: String, requestID: String) async -> CodexContinueOutcome {
+    public func performCodexAction(
+        id: String,
+        action: CodexTaskAction,
+        requestID: String
+    ) async -> CodexContinueOutcome {
         guard continueFeature.isEnabled else {
             actionLog.notice("Rejected fixed continuation because Mac consent is off")
             return .unavailable
@@ -489,17 +603,35 @@ public actor CodexHistoryTaskSource: TaskSource {
         usedContinuationRequests[requestID] = now
 
         do {
-            let current = try await client.listThreads(limit: 6)
-            guard let thread = current.first(where: { $0.id == id }),
-                  CodexContinuationPolicy.allows(thread)
-            else {
-                actionLog.notice("Rejected fixed continuation because current task state is ineligible")
+            let current = try await client.listThreads(limit: codexTaskMaximumCount)
+            guard let thread = current.first(where: { $0.id == id }) else {
+                actionLog.notice("Rejected fixed Codex action for a task outside the current recent list")
                 return .rejected
             }
-            try await client.continueThread(id: id, requestID: requestID)
+            switch action {
+            case .continue:
+                guard CodexContinuationPolicy.allows(thread) else {
+                    actionLog.notice("Rejected fixed continuation because current task state is ineligible")
+                    return .rejected
+                }
+                try await client.continueThread(id: id, requestID: requestID)
+            case .approvePlan, .rejectPlan:
+                let turns = try await client.recentTurns(threadID: id, turnLimit: 1)
+                guard let context = CodexPlanPolicy.responseContext(thread: thread, newestFirst: turns) else {
+                    actionLog.notice("Rejected fixed plan response because no current completed plan was found")
+                    return .rejected
+                }
+                try await client.respondToPlan(
+                    id: id,
+                    plan: context.text,
+                    model: context.model,
+                    action: action,
+                    requestID: requestID
+                )
+            }
             cachedThreads = []
             cachedAt = .distantPast
-            actionLog.notice("Accepted hold-confirmed fixed Codex continuation")
+            actionLog.notice("Accepted hold-confirmed fixed Codex action")
             return .accepted
         } catch CodexSourceError.requestAlreadyRunning {
             actionLog.notice("Deferred fixed continuation because the App Server is busy")

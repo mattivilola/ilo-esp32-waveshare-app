@@ -4,11 +4,11 @@ import Foundation
 public protocol TaskSource: Sendable {
     func snapshot(revision: UInt64) async throws -> DashboardSnapshot
     func chatDetail(id: String) async -> CodexChatDetailOutcome
-    func continueTask(id: String, requestID: String) async -> CodexContinueOutcome
+    func performCodexAction(id: String, action: CodexTaskAction, requestID: String) async -> CodexContinueOutcome
 }
 
 public enum CodexChatDetailOutcome: Sendable {
-    case ready(title: String, messages: [CodexChatMessage])
+    case ready(task: TaskCard, messages: [CodexChatMessage], actions: [CodexTaskAction])
     case unavailable
     case busy
     case failed
@@ -27,7 +27,11 @@ public extension TaskSource {
         .unavailable
     }
 
-    func continueTask(id: String, requestID: String) async -> CodexContinueOutcome {
+    func performCodexAction(
+        id: String,
+        action: CodexTaskAction,
+        requestID: String
+    ) async -> CodexContinueOutcome {
         .unavailable
     }
 }
@@ -62,7 +66,7 @@ public struct MockTaskSource: TaskSource {
                     state: .waiting,
                     attentionKind: .approval,
                     updatedAt: now.addingTimeInterval(-12),
-                    shortSummary: "Review stays on Mac — fixed continue only"
+                    shortSummary: "Fixed plan decision available after Mac opt-in"
                 ),
             ]
         )
@@ -71,11 +75,19 @@ public struct MockTaskSource: TaskSource {
     public func chatDetail(id: String) async -> CodexChatDetailOutcome {
         guard id == "board-foundation" else { return .unavailable }
         return .ready(
-            title: "Board foundation",
+            task: TaskCard(
+                id: "board-foundation",
+                title: "Board foundation",
+                state: .idle,
+                attentionKind: .none,
+                updatedAt: Date(),
+                shortSummary: "Recent local Codex task"
+            ),
             messages: [
                 CodexChatMessage(role: .user, text: "Show more useful Codex detail on the board."),
                 CodexChatMessage(role: .assistant, text: "Added a bounded, read-only recent chat view with touch scrolling."),
-            ]
+            ],
+            actions: [.continue]
         )
     }
 }

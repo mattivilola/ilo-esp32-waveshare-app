@@ -535,7 +535,6 @@ private final class BoardConnection: @unchecked Sendable {
               let request = try? ProtocolJSON.decoder().decode(CodexContinueRequest.self, from: payload),
               request.type == "codexContinueRequest",
               request.version == 1,
-              request.action == "continue",
               Self.validRequestID(request.requestID),
               Self.validTaskID(request.taskID)
         else {
@@ -546,10 +545,14 @@ private final class BoardConnection: @unchecked Sendable {
             return
         }
         Task { [weak self, source] in
-            let outcome = await source.continueTask(id: request.taskID, requestID: request.requestID)
+            let outcome = await source.performCodexAction(
+                id: request.taskID,
+                action: request.action,
+                requestID: request.requestID
+            )
             guard let self else { return }
             let response: (CodexContinueStatus, String) = switch outcome {
-            case .accepted: (.accepted, "Please continue was sent")
+            case .accepted: (.accepted, Self.acceptedCodexActionMessage(request.action))
             case .unavailable: (.unavailable, "Task control is unavailable")
             case .busy: (.busy, "Codex is busy; try again")
             case .rejected: (.rejected, "Task is not eligible to continue")
@@ -560,6 +563,14 @@ private final class BoardConnection: @unchecked Sendable {
                 status: response.0,
                 message: response.1
             ))
+        }
+    }
+
+    private static func acceptedCodexActionMessage(_ action: CodexTaskAction) -> String {
+        switch action {
+        case .continue: "Please continue was sent"
+        case .approvePlan: "Plan approval was sent"
+        case .rejectPlan: "Plan revision was requested"
         }
     }
 
@@ -581,13 +592,17 @@ private final class BoardConnection: @unchecked Sendable {
             let outcome = await source.chatDetail(id: request.taskID)
             guard let self else { return }
             let response: CodexChatDetailMessage = switch outcome {
-            case let .ready(title, messages):
+            case let .ready(task, messages, actions):
                 CodexChatDetailMessage(
                     requestID: request.requestID,
                     taskID: request.taskID,
                     status: .ready,
-                    title: BoardDisplayText.sanitized(title, maximum: 80),
+                    title: BoardDisplayText.sanitized(task.title, maximum: 80),
                     messages: CodexChatSanitizer.sanitize(messages),
+                    taskState: task.state,
+                    attentionKind: task.attentionKind,
+                    updatedEpoch: Int64(task.updatedAt.timeIntervalSince1970),
+                    availableActions: actions,
                     message: messages.isEmpty ? "No recent text messages" : nil
                 )
             case .unavailable:

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "ILO Board fixed Codex continue messages v1",
+  "title": "ILO Board fixed Codex task action messages v1",
   "oneOf": [
     {
       "type": "object",
@@ -11,7 +11,7 @@
         "version": { "const": 1 },
         "requestID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,64}$" },
         "taskID": { "type": "string", "pattern": "^[A-Za-z0-9-]{1,80}$" },
-        "action": { "const": "continue" }
+        "action": { "enum": ["continue", "approvePlan", "rejectPlan"] }
       }
     },
     {

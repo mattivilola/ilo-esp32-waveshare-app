@@ -57,7 +57,11 @@ import Testing
 }
 
 @Test func taskSourcesRejectControlUnlessExplicitlyImplemented() async {
-    let outcome = await MockTaskSource().continueTask(id: "codex-decisions", requestID: "fixture-1")
+    let outcome = await MockTaskSource().performCodexAction(
+        id: "codex-decisions",
+        action: .continue,
+        requestID: "fixture-1"
+    )
     guard case .unavailable = outcome else {
         Issue.record("Mock/read-only task sources must not claim a real Codex action")
         return

@@ -2,7 +2,8 @@ import Foundation
 
 public final class CodexContinueFeatureController: @unchecked Sendable {
     private let defaults: UserDefaults
-    private static let enabledKey = "ilo-board.codex-fixed-continue.v1"
+    // This consent intentionally does not inherit the earlier Continue-only opt-in.
+    private static let enabledKey = "ilo-board.codex-fixed-actions.v2"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

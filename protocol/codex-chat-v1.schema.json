@@ -38,6 +38,15 @@
             }
           }
         },
+        "taskState": { "enum": ["active", "waiting", "completed", "failed", "idle", null] },
+        "attentionKind": { "enum": ["none", "question", "approval", null] },
+        "updatedEpoch": { "type": ["integer", "null"], "minimum": 0 },
+        "availableActions": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "enum": ["continue", "approvePlan", "rejectPlan"] }
+        },
         "message": { "type": ["string", "null"], "maxLength": 95 }
       }
     }

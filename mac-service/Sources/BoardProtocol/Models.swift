@@ -10,6 +10,7 @@ public let screenCaptureRGB565Bytes = screenCaptureWidth * screenCaptureHeight *
 public let screenCaptureChunkCount =
     (screenCaptureRGB565Bytes + screenCaptureMaximumChunkBytes - 1) / screenCaptureMaximumChunkBytes
 public let codexChatProtocolVersion = 1
+public let codexTaskMaximumCount = 10
 public let codexChatMaximumMessages = 6
 public let codexChatMaximumMessageCharacters = 360
 public let focusCompletionProtocolVersion = 1
@@ -159,6 +160,12 @@ public enum CodexChatStatus: String, Codable, Equatable, Sendable {
     case failed
 }
 
+public enum CodexTaskAction: String, Codable, Equatable, Sendable, CaseIterable {
+    case `continue`
+    case approvePlan
+    case rejectPlan
+}
+
 public struct NewsCitation: Codable, Equatable, Sendable {
     public let handle: String
     public let postedAt: Date
@@ -262,11 +269,13 @@ public struct DashboardSnapshot: Codable, Equatable, Sendable {
         if codexEnabled {
             capabilities.append(contentsOf: ["tasks.read", "tasks.chat.read"])
         }
-        if codexEnabled && codexContinueEnabled { capabilities.append("tasks.continue.fixed") }
+        if codexEnabled && codexContinueEnabled {
+            capabilities.append(contentsOf: ["tasks.continue.fixed", "tasks.plan.fixed"])
+        }
         capabilities.append(contentsOf: ["macPower.read", "hostTime.read"])
         if newsFeed != nil { capabilities.append("xNews.read") }
         self.capabilities = capabilities
-        self.tasks = codexEnabled ? Array(tasks.prefix(12)) : []
+        self.tasks = codexEnabled ? Array(tasks.prefix(codexTaskMaximumCount)) : []
         self.codexEnabled = codexEnabled
         self.xNewsEnabled = xNewsEnabled ?? (newsFeed != nil)
         self.newsFeed = newsFeed
@@ -323,6 +332,7 @@ public struct HelloAcknowledgement: Encodable, Equatable, Sendable {
         "tasks.read",
         "tasks.chat.read",
         "tasks.continue.fixed",
+        "tasks.plan.fixed",
         "macPower.read",
         "xNews.refresh.request",
     ]
@@ -363,6 +373,10 @@ public struct CodexChatDetailMessage: Codable, Equatable, Sendable {
     public let status: CodexChatStatus
     public let title: String
     public let messages: [CodexChatMessage]
+    public let taskState: TaskState?
+    public let attentionKind: AttentionKind?
+    public let updatedEpoch: Int64?
+    public let availableActions: [CodexTaskAction]
     public let message: String?
 
     public init(
@@ -371,6 +385,10 @@ public struct CodexChatDetailMessage: Codable, Equatable, Sendable {
         status: CodexChatStatus,
         title: String,
         messages: [CodexChatMessage] = [],
+        taskState: TaskState? = nil,
+        attentionKind: AttentionKind? = nil,
+        updatedEpoch: Int64? = nil,
+        availableActions: [CodexTaskAction] = [],
         message: String? = nil
     ) {
         type = "codexChatDetail"
@@ -380,6 +398,10 @@ public struct CodexChatDetailMessage: Codable, Equatable, Sendable {
         self.status = status
         self.title = title
         self.messages = Array(messages.prefix(codexChatMaximumMessages))
+        self.taskState = taskState
+        self.attentionKind = attentionKind
+        self.updatedEpoch = updatedEpoch
+        self.availableActions = Array(availableActions.prefix(2))
         self.message = message
     }
 }
@@ -389,14 +411,14 @@ public struct CodexContinueRequest: Codable, Equatable, Sendable {
     public let version: Int
     public let requestID: String
     public let taskID: String
-    public let action: String
+    public let action: CodexTaskAction
 
-    public init(requestID: String, taskID: String) {
+    public init(requestID: String, taskID: String, action: CodexTaskAction = .continue) {
         type = "codexContinueRequest"
         version = 1
         self.requestID = requestID
         self.taskID = taskID
-        action = "continue"
+        self.action = action
     }
 }
 
