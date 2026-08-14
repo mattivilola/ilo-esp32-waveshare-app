@@ -3,6 +3,31 @@ import BoardProtocol
 import Foundation
 import Testing
 
+private actor UnavailableCodexAppServer: CodexAppServerAccess {
+    func listThreads(limit: Int) async throws -> [CodexThreadRecord] {
+        throw CodexSourceError.requestTimedOut
+    }
+
+    func recentChat(threadID: String, turnLimit: Int) async throws -> [CodexChatMessage] {
+        throw CodexSourceError.requestTimedOut
+    }
+
+    func continueThread(id threadID: String, requestID: String) async throws {
+        throw CodexSourceError.requestTimedOut
+    }
+}
+
+@Test func unavailableCodexDoesNotBlockIndependentBoardSnapshotData() async throws {
+    let source = CodexHistoryTaskSource(client: UnavailableCodexAppServer())
+    let snapshot = try await source.snapshot(revision: 9)
+
+    #expect(snapshot.revision == 9)
+    #expect(snapshot.codexEnabled)
+    #expect(snapshot.tasks.isEmpty)
+    #expect(snapshot.capabilities.contains("macPower.read"))
+    #expect(snapshot.capabilities.contains("hostTime.read"))
+}
+
 @Test func codexThreadDecodingIgnoresPrivateFieldsAndMapsDesktopHistoryHonestly() throws {
     let data = Data(#"""
     {

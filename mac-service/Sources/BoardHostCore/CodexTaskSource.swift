@@ -116,7 +116,13 @@ private struct CodexTurnStartResult: Decodable, Sendable {
     let turn: Turn
 }
 
-actor CodexAppServerClient {
+protocol CodexAppServerAccess: Sendable {
+    func listThreads(limit: Int) async throws -> [CodexThreadRecord]
+    func recentChat(threadID: String, turnLimit: Int) async throws -> [CodexChatMessage]
+    func continueThread(id threadID: String, requestID: String) async throws
+}
+
+actor CodexAppServerClient: CodexAppServerAccess {
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
@@ -394,7 +400,8 @@ enum CodexContinuationPolicy {
 
 public actor CodexHistoryTaskSource: TaskSource {
     private let actionLog = Logger(subsystem: "com.iloapps.iloboard", category: "CodexFixedAction")
-    private let client = CodexAppServerClient()
+    private let snapshotLog = Logger(subsystem: "com.iloapps.iloboard", category: "CodexSnapshot")
+    private let client: any CodexAppServerAccess
     private let continueFeature: CodexContinueFeatureController
     private var cachedAt = Date.distantPast
     private var cachedThreads = [CodexThreadRecord]()
@@ -402,6 +409,15 @@ public actor CodexHistoryTaskSource: TaskSource {
 
     public init(continueFeature: CodexContinueFeatureController = CodexContinueFeatureController()) {
         self.continueFeature = continueFeature
+        client = CodexAppServerClient()
+    }
+
+    init(
+        continueFeature: CodexContinueFeatureController = CodexContinueFeatureController(),
+        client: any CodexAppServerAccess
+    ) {
+        self.continueFeature = continueFeature
+        self.client = client
     }
 
     public func snapshot(revision: UInt64) async throws -> DashboardSnapshot {
@@ -411,9 +427,17 @@ public actor CodexHistoryTaskSource: TaskSource {
         if now.timeIntervalSince(cachedAt) < 15, !cachedThreads.isEmpty {
             threads = cachedThreads
         } else {
-            threads = try await client.listThreads(limit: 6)
-            cachedThreads = threads
-            cachedAt = now
+            do {
+                threads = try await client.listThreads(limit: 6)
+                cachedThreads = threads
+                cachedAt = now
+            } catch {
+                threads = cachedThreads
+                cachedAt = now
+                snapshotLog.error(
+                    "Codex task refresh failed; sending \(threads.count, privacy: .public) cached tasks with independent board data"
+                )
+            }
         }
         return DashboardSnapshot(
             revision: revision,
@@ -431,7 +455,7 @@ public actor CodexHistoryTaskSource: TaskSource {
             return .unavailable
         }
         do {
-            let messages = try await client.recentChat(threadID: id)
+            let messages = try await client.recentChat(threadID: id, turnLimit: 4)
             return .ready(
                 title: thread.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
                     ?? "Untitled Codex task",
