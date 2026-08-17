@@ -2,7 +2,7 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
-## Unreleased
+## 0.1.12 - 2026-08-17
 
 ### Added
 - Store an optional xAI API key in the Mac login Keychain from the companion's X News controls
