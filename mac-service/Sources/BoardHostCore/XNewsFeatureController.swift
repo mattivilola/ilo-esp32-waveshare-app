@@ -2,13 +2,20 @@ import Foundation
 
 public struct XNewsFeatureStatus: Equatable, Sendable {
     public let cadence: XNewsRefreshCadence
-    public let grokAvailable: Bool
+    public let apiKeyConfigured: Bool
     public let lastAttemptAt: Date?
+    public let lastCostInUSDTicks: Int64?
 
-    public init(cadence: XNewsRefreshCadence, grokAvailable: Bool, lastAttemptAt: Date? = nil) {
+    public init(
+        cadence: XNewsRefreshCadence,
+        apiKeyConfigured: Bool,
+        lastAttemptAt: Date? = nil,
+        lastCostInUSDTicks: Int64? = nil
+    ) {
         self.cadence = cadence
-        self.grokAvailable = grokAvailable
+        self.apiKeyConfigured = apiKeyConfigured
         self.lastAttemptAt = lastAttemptAt
+        self.lastCostInUSDTicks = lastCostInUSDTicks
     }
 
     public var isConfigured: Bool {
@@ -16,54 +23,58 @@ public struct XNewsFeatureStatus: Equatable, Sendable {
     }
 
     public var isEnabled: Bool {
-        isConfigured && grokAvailable
+        isConfigured && apiKeyConfigured
     }
 }
 
 public struct XNewsFeatureController: Sendable {
     private let settingsStore: XNewsRefreshSettingsStore
-    private let environment: [String: String]
+    private let apiKeyStore: XAIAPIKeyStore
     private let availabilityOverride: Bool?
 
     public init(
         settingsStore: XNewsRefreshSettingsStore = XNewsRefreshSettingsStore(),
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        apiKeyStore: XAIAPIKeyStore = XAIAPIKeyStore()
     ) {
         self.settingsStore = settingsStore
-        self.environment = environment
+        self.apiKeyStore = apiKeyStore
         availabilityOverride = nil
     }
 
-    public init(settingsStore: XNewsRefreshSettingsStore, grokAvailable: Bool) {
+    public init(settingsStore: XNewsRefreshSettingsStore, apiKeyConfigured: Bool) {
         self.settingsStore = settingsStore
-        environment = [:]
-        availabilityOverride = grokAvailable
+        apiKeyStore = XAIAPIKeyStore()
+        availabilityOverride = apiKeyConfigured
     }
 
     public func status() -> XNewsFeatureStatus {
         let settings = settingsStore.load()
         return XNewsFeatureStatus(
-            cadence: settings.cadence,
-            grokAvailable: availabilityOverride ?? (GrokExecutableResolver.resolve(environment: environment) != nil),
-            lastAttemptAt: settings.lastAttemptAt
+            cadence: settings.consentVersion == XNewsRefreshSettings.currentConsentVersion
+                ? settings.cadence
+                : .off,
+            apiKeyConfigured: availabilityOverride ?? apiKeyStore.isConfigured,
+            lastAttemptAt: settings.lastAttemptAt,
+            lastCostInUSDTicks: settings.lastCostInUSDTicks
         )
     }
 
     public func enable(
         cadence: XNewsRefreshCadence,
-        explicitlyAllowsGrokTools: Bool
+        explicitlyAllowsPaidAPI: Bool
     ) throws {
         guard cadence != .off else {
             try disable()
             return
         }
-        guard explicitlyAllowsGrokTools else { throw GrokXNewsError.explicitConsentRequired }
-        guard status().grokAvailable else { throw GrokXNewsError.executableNotFound }
+        guard explicitlyAllowsPaidAPI else { throw GrokXNewsError.explicitConsentRequired }
+        guard status().apiKeyConfigured else { throw XAIResponsesError.missingAPIKey }
         let previous = settingsStore.load()
         try settingsStore.save(XNewsRefreshSettings(
             cadence: cadence,
-            consentVersion: previous.consentVersion,
-            lastAttemptAt: previous.lastAttemptAt
+            consentVersion: XNewsRefreshSettings.currentConsentVersion,
+            lastAttemptAt: previous.lastAttemptAt,
+            lastCostInUSDTicks: previous.lastCostInUSDTicks
         ))
     }
 
@@ -71,8 +82,9 @@ public struct XNewsFeatureController: Sendable {
         let previous = settingsStore.load()
         try settingsStore.save(XNewsRefreshSettings(
             cadence: .off,
-            consentVersion: previous.consentVersion,
-            lastAttemptAt: previous.lastAttemptAt
+            consentVersion: XNewsRefreshSettings.currentConsentVersion,
+            lastAttemptAt: previous.lastAttemptAt,
+            lastCostInUSDTicks: previous.lastCostInUSDTicks
         ))
     }
 }

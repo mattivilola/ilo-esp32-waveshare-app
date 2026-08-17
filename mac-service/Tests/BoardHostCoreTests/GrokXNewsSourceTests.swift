@@ -275,28 +275,44 @@ private let referenceNow = ISO8601DateFormatter().date(from: "2026-08-10T09:00:0
     #expect(store.load() == settings)
 }
 
-@Test func xNewsFeatureRequiresGrokAndExplicitConsentAndCanBeDisabled() throws {
+@Test func xNewsFeatureRequiresAPIKeyAndExplicitConsentAndCanBeDisabled() throws {
     let temporaryURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("ilo-board-x-news-feature-\(UUID().uuidString).json")
     defer { try? FileManager.default.removeItem(at: temporaryURL) }
     let store = XNewsRefreshSettingsStore(url: temporaryURL)
 
-    let unavailable = XNewsFeatureController(settingsStore: store, grokAvailable: false)
-    #expect(unavailable.status() == XNewsFeatureStatus(cadence: .off, grokAvailable: false))
-    #expect(throws: GrokXNewsError.self) {
-        try unavailable.enable(cadence: .daily, explicitlyAllowsGrokTools: true)
+    let unavailable = XNewsFeatureController(settingsStore: store, apiKeyConfigured: false)
+    #expect(unavailable.status() == XNewsFeatureStatus(cadence: .off, apiKeyConfigured: false))
+    #expect(throws: XAIResponsesError.self) {
+        try unavailable.enable(cadence: .daily, explicitlyAllowsPaidAPI: true)
     }
 
-    let available = XNewsFeatureController(settingsStore: store, grokAvailable: true)
+    let available = XNewsFeatureController(settingsStore: store, apiKeyConfigured: true)
     #expect(throws: GrokXNewsError.self) {
-        try available.enable(cadence: .daily, explicitlyAllowsGrokTools: false)
+        try available.enable(cadence: .daily, explicitlyAllowsPaidAPI: false)
     }
-    try available.enable(cadence: .morningAndAfternoon, explicitlyAllowsGrokTools: true)
+    try available.enable(cadence: .morningAndAfternoon, explicitlyAllowsPaidAPI: true)
     #expect(available.status().isEnabled)
     #expect(available.status().cadence == .morningAndAfternoon)
 
     try available.disable()
-    #expect(available.status() == XNewsFeatureStatus(cadence: .off, grokAvailable: true))
+    #expect(available.status() == XNewsFeatureStatus(cadence: .off, apiKeyConfigured: true))
+}
+
+@Test func legacyGrokConsentCannotSilentlyEnableSeparatelyBilledAPIRefreshes() throws {
+    let temporaryURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-x-news-consent-migration-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: temporaryURL) }
+    let store = XNewsRefreshSettingsStore(url: temporaryURL)
+    try store.save(XNewsRefreshSettings(cadence: .daily, consentVersion: 1))
+    let controller = XNewsFeatureController(settingsStore: store, apiKeyConfigured: true)
+
+    #expect(controller.status().cadence == .off)
+    #expect(!controller.status().isEnabled)
+
+    try controller.enable(cadence: .daily, explicitlyAllowsPaidAPI: true)
+    #expect(store.load().consentVersion == XNewsRefreshSettings.currentConsentVersion)
+    #expect(controller.status().isEnabled)
 }
 
 @Test func boardRefreshRequestRequiresMacConsentAndHonorsCooldown() async throws {

@@ -47,6 +47,7 @@ final class HostStatusStore: ObservableObject {
     private let xNewsFeatureController: XNewsFeatureController
     private let xNewsRefreshCoordinator: XNewsRefreshCoordinator
     private let xNewsFeedCache: XNewsFeedCache
+    private let xaiAPIKeyStore: XAIAPIKeyStore
     private let weatherLocationSource: any WeatherLocationProviding
     private let usesCompanionCredential: Bool
     private let usbDiscovery: any USBBoardDiscovering
@@ -63,6 +64,7 @@ final class HostStatusStore: ObservableObject {
         xNewsFeatureController: XNewsFeatureController = XNewsFeatureController(),
         xNewsRefreshCoordinator: XNewsRefreshCoordinator = .shared,
         xNewsFeedCache: XNewsFeedCache = XNewsFeedCache(),
+        xaiAPIKeyStore: XAIAPIKeyStore = XAIAPIKeyStore(),
         weatherLocationSource: any WeatherLocationProviding = NoWeatherLocationSource(),
         usbDiscovery: any USBBoardDiscovering = IOKitUSBBoardDiscovery(),
         usesCompanionCredential: Bool = KeychainPSKStore.shouldUseCompanionCredential,
@@ -74,6 +76,7 @@ final class HostStatusStore: ObservableObject {
         self.xNewsFeatureController = xNewsFeatureController
         self.xNewsRefreshCoordinator = xNewsRefreshCoordinator
         self.xNewsFeedCache = xNewsFeedCache
+        self.xaiAPIKeyStore = xaiAPIKeyStore
         self.weatherLocationSource = weatherLocationSource
         self.usbDiscovery = usbDiscovery
         self.usesCompanionCredential = usesCompanionCredential
@@ -241,19 +244,43 @@ final class HostStatusStore: ObservableObject {
             case .disabled: "Enable X News before refreshing."
             case .cooldown: "Refresh is rate-limited to once every 15 minutes."
             case .busy: "An X News refresh is already running."
-            case .failed: "No usable update was accepted; the previous cache was preserved."
+            case .failed: await xNewsRefreshCoordinator.failureDescription()
+                ?? "No usable update was accepted; the previous cache was preserved."
             }
         }
     }
 
+    @discardableResult
+    func saveXAIAPIKey(_ value: String) -> Bool {
+        do {
+            try xaiAPIKeyStore.saveAPIKey(value)
+            xNewsNotice = "xAI API key saved in this Mac’s Keychain."
+            refreshXNewsStatus()
+            return true
+        } catch {
+            xNewsNotice = error.localizedDescription
+            return false
+        }
+    }
+
+    func removeXAIAPIKey() {
+        do {
+            try xaiAPIKeyStore.removeAPIKey()
+            xNewsNotice = "xAI API key removed from Keychain. X News is hidden until another key is saved."
+        } catch {
+            xNewsNotice = "The xAI API key could not be removed: \(error.localizedDescription)"
+        }
+        refreshXNewsStatus()
+    }
+
     func enableXNews(cadence: XNewsRefreshCadence = .daily) {
         do {
-            try xNewsFeatureController.enable(cadence: cadence, explicitlyAllowsGrokTools: true)
+            try xNewsFeatureController.enable(cadence: cadence, explicitlyAllowsPaidAPI: true)
             xNewsNotice = cadence == .daily
                 ? "X News enabled daily; the board screen will appear on its next sync."
                 : "X News enabled twice daily; the board screen will appear on its next sync."
-        } catch GrokXNewsError.executableNotFound {
-            xNewsNotice = "Grok CLI is not installed or executable. X News remains hidden."
+        } catch XAIResponsesError.missingAPIKey {
+            xNewsNotice = "Save an xAI API key in Keychain before enabling X News."
         } catch {
             xNewsNotice = "Couldn’t enable X News. Its previous setting was preserved."
         }

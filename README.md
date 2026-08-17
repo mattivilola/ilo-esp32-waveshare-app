@@ -45,7 +45,7 @@ Hardware-independent development can continue without a board: the Swift service
 - macOS Keychain access. Pairing stores the per-board TLS secret in the login Keychain. The installed app explains its one-time migration before macOS asks for your normal Mac login password; ordinary later launches do not prompt.
 - Local Network permission for the packaged menu-bar app.
 - For Codex integration: a supported local `codex` CLI that is installed and authenticated. No Codex token is stored on the board.
-- Optional X News integration: `grok` CLI 1.0.0 or a compatible newer build, authenticated with an account that can search X. Set `ILO_BOARD_GROK_PATH` if it is not on `PATH` or under `~/.local/bin`. Grok authentication remains on the Mac.
+- Optional X News integration: an xAI API key with API credits. Enter it in the Mac companion's **Features → X News** controls; it stays in this Mac's non-synchronizing login Keychain and is never copied to the board. API usage is billed separately from a Grok subscription.
 
 ### Network
 
@@ -125,8 +125,8 @@ There is no Node/npm layer in this repository. The stable entry points are `make
 | Run the headless Codex service | `make mac-run` or `./tools/host serve` | No; board status stays offline |
 | Run the service with sample tasks | `./tools/host serve --mock` | No |
 | Inspect optional X News state | `./tools/host x-news status` | No |
-| Fetch a bounded rolling 24h X feed | `./tools/host x-news refresh --allow-grok-tools` | No |
-| Enable daily X News | `./tools/host x-news enable --allow-grok-tools` | No |
+| Fetch a bounded rolling 24h X feed | `./tools/host x-news refresh --allow-paid-api` | No |
+| Enable daily X News | `./tools/host x-news enable --allow-paid-api` | No |
 | Disable and hide X News | `./tools/host x-news disable` | No |
 | Capture the live board framebuffer | `./tools/host screenshot --output board.png` | Yes, Wi-Fi |
 | Build universal `.app` | `make app` | No |
@@ -250,36 +250,30 @@ The first real adapter keeps task data read-only and exposes one fixed continuat
 
 Do not copy Codex credentials into firmware or NVS. Any future write/control capability must be separately paired, narrowly scoped, visibly confirmed, replay-protected, and auditable.
 
-## Optional X News via Grok
+## Optional X News via the xAI API
 
-X News is Mac-mediated and disabled by default. When Off—or when the Grok executable is unavailable—the complete board page is hidden and Weather follows Codex. The menu-bar companion exposes availability, cache count/age, live fetching/result/cooldown state, a **Refresh now** action, an explicit enable confirmation, daily/twice-daily scheduling, and Disable. The Mac button and board pull gesture share one coordinator and 15-minute cooldown; an accepted cache automatically reaches the board on its next five-second snapshot. It uses the authenticated top-level headless command `grok -p`; it does not use `grok agent`, and no Grok/X credential is copied to the board. Check availability and the last cache with:
+X News is Mac-mediated and disabled by default. When Off—or when no xAI API key is configured—the complete board page is hidden and Weather follows Codex. In the menu-bar companion, open **Features → X News**, paste the key into the masked field, and choose **Save in Keychain**. The companion supports Replace and Remove without ever showing the saved value. The key is stored as a device-only, non-synchronizing generic password in this Mac's login Keychain; it is never written to preferences, logs, command arguments, cache files, or the board. Existing consent for the former Grok CLI path does not carry over: the separately billed API schedule requires a fresh Enable confirmation.
+
+After the key is saved, the companion exposes cache count/age, live fetching/result/cooldown state, a **Refresh now** action, an explicit paid-API enable confirmation, daily/twice-daily scheduling, Disable, and the exact xAI-reported cost of the most recently accepted refresh. The Mac button and board pull gesture share one coordinator and 15-minute cooldown; an accepted cache automatically reaches the board on its next five-second snapshot. Check configuration and the last cache with:
 
 ```bash
-grok --version
 ./tools/host x-news status
 ```
 
-A manual refresh is explicit because Grok may use paid model/tool capacity:
+API-key entry is intentionally available only in the companion UI. Manual CLI refresh and scheduling still require an explicit paid-API flag:
 
 ```bash
-./tools/host x-news refresh --allow-grok-tools
-```
-
-Enable one automatic run at 08:00 local each day, optionally adding a 14:00 run, or disable and hide the screen without deleting the last cache:
-
-```bash
-./tools/host x-news enable --allow-grok-tools
-./tools/host x-news enable --twice-daily --allow-grok-tools
+./tools/host x-news refresh --allow-paid-api
+./tools/host x-news enable --allow-paid-api
+./tools/host x-news enable --twice-daily --allow-paid-api
 ./tools/host x-news disable
 ```
 
-The scheduler runs while the menu companion or headless host is running. Manual and failed scheduled attempts are rate-limited, so a failure is not retried every minute. Each request supplies a rolling UTC `since`/`until` window, asks Grok for one focused X search, targets 10–15 AI/robotics posts, includes the available primary post text, and preserves only a bounded fifteen-story rolling cache.
+The scheduler runs while the menu companion or headless host is running. Manual and failed scheduled attempts are rate-limited, so a failure is not retried every minute. Each request uses `grok-4.5` with low reasoning effort through the xAI Responses API, requires the built-in X Search tool over a rolling UTC window, limits the tool loop to two turns, disables server-side response storage, targets 10–15 AI/robotics posts, and preserves only a bounded fifteen-story rolling cache. If X Search produces fewer than two usable posts, the model is instructed to return an empty list instead of inventing placeholders.
 
-The paired board can request that same manual refresh by pulling down at the top of X News. This works only after X News has been explicitly enabled on the Mac, and it still enforces the 15-minute cooldown and one in-flight Grok process. The board receives bounded `fetching`, `updated`, `disabled`, `cooldown`, `busy`, or `failed` state—not Grok output or error details. An accepted refresh appears on the next five-second snapshot; a rejected refresh leaves the previous feed unchanged.
+The paired board can request that same manual refresh by pulling down at the top of X News. This works only after X News has been explicitly enabled on the Mac, and it still enforces the 15-minute cooldown and one in-flight API request. The board receives bounded `fetching`, `updated`, `disabled`, `cooldown`, `busy`, or `failed` state—not API output or error details. An accepted refresh appears on the next five-second snapshot; a rejected refresh leaves the previous feed unchanged.
 
-The JSON schema is treated as a hint, not a trust boundary. The Mac still performs fast structural checks: high/medium confidence, bounded headline/summary/post text, 1–3 matching `@handle` citations per story, and direct `https://x.com/<handle>/status/<id>` URLs. It decodes the X status ID timestamp and drops stories outside the requested 24 hours or inconsistent with `posted_at`; at least two usable stories must survive or the refresh is rejected. It does not ask Grok for a separate cross-check or independent claim verification. If Grok concatenates multiple documents, only documents with a valid rolling window and enough usable stories participate; the final document has priority, then duplicate headlines/citation URLs are removed. New developments are combined with still-current cached stories up to fifteen, while search-progress placeholders are rejected. Invalid, unsourced, oversized, stale, or future output never replaces the last good feed. The board receives only the bounded cache, not Grok reasoning, session IDs, usage, prompts, or credentials. Feed rows expose colored category and confidence chips; tapping one opens a read-only detail screen with the available post text, summary, author, timestamp, and direct URL.
-
-The local Grok 1.0.0 tests proved why this gate is necessary: the schema-based attempts still reported structured-output errors; one returned only root X URLs, while the improved prompt found direct posts but concatenated two JSON documents. The adapter therefore fails closed instead of trusting `--json-schema` by itself.
+The strict response schema is not the only trust boundary. The Mac also requires evidence that X Search actually ran, caps the response at 1 MB, and performs fast structural checks: high/medium confidence, bounded headline/summary/post text, 1–3 matching `@handle` citations per story, and direct `https://x.com/<handle>/status/<id>` URLs. It decodes the X status ID timestamp and drops stories outside the requested 24 hours or inconsistent with `posted_at`; at least two usable stories must survive or the refresh is rejected. It deliberately does not spend another model pass on independent claim verification. New developments are combined with still-current cached stories up to fifteen, while placeholders and duplicates are rejected. Invalid, unsourced, oversized, stale, or future output never replaces the last good feed. The board receives only the bounded cache, not the API key, cost, reasoning, usage, prompts, tool calls, or raw response. Feed rows expose colored category and confidence chips; tapping one opens a read-only detail screen with the available post text, summary, author, timestamp, and direct URL.
 
 ## Internet access without the Mac
 

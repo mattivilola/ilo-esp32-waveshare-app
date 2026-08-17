@@ -520,7 +520,7 @@ private final class BoardConnection: @unchecked Sendable {
             case .disabled: (.disabled, "Enable X News on the Mac first")
             case .cooldown: (.cooldown, "Refresh available after the 15 minute cooldown")
             case .busy: (.busy, "A news refresh is already running")
-            case .failed: (.failed, "No verified update was accepted")
+            case .failed: (.failed, "No usable update was accepted")
             }
             self.send(XNewsRefreshStatusMessage(
                 requestID: request.requestID,

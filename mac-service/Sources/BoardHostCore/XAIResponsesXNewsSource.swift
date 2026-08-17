@@ -1,0 +1,258 @@
+import Foundation
+
+public enum XAIResponsesError: Error, LocalizedError, Sendable {
+    case missingAPIKey
+    case invalidAPIKey
+    case insufficientCredits
+    case rateLimited
+    case requestRejected
+    case serviceUnavailable
+    case networkFailure
+    case malformedResponse
+    case searchNotPerformed
+
+    public var errorDescription: String? {
+        switch self {
+        case .missingAPIKey:
+            "Add an xAI API key in the Mac companion first."
+        case .invalidAPIKey:
+            "xAI rejected the API key. Replace it in the Mac companion."
+        case .insufficientCredits:
+            "xAI API credits are unavailable. Check API billing in the xAI Console."
+        case .rateLimited:
+            "xAI rate-limited the request. Try again shortly."
+        case .requestRejected:
+            "xAI rejected the X News request."
+        case .serviceUnavailable:
+            "The xAI API is temporarily unavailable."
+        case .networkFailure:
+            "The Mac could not reach the xAI API."
+        case .malformedResponse:
+            "xAI returned an unreadable X News response."
+        case .searchNotPerformed:
+            "xAI returned no completed X search."
+        }
+    }
+}
+
+public struct XNewsFetchResult: Sendable {
+    public let feed: XNewsFeed
+    public let costInUSDTicks: Int64?
+
+    public init(feed: XNewsFeed, costInUSDTicks: Int64?) {
+        self.feed = feed
+        self.costInUSDTicks = costInUSDTicks
+    }
+}
+
+public protocol XNewsFeedRefreshing: Sendable {
+    func refresh(now: Date) async throws -> XNewsFetchResult
+}
+
+public struct XAIHTTPResponse: Sendable {
+    public let data: Data
+    public let statusCode: Int
+
+    public init(data: Data, statusCode: Int) {
+        self.data = data
+        self.statusCode = statusCode
+    }
+}
+
+public protocol XAIHTTPTransport: Sendable {
+    func send(_ request: URLRequest) async throws -> XAIHTTPResponse
+}
+
+public struct URLSessionXAIHTTPTransport: XAIHTTPTransport, Sendable {
+    private let session: URLSession
+
+    public init() {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 180
+        configuration.timeoutIntervalForResource = 180
+        configuration.httpMaximumConnectionsPerHost = 1
+        session = URLSession(configuration: configuration)
+    }
+
+    public func send(_ request: URLRequest) async throws -> XAIHTTPResponse {
+        let (data, response) = try await session.data(for: request)
+        guard let response = response as? HTTPURLResponse else {
+            throw XAIResponsesError.malformedResponse
+        }
+        return XAIHTTPResponse(data: data, statusCode: response.statusCode)
+    }
+}
+
+public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
+    public static let defaultEndpoint = URL(string: "https://api.x.ai/v1/responses")!
+    public static let model = "grok-4.5"
+
+    private let cache: XNewsFeedCache
+    private let apiKeyProvider: any XAIAPIKeyProviding
+    private let transport: any XAIHTTPTransport
+    private let endpoint: URL
+
+    public init(
+        cache: XNewsFeedCache = XNewsFeedCache(),
+        apiKeyProvider: any XAIAPIKeyProviding = XAIAPIKeyStore(),
+        transport: any XAIHTTPTransport = URLSessionXAIHTTPTransport(),
+        endpoint: URL = Self.defaultEndpoint
+    ) {
+        self.cache = cache
+        self.apiKeyProvider = apiKeyProvider
+        self.transport = transport
+        self.endpoint = endpoint
+    }
+
+    public func refresh(now: Date = Date()) async throws -> XNewsFetchResult {
+        let apiKey: String
+        do {
+            apiKey = try apiKeyProvider.loadAPIKey()
+        } catch XAIAPIKeyError.notFound {
+            throw XAIResponsesError.missingAPIKey
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 180
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try requestBody(now: now)
+
+        let response: XAIHTTPResponse
+        do {
+            response = try await transport.send(request)
+        } catch let error as XAIResponsesError {
+            throw error
+        } catch {
+            throw XAIResponsesError.networkFailure
+        }
+        try Self.validate(statusCode: response.statusCode, data: response.data)
+        guard response.data.count <= 1_000_000 else {
+            throw GrokXNewsError.invalidFeed("response exceeds the one-megabyte safety limit")
+        }
+
+        let envelope: ResponsesEnvelope
+        do {
+            envelope = try JSONDecoder().decode(ResponsesEnvelope.self, from: response.data)
+        } catch {
+            throw XAIResponsesError.malformedResponse
+        }
+        guard envelope.status == "completed",
+              envelope.output.contains(where: { $0.type == "x_search_call" && $0.status == "completed" })
+        else {
+            throw XAIResponsesError.searchNotPerformed
+        }
+        guard let text = envelope.output
+            .first(where: { $0.type == "message" })?
+            .content?
+            .first(where: { $0.type == "output_text" })?
+            .text
+        else {
+            throw XAIResponsesError.malformedResponse
+        }
+
+        let candidate = try GrokXNewsParser.parse(feedText: text, now: now)
+        let feed = try XNewsRollingFeedMerger.merge(
+            candidate: candidate,
+            previous: try? cache.loadIncludingStale(),
+            now: now
+        )
+        try cache.save(feed)
+        return XNewsFetchResult(feed: feed, costInUSDTicks: envelope.usage?.costInUSDTicks)
+    }
+
+    private func requestBody(now: Date) throws -> Data {
+        let schemaData = Data(GrokXNewsContract.jsonSchema.utf8)
+        let schema = try JSONSerialization.jsonObject(with: schemaData)
+        let since = now.addingTimeInterval(-GrokXNewsContract.maximumAge)
+        let body: [String: Any] = [
+            "model": Self.model,
+            "input": GrokXNewsContract.prompt(now: now),
+            "tools": [[
+                "type": "x_search",
+                "from_date": Self.dayString(since),
+                "to_date": Self.dayString(now),
+            ]],
+            "tool_choice": "required",
+            "parallel_tool_calls": false,
+            "max_turns": 2,
+            "max_output_tokens": 12_000,
+            "reasoning": ["effort": "low"],
+            "store": false,
+            "include": ["no_inline_citations"],
+            "text": [
+                "format": [
+                    "type": "json_schema",
+                    "name": "ilo_board_x_news",
+                    "schema": schema,
+                    "strict": true,
+                ],
+            ],
+        ]
+        return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    private static func dayString(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
+    private static func validate(statusCode: Int, data: Data) throws {
+        guard !(200..<300).contains(statusCode) else { return }
+        switch statusCode {
+        case 401, 403:
+            throw XAIResponsesError.invalidAPIKey
+        case 402:
+            throw XAIResponsesError.insufficientCredits
+        case 429:
+            let message = (try? JSONDecoder().decode(APIErrorEnvelope.self, from: data))?
+                .error.message.lowercased() ?? ""
+            if message.contains("credit") || message.contains("billing") || message.contains("spend") {
+                throw XAIResponsesError.insufficientCredits
+            }
+            throw XAIResponsesError.rateLimited
+        case 500...599:
+            throw XAIResponsesError.serviceUnavailable
+        default:
+            throw XAIResponsesError.requestRejected
+        }
+    }
+}
+
+private struct ResponsesEnvelope: Decodable {
+    struct OutputItem: Decodable {
+        struct ContentItem: Decodable {
+            let type: String
+            let text: String?
+        }
+
+        let type: String
+        let status: String?
+        let content: [ContentItem]?
+    }
+
+    struct Usage: Decodable {
+        let costInUSDTicks: Int64?
+
+        enum CodingKeys: String, CodingKey {
+            case costInUSDTicks = "cost_in_usd_ticks"
+        }
+    }
+
+    let output: [OutputItem]
+    let status: String
+    let usage: Usage?
+}
+
+private struct APIErrorEnvelope: Decodable {
+    struct APIError: Decodable {
+        let message: String
+    }
+
+    let error: APIError
+}

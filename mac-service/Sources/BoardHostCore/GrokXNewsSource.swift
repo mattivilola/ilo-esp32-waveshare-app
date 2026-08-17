@@ -115,14 +115,23 @@ public struct XNewsRefreshPolicy: Equatable, Sendable {
 }
 
 public struct XNewsRefreshSettings: Codable, Equatable, Sendable {
+    public static let currentConsentVersion = 2
+
     public let cadence: XNewsRefreshCadence
     public let consentVersion: Int
     public let lastAttemptAt: Date?
+    public let lastCostInUSDTicks: Int64?
 
-    public init(cadence: XNewsRefreshCadence = .off, consentVersion: Int = 1, lastAttemptAt: Date? = nil) {
+    public init(
+        cadence: XNewsRefreshCadence = .off,
+        consentVersion: Int = Self.currentConsentVersion,
+        lastAttemptAt: Date? = nil,
+        lastCostInUSDTicks: Int64? = nil
+    ) {
         self.cadence = cadence
         self.consentVersion = consentVersion
         self.lastAttemptAt = lastAttemptAt
+        self.lastCostInUSDTicks = lastCostInUSDTicks
     }
 }
 
@@ -141,7 +150,7 @@ public struct XNewsRefreshSettingsStore: Sendable {
     public func load() -> XNewsRefreshSettings {
         guard let data = try? Data(contentsOf: url),
               let settings = try? JSONDecoder().decode(XNewsRefreshSettings.self, from: data),
-              settings.consentVersion == 1
+              (1...XNewsRefreshSettings.currentConsentVersion).contains(settings.consentVersion)
         else {
             return XNewsRefreshSettings()
         }
@@ -172,7 +181,7 @@ public enum GrokXNewsError: Error, LocalizedError, Sendable {
         case .executableNotFound:
             "Grok CLI was not found. Install and authenticate it, or set ILO_BOARD_GROK_PATH."
         case .explicitConsentRequired:
-            "X news is disabled. Re-run with explicit consent after reviewing the Grok prompt and permissions."
+            "X News is disabled. Re-run with explicit consent after reviewing separate xAI API billing."
         case let .processFailed(message):
             "Grok X-news request failed: \(message)"
         case .timedOut:
@@ -230,20 +239,20 @@ public enum GrokXNewsContract {
         - generated_at: \(until)
 
         Hard rules:
-        1) Search X once for recent AI and humanoid/robotics posts in this window.
+        1) Use the provided X search tool for recent AI and humanoid/robotics posts in this window. Never answer from model memory alone.
         2) Drop every post with a timestamp before \(since) or after \(until).
         3) Deduplicate stories. Skip items widely covered before this window unless the cited post contains a new development.
         4) Prefer the original poster, but do not spend turns independently verifying or cross-checking the claim.
         5) Return exactly one JSON object and no markdown or commentary.
-        6) Aim for 10 to 15 unique topics. Return fewer only when fewer relevant direct posts exist; never return fewer than 2. Category must be exactly AI or Robotics and confidence exactly high or medium.
+        6) Aim for 10 to 15 unique topics. Return fewer only when fewer relevant direct posts exist. If X search is unavailable or fewer than 2 usable direct posts exist, return topics as an empty array instead of placeholders. Category must be exactly AI or Robotics and confidence exactly high or medium.
         7) Include the complete available text of the primary X post in post_text, bounded to \(xNewsMaximumPostCharacters) characters.
         8) Include 1 to 3 sources per topic. Put the primary post first. Every post_url must be a direct URL shaped https://x.com/<handle>/status/<numeric-id>.
-        9) Return finished news only. Never include search progress, missing-source notes, "need more" placeholders, or remaining-work commentary as a topic.
-        Profile pages, home pages, search pages, missing citations, and invented URLs are forbidden.
+        9) Return finished news only. Never include search progress, missing-source notes, generic placeholders, or remaining-work commentary as a topic.
+        Profile pages, home pages, search pages, missing citations, invented URLs, and values such as "Placeholder" are forbidden.
         """
     }
 
-    public static let jsonSchema = #"{"type":"object","additionalProperties":false,"required":["window","generated_at","topics"],"properties":{"window":{"type":"object","additionalProperties":false,"required":["since","until"],"properties":{"since":{"type":"string"},"until":{"type":"string"}}},"generated_at":{"type":"string"},"topics":{"type":"array","minItems":2,"maxItems":15,"items":{"type":"object","additionalProperties":false,"required":["category","headline","summary","post_text","confidence","posted_at","sources"],"properties":{"category":{"enum":["AI","Robotics"]},"headline":{"type":"string","minLength":1,"maxLength":70},"summary":{"type":"string","minLength":1,"maxLength":220},"post_text":{"type":"string","minLength":1,"maxLength":1800},"confidence":{"enum":["high","medium"]},"posted_at":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["handle","post_url"],"properties":{"handle":{"type":"string","pattern":"^@[A-Za-z0-9_]{1,15}$"},"post_url":{"type":"string","pattern":"^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$"}}}}}}}}}"#
+    public static let jsonSchema = #"{"type":"object","additionalProperties":false,"required":["window","generated_at","topics"],"properties":{"window":{"type":"object","additionalProperties":false,"required":["since","until"],"properties":{"since":{"type":"string"},"until":{"type":"string"}}},"generated_at":{"type":"string"},"topics":{"type":"array","minItems":0,"maxItems":15,"items":{"type":"object","additionalProperties":false,"required":["category","headline","summary","post_text","confidence","posted_at","sources"],"properties":{"category":{"enum":["AI","Robotics"]},"headline":{"type":"string","minLength":1,"maxLength":70},"summary":{"type":"string","minLength":1,"maxLength":220},"post_text":{"type":"string","minLength":1,"maxLength":1800},"confidence":{"enum":["high","medium"]},"posted_at":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["handle","post_url"],"properties":{"handle":{"type":"string","pattern":"^@[A-Za-z0-9_]{1,15}$"},"post_url":{"type":"string","pattern":"^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$"}}}}}}}}}"#
 
     public static func processArguments(now: Date) -> [String] {
         [
@@ -316,7 +325,11 @@ public enum GrokXNewsParser {
         guard let envelope = try? JSONDecoder().decode(CLIEnvelope.self, from: grokOutput) else {
             throw GrokXNewsError.malformedEnvelope
         }
-        let documents = JSONDocumentScanner.documents(in: envelope.text)
+        return try parse(feedText: envelope.text, now: now)
+    }
+
+    public static func parse(feedText: String, now: Date = Date()) throws -> XNewsFeed {
+        let documents = JSONDocumentScanner.documents(in: feedText)
         guard !documents.isEmpty else {
             throw GrokXNewsError.malformedFeed
         }
@@ -703,6 +716,7 @@ enum XNewsStoryQuality {
         "in-window primaries",
         "could not find",
         "missing sources",
+        "placeholder",
     ]
 
     static func isPublishable(title: String, summary: String) -> Bool {
@@ -761,15 +775,19 @@ public actor XNewsRefreshCoordinator {
 
     private let settingsStore: XNewsRefreshSettingsStore
     private let cache: XNewsFeedCache
+    private let source: any XNewsFeedRefreshing
     private var refreshInFlight = false
     private var lastActivity: XNewsRefreshActivity = .idle
+    private var lastFailureDescription: String?
 
     public init(
         settingsStore: XNewsRefreshSettingsStore = XNewsRefreshSettingsStore(),
-        cache: XNewsFeedCache = XNewsFeedCache()
+        cache: XNewsFeedCache = XNewsFeedCache(),
+        source: (any XNewsFeedRefreshing)? = nil
     ) {
         self.settingsStore = settingsStore
         self.cache = cache
+        self.source = source ?? XAIResponsesXNewsSource(cache: cache)
     }
 
     public func run() async {
@@ -782,7 +800,9 @@ public actor XNewsRefreshCoordinator {
     public func requestManualRefresh(now: Date = Date()) async -> XNewsManualRefreshOutcome {
         guard !refreshInFlight else { return .busy }
         let settings = settingsStore.load()
-        guard settings.consentVersion == 1, settings.cadence != .off else {
+        guard settings.consentVersion == XNewsRefreshSettings.currentConsentVersion,
+              settings.cadence != .off
+        else {
             lastActivity = .disabled
             return .disabled
         }
@@ -795,25 +815,33 @@ public actor XNewsRefreshCoordinator {
             try settingsStore.save(XNewsRefreshSettings(
                 cadence: settings.cadence,
                 consentVersion: settings.consentVersion,
-                lastAttemptAt: now
+                lastAttemptAt: now,
+                lastCostInUSDTicks: settings.lastCostInUSDTicks
             ))
         } catch {
             lastActivity = .failed(at: now)
+            lastFailureDescription = "The Mac could not save the refresh state."
             return .failed
         }
 
         refreshInFlight = true
         lastActivity = .fetching(startedAt: now)
+        lastFailureDescription = nil
         defer { refreshInFlight = false }
-        let source = GrokXNewsSource(cache: cache)
         do {
-            _ = try await Task.detached(priority: .utility) {
-                try source.refresh(explicitlyAllowsGrokTools: true, now: now)
-            }.value
+            let result = try await source.refresh(now: now)
+            let current = settingsStore.load()
+            try settingsStore.save(XNewsRefreshSettings(
+                cadence: current.cadence,
+                consentVersion: current.consentVersion,
+                lastAttemptAt: current.lastAttemptAt,
+                lastCostInUSDTicks: result.costInUSDTicks
+            ))
             lastActivity = .updated(at: Date())
             return .updated
         } catch {
             lastActivity = .failed(at: Date())
+            lastFailureDescription = Self.safeFailureDescription(error)
             return .failed
         }
     }
@@ -829,10 +857,16 @@ public actor XNewsRefreshCoordinator {
         return lastActivity
     }
 
+    public func failureDescription() -> String? {
+        lastFailureDescription
+    }
+
     public func considerRefresh(now: Date = Date(), calendar: Calendar = .current) {
         guard !refreshInFlight else { return }
         let settings = settingsStore.load()
-        guard settings.consentVersion == 1, settings.cadence != .off else { return }
+        guard settings.consentVersion == XNewsRefreshSettings.currentConsentVersion,
+              settings.cadence != .off
+        else { return }
         let policy = XNewsRefreshPolicy(cadence: settings.cadence)
         guard policy.allowsManualRefresh(lastAttempt: settings.lastAttemptAt, now: now) else { return }
         let previous = try? cache.loadIncludingStale()
@@ -846,24 +880,56 @@ public actor XNewsRefreshCoordinator {
         try? settingsStore.save(XNewsRefreshSettings(
             cadence: settings.cadence,
             consentVersion: settings.consentVersion,
-            lastAttemptAt: now
+            lastAttemptAt: now,
+            lastCostInUSDTicks: settings.lastCostInUSDTicks
         ))
         refreshInFlight = true
         lastActivity = .fetching(startedAt: now)
-        let source = GrokXNewsSource(cache: cache)
+        lastFailureDescription = nil
+        let source = source
         Task.detached(priority: .utility) { [weak self] in
             do {
-                _ = try source.refresh(explicitlyAllowsGrokTools: true)
-                await self?.refreshFinished(.updated(at: Date()))
+                let result = try await source.refresh(now: now)
+                await self?.refreshFinished(
+                    .updated(at: Date()),
+                    costInUSDTicks: result.costInUSDTicks,
+                    failureDescription: nil
+                )
             } catch {
-                await self?.refreshFinished(.failed(at: Date()))
+                await self?.refreshFinished(
+                    .failed(at: Date()),
+                    costInUSDTicks: settings.lastCostInUSDTicks,
+                    failureDescription: Self.safeFailureDescription(error)
+                )
             }
         }
     }
 
-    private func refreshFinished(_ activity: XNewsRefreshActivity) {
+    private func refreshFinished(
+        _ activity: XNewsRefreshActivity,
+        costInUSDTicks: Int64?,
+        failureDescription: String?
+    ) {
         refreshInFlight = false
         lastActivity = activity
+        lastFailureDescription = failureDescription
+        if case .updated = activity {
+            let current = settingsStore.load()
+            try? settingsStore.save(XNewsRefreshSettings(
+                cadence: current.cadence,
+                consentVersion: current.consentVersion,
+                lastAttemptAt: current.lastAttemptAt,
+                lastCostInUSDTicks: costInUSDTicks
+            ))
+        }
+    }
+
+    private static func safeFailureDescription(_ error: Error) -> String {
+        if let description = (error as? LocalizedError)?.errorDescription,
+           !description.isEmpty {
+            return String(description.prefix(240))
+        }
+        return "The xAI X News request failed."
     }
 }
 

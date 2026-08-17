@@ -141,8 +141,8 @@ struct ILOBoardHostCommand {
             print("  transport: Wi-Fi TLS 1.2 PSK with authenticated encrypted USB fallback")
             print("  Codex adapter: \(CodexExecutableResolver.resolve()?.path ?? "CLI not found")")
             print("  Desktop task status: recent history only unless owned by this App Server")
-            print("  Optional Grok adapter: \(GrokExecutableResolver.resolve()?.path ?? "CLI not found")")
-            print("  X News: opt-in; bounded direct-post cache; daily policy available")
+            print("  xAI API key: \(XAIAPIKeyStore().isConfigured ? "configured in Keychain" : "not configured")")
+            print("  X News: opt-in xAI Responses API; bounded direct-post cache; daily policy available")
             print("  USB: \(usbPresence.displayText)\(usbPresence.path.map { " (\($0))" } ?? "")")
             if let power = await CachedMacPowerStatusSource().currentStatus() {
                 print("  Mac power: \(power.levelPercent)% \(power.state.rawValue)")
@@ -150,7 +150,7 @@ struct ILOBoardHostCommand {
                 print("  Mac power: internal battery unavailable")
             }
         case "x-news":
-            try runXNews(arguments: Array(arguments.dropFirst()))
+            try await runXNews(arguments: Array(arguments.dropFirst()))
         default:
             printUsage()
         }
@@ -183,10 +183,10 @@ struct ILOBoardHostCommand {
         return seconds
     }
 
-    private static func runXNews(arguments: [String]) throws {
+    private static func runXNews(arguments: [String]) async throws {
         switch arguments.first ?? "status" {
         case "status":
-            print("Grok CLI: \(GrokExecutableResolver.resolve()?.path ?? "not found")")
+            print("xAI API key: \(XAIAPIKeyStore().isConfigured ? "configured in Keychain" : "not configured")")
             if let feed = try? XNewsFeedCache().load() {
                 let timestamp = ISO8601DateFormatter().string(from: feed.generatedAt)
                 print("X News cache: \(feed.stories.count) posts generated \(timestamp)")
@@ -200,34 +200,32 @@ struct ILOBoardHostCommand {
             print("Available schedules: daily at 08:00, or 08:00 + 14:00 local")
             print("Manual refresh cooldown: 15 minutes")
         case "refresh":
-            guard arguments.contains("--allow-grok-tools") else {
+            guard paidAPIConsent(in: arguments) else {
                 throw GrokXNewsError.explicitConsentRequired
             }
-            let settingsStore = XNewsRefreshSettingsStore()
-            let settings = settingsStore.load()
-            let now = Date()
-            guard XNewsRefreshPolicy(cadence: settings.cadence).allowsManualRefresh(
-                lastAttempt: settings.lastAttemptAt,
-                now: now
-            ) else {
+            let coordinator = XNewsRefreshCoordinator()
+            let outcome = await coordinator.requestManualRefresh()
+            switch outcome {
+            case .updated:
+                let feed = try XNewsFeedCache().load()
+                print("Accepted and cached \(feed.stories.count) newly cited X News stories.")
+            case .disabled:
+                throw GrokXNewsError.explicitConsentRequired
+            case .cooldown:
                 throw GrokXNewsError.refreshCooldown
+            case .busy:
+                throw XNewsCommandError.refreshBusy
+            case .failed:
+                throw XNewsCommandError.refreshFailed(
+                    await coordinator.failureDescription() ?? "The xAI X News request failed."
+                )
             }
-            try settingsStore.save(XNewsRefreshSettings(
-                cadence: settings.cadence,
-                consentVersion: settings.consentVersion,
-                lastAttemptAt: now
-            ))
-            let feed = try GrokXNewsSource().refresh(
-                explicitlyAllowsGrokTools: true,
-                now: now
-            )
-            print("Accepted and cached \(feed.stories.count) newly cited X News stories.")
         case "enable":
-            guard arguments.contains("--allow-grok-tools") else {
+            guard paidAPIConsent(in: arguments) else {
                 throw GrokXNewsError.explicitConsentRequired
             }
             let cadence: XNewsRefreshCadence = arguments.contains("--twice-daily") ? .morningAndAfternoon : .daily
-            try XNewsFeatureController().enable(cadence: cadence, explicitlyAllowsGrokTools: true)
+            try XNewsFeatureController().enable(cadence: cadence, explicitlyAllowsPaidAPI: true)
             print(cadence == .daily
                 ? "Enabled X News at 08:00 local each day."
                 : "Enabled X News at 08:00 and 14:00 local each day.")
@@ -239,6 +237,10 @@ struct ILOBoardHostCommand {
         }
     }
 
+    private static func paidAPIConsent(in arguments: [String]) -> Bool {
+        arguments.contains("--allow-paid-api") || arguments.contains("--allow-grok-tools")
+    }
+
     private static func printUsage() {
         print("""
         Usage:
@@ -248,8 +250,8 @@ struct ILOBoardHostCommand {
           ilo-board-host serve [--mock] [--usb-only] [--board-id ID] [--port PORT]
           ilo-board-host screenshot --output FILE.png [--timeout SECONDS] [--force]
           ilo-board-host x-news status
-          ilo-board-host x-news refresh --allow-grok-tools
-          ilo-board-host x-news enable [--twice-daily] --allow-grok-tools
+          ilo-board-host x-news refresh --allow-paid-api
+          ilo-board-host x-news enable [--twice-daily] --allow-paid-api
           ilo-board-host x-news disable
         """)
     }
@@ -257,9 +259,15 @@ struct ILOBoardHostCommand {
 
 private enum XNewsCommandError: Error, LocalizedError {
     case invalidAction
+    case refreshBusy
+    case refreshFailed(String)
 
     var errorDescription: String? {
-        "X News action must be status or refresh."
+        switch self {
+        case .invalidAction: "X News action must be status, refresh, enable, or disable."
+        case .refreshBusy: "An X News refresh is already running."
+        case let .refreshFailed(message): message
+        }
     }
 }
 

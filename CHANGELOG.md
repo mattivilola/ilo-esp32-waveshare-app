@@ -2,6 +2,18 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## Unreleased
+
+### Added
+- Store an optional xAI API key in the Mac login Keychain from the companion's X News controls
+- Show the exact xAI-reported cost of the most recent accepted X News refresh
+
+### Changed
+- Fetch X News through the xAI Responses API with required X search, strict bounded output, and response storage disabled
+
+### Fixed
+- Stop accepting placeholder stories when the local Grok CLI cannot access X search
+
 ## 0.1.11 - 2026-08-14
 
 ### Added

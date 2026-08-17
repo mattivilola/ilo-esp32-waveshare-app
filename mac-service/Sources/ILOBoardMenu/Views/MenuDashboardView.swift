@@ -28,6 +28,9 @@ struct MenuDashboardView: View {
     @ObservedObject var updater: SparkleUpdaterController
     @State private var diagnosticNotice: String?
     @State private var showingXNewsConsent = false
+    @State private var showingXAIKeyEditor = false
+    @State private var showingXAIKeyRemoval = false
+    @State private var xaiAPIKeyDraft = ""
     @State private var showingCodexContinueConsent = false
     @State private var showingLocationConsent = false
     @State private var selectedSection = CompanionDashboardSection.overview
@@ -59,6 +62,15 @@ struct MenuDashboardView: View {
             weatherLocation.refresh()
             store.refreshXNewsStatus()
         }
+        .onChange(of: selectedSection) { section in
+            guard section != .features else { return }
+            xaiAPIKeyDraft = ""
+            showingXAIKeyEditor = false
+        }
+        .onDisappear {
+            xaiAPIKeyDraft = ""
+            showingXAIKeyEditor = false
+        }
         .confirmationDialog(
             "Enable fixed board Codex actions?",
             isPresented: $showingCodexContinueConsent,
@@ -77,7 +89,21 @@ struct MenuDashboardView: View {
             Button("Enable Daily X News") { store.enableXNews() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This runs your authenticated Grok CLI with X search and may use paid model or tool capacity. Credentials remain on this Mac.")
+            Text("This uses the xAI Responses API with X Search. Requests consume API credits separately from your Grok subscription. The API key remains in this Mac’s Keychain and is never sent to the board.")
+        }
+        .confirmationDialog(
+            "Remove the xAI API key?",
+            isPresented: $showingXAIKeyRemoval,
+            titleVisibility: .visible
+        ) {
+            Button("Remove from Keychain", role: .destructive) {
+                store.removeXAIAPIKey()
+                xaiAPIKeyDraft = ""
+                showingXAIKeyEditor = false
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("X News will stop refreshing and its board screen will hide. The existing news cache is preserved.")
         }
         .confirmationDialog(
             "Share Mac location for weather?",
@@ -515,11 +541,9 @@ struct MenuDashboardView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            if !store.xNewsStatus.grokAvailable {
-                Text("Install and authenticate the Grok CLI to make this screen available.")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            } else if store.xNewsStatus.isEnabled {
+            xaiAPIKeyControls
+
+            if store.xNewsStatus.isEnabled {
                 HStack(spacing: 8) {
                     Button {
                         store.refreshXNewsNow()
@@ -552,6 +576,7 @@ struct MenuDashboardView: View {
                 }
             } else {
                 Button("Enable X News…") { showingXNewsConsent = true }
+                    .disabled(!store.xNewsStatus.apiKeyConfigured)
             }
 
             if let notice = store.xNewsNotice {
@@ -562,6 +587,45 @@ struct MenuDashboardView: View {
             }
         }
         .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var xaiAPIKeyControls: some View {
+        if showingXAIKeyEditor || !store.xNewsStatus.apiKeyConfigured {
+            VStack(alignment: .leading, spacing: 6) {
+                SecureField("xai-…", text: $xaiAPIKeyDraft)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("xAI API key")
+                HStack(spacing: 8) {
+                    Button(store.xNewsStatus.apiKeyConfigured ? "Replace Key" : "Save in Keychain") {
+                        if store.saveXAIAPIKey(xaiAPIKeyDraft) {
+                            xaiAPIKeyDraft = ""
+                            showingXAIKeyEditor = false
+                        }
+                    }
+                    .disabled(xaiAPIKeyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    if store.xNewsStatus.apiKeyConfigured {
+                        Button("Cancel") {
+                            xaiAPIKeyDraft = ""
+                            showingXAIKeyEditor = false
+                        }
+                    }
+                }
+                Text("Stored only in this Mac’s Keychain. API usage is billed separately by xAI.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        } else {
+            HStack(spacing: 8) {
+                Label("API key saved in Keychain", systemImage: "checkmark.shield.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+                Spacer(minLength: 4)
+                Button("Replace…") { showingXAIKeyEditor = true }
+                Button("Remove…", role: .destructive) { showingXAIKeyRemoval = true }
+            }
+        }
     }
 
     private var codexContinueControls: some View {
@@ -669,7 +733,7 @@ struct MenuDashboardView: View {
     }
 
     private var xNewsFetchStatusTitle: String {
-        guard store.xNewsStatus.grokAvailable else { return "Unavailable" }
+        guard store.xNewsStatus.apiKeyConfigured else { return "API key needed" }
         guard store.xNewsStatus.isEnabled else { return "Off" }
         if xNewsCooldownUntil != nil, case .idle = store.xNewsRefreshActivity { return "Cooldown" }
         return switch store.xNewsRefreshActivity {
@@ -726,11 +790,16 @@ struct MenuDashboardView: View {
         guard let generatedAt = store.xNewsCacheGeneratedAt, store.xNewsCachedStoryCount > 0 else {
             return "No cached posts"
         }
-        return "\(store.xNewsCachedStoryCount) stories · \(generatedAt.formatted(.relative(presentation: .named)))"
+        let base = "\(store.xNewsCachedStoryCount) stories · \(generatedAt.formatted(.relative(presentation: .named)))"
+        guard let ticks = store.xNewsStatus.lastCostInUSDTicks else { return base }
+        let cost = Double(ticks) / 10_000_000_000
+        return "\(base) · \(cost.formatted(.currency(code: "USD").precision(.fractionLength(4))))"
     }
 
     private var xNewsStatusDetail: String {
-        guard store.xNewsStatus.grokAvailable else { return "Hidden on the board because Grok was not found." }
+        guard store.xNewsStatus.apiKeyConfigured else {
+            return "Add an xAI API key below. Until then, X News stays hidden on the board."
+        }
         return switch store.xNewsStatus.cadence {
         case .off: "Off by default; the X News screen is hidden on the board."
         case .daily: "Visible on the board; refreshes at 08:00 local time."

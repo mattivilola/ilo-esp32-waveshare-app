@@ -25,7 +25,7 @@ The device uses four horizontally ordered pages by default:
 3. Weather
 4. Settings
 
-When X News is explicitly enabled on a Mac with Grok available, it is inserted between Codex and Weather as a fifth page. Disabling it, or losing Grok availability, removes the complete page and expands the remaining navigation targets. A horizontal swipe moves one page at a time. The bottom navigation is always visible so the gesture is discoverable and every screen remains one tap away. Page changes must not wrap from Settings to Dashboard because accidental edge swipes should be predictable.
+When X News is explicitly enabled on a Mac with an xAI API key configured, it is inserted between Codex and Weather as a fifth page. Disabling it, or removing the key, removes the complete page and expands the remaining navigation targets. A horizontal swipe moves one page at a time. The bottom navigation is always visible so the gesture is discoverable and every screen remains one tap away. Page changes must not wrap from Settings to Dashboard because accidental edge swipes should be predictable.
 
 Touch targets are at least 48×48 logical pixels. Empty, sleeping, reconnecting, and stale-data states explain what is happening and what the user can do. Phase 1 offers inspection only; it never draws a control that cannot safely complete its action.
 
@@ -79,7 +79,7 @@ The first device-manageable preferences are:
 - connection diagnostics and a manual reconnect;
 - firmware/version/update status.
 
-Settings reports whether X News is Mac-enabled, but cannot grant Grok consent or change its paid-tool schedule.
+Settings reports whether X News is Mac-enabled, but cannot configure the API key, grant paid-API consent, or change its schedule.
 
 Reboot, pairing reset, erase, and update installation require a separate confirmation surface. Wi-Fi can be changed locally from Settings with a masked touch keyboard; the flow clearly warns about shoulder-surfing, validates WPA2/WPA3 Personal credential lengths, and retains USB provisioning as the recovery route.
 
@@ -113,7 +113,7 @@ The dashboard should aggregate only the top one or two of these. Dedicated pages
 
 The preview uses the same Carbon/Slate/Steel/Signal/Amber/Mist/Fog system, real ILO roundel, page order, content density, and touch-sized navigation intended for firmware. `make ui-preview` opens it; `make ui-screenshots` exports all pages; `./tools/board ui-screenshot --screen codex --chat` renders the focused chat-reader fixture; `swift run --package-path mac-service ilo-board-preview focus-screenshot` renders the Focus Cockpit.
 
-The first LVGL port now mirrors the adaptive four/five-page structure with `lv_tileview`, dynamically sized bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, optional bounded X News, sample Weather, persistent NVS-backed Settings, summary privacy, a bounded Pulse/Lando screensaver, and binary backlight sleep. Lando uses ten precomposited RGB565 frames (six idle and four waving), never a scaled or alpha-blended atlas; his animation pauses whenever the saver is hidden or the backlight is off. X News accepts vertical momentum scrolling for up to fifteen stories and chains horizontal gestures back to the page tileview; every row exposes category/confidence chips and opens a full-width, vertically scrollable post-detail view with Back, author, timestamp, summary, available post text, and direct URL. A feed hint appears only when more than three stories are available. The X News page never runs Grok or receives Grok prompts, reasoning, authentication, or raw output; the Mac companion sends only the bounded feed that passed host-side structural validation. Physical review must precede any claim that the prototype and LVGL output match.
+The first LVGL port now mirrors the adaptive four/five-page structure with `lv_tileview`, dynamically sized bottom navigation, the generated 48×48 ARGB roundel, model-bound Dashboard/Codex task rows, optional bounded X News, sample Weather, persistent NVS-backed Settings, summary privacy, a bounded Pulse/Lando screensaver, and binary backlight sleep. Lando uses ten precomposited RGB565 frames (six idle and four waving), never a scaled or alpha-blended atlas; his animation pauses whenever the saver is hidden or the backlight is off. X News accepts vertical momentum scrolling for up to fifteen stories and chains horizontal gestures back to the page tileview; every row exposes category/confidence chips and opens a full-width, vertically scrollable post-detail view with Back, author, timestamp, summary, available post text, and direct URL. A feed hint appears only when more than three stories are available. The X News page never calls xAI or receives the API key, cost, prompts, reasoning, usage, tool calls, or raw output; the Mac companion sends only the bounded feed that passed host-side structural validation. Physical review must precede any claim that the prototype and LVGL output match.
 
 ## macOS menu-bar companion
 
