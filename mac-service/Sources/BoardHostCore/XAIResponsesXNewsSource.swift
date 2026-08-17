@@ -9,6 +9,7 @@ public enum XAIResponsesError: Error, LocalizedError, Sendable {
     case serviceUnavailable
     case networkFailure
     case malformedResponse
+    case incompleteResponse
     case searchNotPerformed
 
     public var errorDescription: String? {
@@ -29,6 +30,8 @@ public enum XAIResponsesError: Error, LocalizedError, Sendable {
             "The Mac could not reach the xAI API."
         case .malformedResponse:
             "xAI returned an unreadable X News response."
+        case .incompleteResponse:
+            "xAI stopped before writing the X News brief. Try Refresh again."
         case .searchNotPerformed:
             "xAI returned no completed X search."
         }
@@ -138,9 +141,10 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
         } catch {
             throw XAIResponsesError.malformedResponse
         }
-        guard envelope.status == "completed",
-              envelope.output.contains(where: { $0.type == "x_search_call" && $0.status == "completed" })
-        else {
+        guard envelope.status == "completed" else {
+            throw XAIResponsesError.incompleteResponse
+        }
+        guard envelope.output.contains(where: { $0.type == "x_search_call" && $0.status == "completed" }) else {
             throw XAIResponsesError.searchNotPerformed
         }
         guard let text = envelope.output
@@ -149,7 +153,7 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             .first(where: { $0.type == "output_text" })?
             .text
         else {
-            throw XAIResponsesError.malformedResponse
+            throw XAIResponsesError.incompleteResponse
         }
 
         let candidate = try GrokXNewsParser.parse(feedText: text, now: now)
@@ -174,9 +178,9 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
                 "from_date": Self.dayString(since),
                 "to_date": Self.dayString(now),
             ]],
-            "tool_choice": "required",
+            "tool_choice": "auto",
             "parallel_tool_calls": false,
-            "max_turns": 2,
+            "max_turns": 3,
             "max_output_tokens": 12_000,
             "reasoning": ["effort": "low"],
             "store": false,

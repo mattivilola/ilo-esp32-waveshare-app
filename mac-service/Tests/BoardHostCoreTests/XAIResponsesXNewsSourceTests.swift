@@ -15,7 +15,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     }
 }
 
-@Test func responsesAPIForcesXSearchDisablesStorageAndCachesValidatedFeed() async throws {
+@Test func responsesAPIAllowsFinalAnswerDisablesStorageAndCachesOnlyAfterXSearch() async throws {
     let cacheURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("ilo-board-xai-responses-\(UUID().uuidString).json")
     defer { try? FileManager.default.removeItem(at: cacheURL) }
@@ -41,8 +41,8 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     let body = try #require(request.httpBody)
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(json["store"] as? Bool == false)
-    #expect(json["tool_choice"] as? String == "required")
-    #expect(json["max_turns"] as? Int == 2)
+    #expect(json["tool_choice"] as? String == "auto")
+    #expect(json["max_turns"] as? Int == 3)
     let reasoning = try #require(json["reasoning"] as? [String: Any])
     #expect(reasoning["effort"] as? String == "low")
     let tools = try #require(json["tools"] as? [[String: Any]])
@@ -55,6 +55,29 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     let properties = try #require(schema["properties"] as? [String: Any])
     let topics = try #require(properties["topics"] as? [String: Any])
     #expect(topics["minItems"] as? Int == 0)
+}
+
+@Test func responsesAPIReturnsActionableFailureWhenToolLoopDoesNotFinish() async throws {
+    let transport = CapturingXAITransport(response: XAIHTTPResponse(
+        data: try responsesEnvelope(includeSearchCall: true, costTicks: nil, status: "incomplete"),
+        statusCode: 200
+    ))
+    let source = XAIResponsesXNewsSource(
+        cache: XNewsFeedCache(url: URL(fileURLWithPath: "/tmp/not-used-incomplete-xai-news.json")),
+        apiKeyProvider: StaticXAIKeyProvider(),
+        transport: transport
+    )
+
+    do {
+        _ = try await source.refresh(now: apiReferenceNow)
+        Issue.record("Expected an incomplete-response failure")
+    } catch let error as XAIResponsesError {
+        guard case .incompleteResponse = error else {
+            Issue.record("Expected incompleteResponse, got \(error)")
+            return
+        }
+        #expect(error.localizedDescription == "xAI stopped before writing the X News brief. Try Refresh again.")
+    }
 }
 
 @Test func responsesAPIRejectsOutputWhenXSearchWasNotPerformed() async throws {
@@ -197,7 +220,11 @@ private struct StaticXNewsSource: XNewsFeedRefreshing {
     }
 }
 
-private func responsesEnvelope(includeSearchCall: Bool, costTicks: Int64?) throws -> Data {
+private func responsesEnvelope(
+    includeSearchCall: Bool,
+    costTicks: Int64?,
+    status: String = "completed"
+) throws -> Data {
     var output = [[String: Any]]()
     if includeSearchCall {
         output.append(["type": "x_search_call", "status": "completed"])
@@ -206,7 +233,7 @@ private func responsesEnvelope(includeSearchCall: Bool, costTicks: Int64?) throw
         "type": "message",
         "content": [["type": "output_text", "text": try directFeedText()]],
     ])
-    var root: [String: Any] = ["status": "completed", "output": output]
+    var root: [String: Any] = ["status": status, "output": output]
     if let costTicks {
         root["usage"] = ["cost_in_usd_ticks": costTicks]
     }
