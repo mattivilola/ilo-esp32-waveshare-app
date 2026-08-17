@@ -2,6 +2,15 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.13 - 2026-08-17
+
+### Changed
+- Give xAI enough search turns to finish a structured X News brief while still requiring a completed X search
+
+### Fixed
+- Explain when xAI stops before writing the brief instead of reporting a generic unusable update
+
+
 ## 0.1.12 - 2026-08-17
 
 ### Added
