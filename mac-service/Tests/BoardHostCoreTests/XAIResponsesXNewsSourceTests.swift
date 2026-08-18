@@ -42,7 +42,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(json["store"] as? Bool == false)
     #expect(json["tool_choice"] as? String == "auto")
-    #expect(json["max_turns"] as? Int == 3)
+    #expect(json["max_turns"] as? Int == 8)
     let reasoning = try #require(json["reasoning"] as? [String: Any])
     #expect(reasoning["effort"] as? String == "low")
     let tools = try #require(json["tools"] as? [[String: Any]])
@@ -71,13 +71,41 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     do {
         _ = try await source.refresh(now: apiReferenceNow)
         Issue.record("Expected an incomplete-response failure")
-    } catch let error as XAIResponsesError {
-        guard case .incompleteResponse = error else {
-            Issue.record("Expected incompleteResponse, got \(error)")
-            return
-        }
-        #expect(error.localizedDescription == "xAI stopped before writing the X News brief. Try Refresh again.")
+    } catch let error as XAIResponseRejectedError {
+        #expect(error.localizedDescription.contains("xAI stopped before writing the X News brief"))
+        #expect(error.diagnostic == "status=incomplete; output=x_search_call:completed,message")
     }
+}
+
+@Test func rejectedStructuredBriefReportsDiagnosticAndPersistsExactCost() async throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-xai-rejected-cost-\(UUID().uuidString)", isDirectory: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let settingsStore = XNewsRefreshSettingsStore(url: directory.appendingPathComponent("settings.json"))
+    try settingsStore.save(XNewsRefreshSettings(cadence: .daily))
+    let source = XAIResponsesXNewsSource(
+        cache: XNewsFeedCache(url: directory.appendingPathComponent("feed.json")),
+        apiKeyProvider: StaticXAIKeyProvider(),
+        transport: CapturingXAITransport(response: XAIHTTPResponse(
+            data: try responsesEnvelope(
+                includeSearchCall: true,
+                costTicks: 77_000_000,
+                feedText: emptyFeedText()
+            ),
+            statusCode: 200
+        ))
+    )
+    let coordinator = XNewsRefreshCoordinator(
+        settingsStore: settingsStore,
+        cache: XNewsFeedCache(url: directory.appendingPathComponent("feed.json")),
+        source: source
+    )
+
+    #expect(await coordinator.requestManualRefresh(now: apiReferenceNow) == .failed)
+    #expect(settingsStore.load().lastCostInUSDTicks == 77_000_000)
+    let failure = try #require(await coordinator.failureDescription())
+    #expect(failure.contains("xAI returned an unusable X News brief: expected 2 to 15 stories"))
+    #expect(failure.contains("status=completed; output=x_search_call:completed,message"))
 }
 
 @Test func responsesAPIRejectsOutputWhenXSearchWasNotPerformed() async throws {
@@ -91,8 +119,12 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
         transport: transport
     )
 
-    await #expect(throws: XAIResponsesError.self) {
-        try await source.refresh(now: apiReferenceNow)
+    do {
+        _ = try await source.refresh(now: apiReferenceNow)
+        Issue.record("Expected a missing-search rejection")
+    } catch let error as XAIResponseRejectedError {
+        #expect(error.message.contains("no completed X search"))
+        #expect(error.diagnostic == "status=completed; output=message")
     }
 }
 
@@ -223,7 +255,8 @@ private struct StaticXNewsSource: XNewsFeedRefreshing {
 private func responsesEnvelope(
     includeSearchCall: Bool,
     costTicks: Int64?,
-    status: String = "completed"
+    status: String = "completed",
+    feedText: String? = nil
 ) throws -> Data {
     var output = [[String: Any]]()
     if includeSearchCall {
@@ -231,13 +264,23 @@ private func responsesEnvelope(
     }
     output.append([
         "type": "message",
-        "content": [["type": "output_text", "text": try directFeedText()]],
+        "content": [["type": "output_text", "text": try feedText ?? directFeedText()]],
     ])
     var root: [String: Any] = ["status": status, "output": output]
     if let costTicks {
         root["usage"] = ["cost_in_usd_ticks": costTicks]
     }
     return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+}
+
+private func emptyFeedText() -> String {
+    """
+    {
+      "window": {"since": "2026-08-16T09:00:00Z", "until": "2026-08-17T09:00:00Z"},
+      "generated_at": "2026-08-17T09:00:00Z",
+      "topics": []
+    }
+    """
 }
 
 private func directFeedText() throws -> String {

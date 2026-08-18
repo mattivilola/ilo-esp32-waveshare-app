@@ -9,8 +9,6 @@ public enum XAIResponsesError: Error, LocalizedError, Sendable {
     case serviceUnavailable
     case networkFailure
     case malformedResponse
-    case incompleteResponse
-    case searchNotPerformed
 
     public var errorDescription: String? {
         switch self {
@@ -30,11 +28,23 @@ public enum XAIResponsesError: Error, LocalizedError, Sendable {
             "The Mac could not reach the xAI API."
         case .malformedResponse:
             "xAI returned an unreadable X News response."
-        case .incompleteResponse:
-            "xAI stopped before writing the X News brief. Try Refresh again."
-        case .searchNotPerformed:
-            "xAI returned no completed X search."
         }
+    }
+}
+
+public struct XAIResponseRejectedError: Error, LocalizedError, Sendable {
+    public let message: String
+    public let diagnostic: String
+    public let costInUSDTicks: Int64?
+
+    public init(message: String, diagnostic: String, costInUSDTicks: Int64?) {
+        self.message = String(message.prefix(160))
+        self.diagnostic = String(diagnostic.prefix(160))
+        self.costInUSDTicks = costInUSDTicks
+    }
+
+    public var errorDescription: String? {
+        "\(message) · \(diagnostic)"
     }
 }
 
@@ -141,11 +151,20 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
         } catch {
             throw XAIResponsesError.malformedResponse
         }
+        let diagnostic = Self.diagnosticSummary(envelope)
         guard envelope.status == "completed" else {
-            throw XAIResponsesError.incompleteResponse
+            throw XAIResponseRejectedError(
+                message: "xAI stopped before writing the X News brief. No cache was changed.",
+                diagnostic: diagnostic,
+                costInUSDTicks: envelope.usage?.costInUSDTicks
+            )
         }
         guard envelope.output.contains(where: { $0.type == "x_search_call" && $0.status == "completed" }) else {
-            throw XAIResponsesError.searchNotPerformed
+            throw XAIResponseRejectedError(
+                message: "xAI returned no completed X search. No cache was changed.",
+                diagnostic: diagnostic,
+                costInUSDTicks: envelope.usage?.costInUSDTicks
+            )
         }
         guard let text = envelope.output
             .first(where: { $0.type == "message" })?
@@ -153,10 +172,23 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             .first(where: { $0.type == "output_text" })?
             .text
         else {
-            throw XAIResponsesError.incompleteResponse
+            throw XAIResponseRejectedError(
+                message: "xAI searched X but did not write the final brief. No cache was changed.",
+                diagnostic: diagnostic,
+                costInUSDTicks: envelope.usage?.costInUSDTicks
+            )
         }
 
-        let candidate = try GrokXNewsParser.parse(feedText: text, now: now)
+        let candidate: XNewsFeed
+        do {
+            candidate = try GrokXNewsParser.parse(feedText: text, now: now)
+        } catch {
+            throw XAIResponseRejectedError(
+                message: Self.rejectedBriefMessage(error),
+                diagnostic: diagnostic,
+                costInUSDTicks: envelope.usage?.costInUSDTicks
+            )
+        }
         let feed = try XNewsRollingFeedMerger.merge(
             candidate: candidate,
             previous: try? cache.loadIncludingStale(),
@@ -180,7 +212,7 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             ]],
             "tool_choice": "auto",
             "parallel_tool_calls": false,
-            "max_turns": 3,
+            "max_turns": 8,
             "max_output_tokens": 12_000,
             "reasoning": ["effort": "low"],
             "store": false,
@@ -204,6 +236,36 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter.string(from: date)
+    }
+
+    private static func diagnosticSummary(_ envelope: ResponsesEnvelope) -> String {
+        let status = diagnosticToken(envelope.status)
+        let items = envelope.output.prefix(8).map { item in
+            let type = diagnosticToken(item.type)
+            guard let itemStatus = item.status else { return type }
+            return "\(type):\(diagnosticToken(itemStatus))"
+        }
+        let output = items.isEmpty ? "none" : items.joined(separator: ",")
+        return "status=\(status); output=\(output)"
+    }
+
+    private static func diagnosticToken(_ value: String) -> String {
+        let allowed = value.unicodeScalars.filter {
+            CharacterSet.alphanumerics.contains($0) || $0 == "_" || $0 == "-"
+        }
+        let token = String(String.UnicodeScalarView(allowed)).prefix(32)
+        return token.isEmpty ? "unknown" : String(token)
+    }
+
+    private static func rejectedBriefMessage(_ error: Error) -> String {
+        switch error as? GrokXNewsError {
+        case let .invalidFeed(reason):
+            "xAI returned an unusable X News brief: \(reason). No cache was changed."
+        case .malformedFeed, .malformedEnvelope:
+            "xAI returned no readable structured X News brief. No cache was changed."
+        default:
+            "xAI returned an unusable X News brief. No cache was changed."
+        }
     }
 
     private static func validate(statusCode: Int, data: Data) throws {

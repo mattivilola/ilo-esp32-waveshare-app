@@ -585,6 +585,11 @@ struct MenuDashboardView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+
+            XNewsFeedPreview(
+                feed: store.xNewsCachedFeed,
+                isCurrent: store.xNewsCacheIsCurrent
+            )
         }
         .padding(.vertical, 10)
     }
@@ -742,7 +747,7 @@ struct MenuDashboardView: View {
         case .updated: "Updated"
         case .disabled: "Off"
         case .cooldown: "Cooldown"
-        case .failed: "Needs attention"
+        case .failed: "Refresh failed"
         }
     }
 
@@ -799,6 +804,9 @@ struct MenuDashboardView: View {
     private var xNewsStatusDetail: String {
         guard store.xNewsStatus.apiKeyConfigured else {
             return "Add an xAI API key below. Until then, X News stays hidden on the board."
+        }
+        if store.xNewsStatus.isEnabled, !store.xNewsCacheIsCurrent {
+            return "Enabled, but there is no current accepted feed. The board hides X News until a refresh succeeds."
         }
         return switch store.xNewsStatus.cadence {
         case .off: "Off by default; the X News screen is hidden on the board."

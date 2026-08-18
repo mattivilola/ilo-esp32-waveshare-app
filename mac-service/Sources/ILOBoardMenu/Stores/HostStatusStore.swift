@@ -33,6 +33,8 @@ final class HostStatusStore: ObservableObject {
     @Published private(set) var xNewsRefreshActivity: XNewsRefreshActivity = .idle
     @Published private(set) var xNewsCachedStoryCount = 0
     @Published private(set) var xNewsCacheGeneratedAt: Date?
+    @Published private(set) var xNewsCachedFeed: XNewsFeed?
+    @Published private(set) var xNewsCacheIsCurrent = false
     @Published private(set) var xNewsNotice: String?
     @Published private(set) var pairingAuthorizationNotice: String?
     @Published private(set) var usbPresence: USBBoardPresence = .disconnected
@@ -102,9 +104,17 @@ final class HostStatusStore: ObservableObject {
         xNewsMonitorTask = Task { [weak self, xNewsRefreshCoordinator] in
             while !Task.isCancelled {
                 let activity = await xNewsRefreshCoordinator.activity()
+                let failureDescription: String? = if case .failed = activity {
+                    await xNewsRefreshCoordinator.failureDescription()
+                } else {
+                    nil
+                }
                 guard let self else { return }
                 self.xNewsRefreshActivity = activity
                 self.refreshXNewsStatus()
+                if let failureDescription {
+                    self.xNewsNotice = failureDescription
+                }
                 try? await Task.sleep(for: .seconds(1))
             }
         }
@@ -222,12 +232,16 @@ final class HostStatusStore: ObservableObject {
 
     func refreshXNewsStatus() {
         xNewsStatus = xNewsFeatureController.status()
-        if let feed = try? xNewsFeedCache.load() {
+        if let feed = try? xNewsFeedCache.loadIncludingStale() {
+            xNewsCachedFeed = feed
             xNewsCachedStoryCount = feed.stories.count
             xNewsCacheGeneratedAt = feed.generatedAt
+            xNewsCacheIsCurrent = (try? xNewsFeedCache.load()) != nil
         } else {
+            xNewsCachedFeed = nil
             xNewsCachedStoryCount = 0
             xNewsCacheGeneratedAt = nil
+            xNewsCacheIsCurrent = false
         }
     }
 

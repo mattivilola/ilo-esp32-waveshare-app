@@ -1,6 +1,9 @@
 import Darwin
 import BoardProtocol
 import Foundation
+import OSLog
+
+private let xNewsRefreshLogger = Logger(subsystem: "com.iloapps.iloboard", category: "XNews")
 
 private func writeXNewsData(_ data: Data, to url: URL) throws {
     let target = url.standardizedFileURL.path
@@ -840,6 +843,20 @@ public actor XNewsRefreshCoordinator {
             lastActivity = .updated(at: Date())
             return .updated
         } catch {
+            let current = settingsStore.load()
+            let rejection = error as? XAIResponseRejectedError
+            let reportedCost = rejection?.costInUSDTicks
+            if let rejection {
+                xNewsRefreshLogger.error("xAI response rejected: \(rejection.diagnostic, privacy: .public)")
+            }
+            if reportedCost != nil {
+                try? settingsStore.save(XNewsRefreshSettings(
+                    cadence: current.cadence,
+                    consentVersion: current.consentVersion,
+                    lastAttemptAt: current.lastAttemptAt,
+                    lastCostInUSDTicks: reportedCost
+                ))
+            }
             lastActivity = .failed(at: Date())
             lastFailureDescription = Self.safeFailureDescription(error)
             return .failed
@@ -896,9 +913,13 @@ public actor XNewsRefreshCoordinator {
                     failureDescription: nil
                 )
             } catch {
+                if let rejection = error as? XAIResponseRejectedError {
+                    xNewsRefreshLogger.error("xAI response rejected: \(rejection.diagnostic, privacy: .public)")
+                }
                 await self?.refreshFinished(
                     .failed(at: Date()),
-                    costInUSDTicks: settings.lastCostInUSDTicks,
+                    costInUSDTicks: (error as? XAIResponseRejectedError)?.costInUSDTicks
+                        ?? settings.lastCostInUSDTicks,
                     failureDescription: Self.safeFailureDescription(error)
                 )
             }
@@ -914,6 +935,14 @@ public actor XNewsRefreshCoordinator {
         lastActivity = activity
         lastFailureDescription = failureDescription
         if case .updated = activity {
+            let current = settingsStore.load()
+            try? settingsStore.save(XNewsRefreshSettings(
+                cadence: current.cadence,
+                consentVersion: current.consentVersion,
+                lastAttemptAt: current.lastAttemptAt,
+                lastCostInUSDTicks: costInUSDTicks
+            ))
+        } else if case .failed = activity, costInUSDTicks != nil {
             let current = settingsStore.load()
             try? settingsStore.save(XNewsRefreshSettings(
                 cadence: current.cadence,
