@@ -15,7 +15,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     }
 }
 
-@Test func responsesAPIRequiresXSearchAllowsEightTurnsAndCachesValidatedFeed() async throws {
+@Test func responsesAPIRequiresXSearchAllowsFourTurnsAndCachesValidatedFeed() async throws {
     let cacheURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("ilo-board-xai-responses-\(UUID().uuidString).json")
     defer { try? FileManager.default.removeItem(at: cacheURL) }
@@ -42,7 +42,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(json["store"] as? Bool == false)
     #expect(json["tool_choice"] as? String == "required")
-    #expect(json["max_turns"] as? Int == 8)
+    #expect(json["max_turns"] as? Int == 4)
     let reasoning = try #require(json["reasoning"] as? [String: Any])
     #expect(reasoning["effort"] as? String == "low")
     let tools = try #require(json["tools"] as? [[String: Any]])
@@ -55,6 +55,19 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     let properties = try #require(schema["properties"] as? [String: Any])
     let topics = try #require(properties["topics"] as? [String: Any])
     #expect(topics["minItems"] as? Int == 0)
+}
+
+@Test func responsesAPIEnforcesAHardDeadline() async throws {
+    let source = XAIResponsesXNewsSource(
+        cache: XNewsFeedCache(url: URL(fileURLWithPath: "/tmp/not-used-xai-timeout-news.json")),
+        apiKeyProvider: StaticXAIKeyProvider(),
+        transport: SuspendedXAITransport(),
+        hardDeadline: .milliseconds(10)
+    )
+
+    await #expect(throws: XAIResponsesError.timedOut) {
+        try await source.refresh(now: apiReferenceNow)
+    }
 }
 
 @Test func responsesAPIReturnsActionableFailureWhenToolLoopDoesNotFinish() async throws {
@@ -208,6 +221,13 @@ private actor CapturingXAITransport: XAIHTTPTransport {
 
     func capturedRequest() -> URLRequest? {
         request
+    }
+}
+
+private struct SuspendedXAITransport: XAIHTTPTransport {
+    func send(_: URLRequest) async throws -> XAIHTTPResponse {
+        try await Task.sleep(for: .seconds(60))
+        throw XAIResponsesError.networkFailure
     }
 }
 

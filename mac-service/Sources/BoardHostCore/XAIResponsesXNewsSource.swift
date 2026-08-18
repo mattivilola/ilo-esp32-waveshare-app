@@ -8,6 +8,7 @@ public enum XAIResponsesError: Error, LocalizedError, Sendable {
     case requestRejected
     case serviceUnavailable
     case networkFailure
+    case timedOut
     case malformedResponse
 
     public var errorDescription: String? {
@@ -26,6 +27,8 @@ public enum XAIResponsesError: Error, LocalizedError, Sendable {
             "The xAI API is temporarily unavailable."
         case .networkFailure:
             "The Mac could not reach the xAI API."
+        case .timedOut:
+            "xAI did not finish the X News search within six minutes. Try again later."
         case .malformedResponse:
             "xAI returned an unreadable X News response."
         }
@@ -77,12 +80,13 @@ public protocol XAIHTTPTransport: Sendable {
 }
 
 public struct URLSessionXAIHTTPTransport: XAIHTTPTransport, Sendable {
+    public static let timeout: TimeInterval = 6 * 60
     private let session: URLSession
 
     public init() {
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 180
-        configuration.timeoutIntervalForResource = 180
+        configuration.timeoutIntervalForRequest = Self.timeout
+        configuration.timeoutIntervalForResource = Self.timeout
         configuration.httpMaximumConnectionsPerHost = 1
         session = URLSession(configuration: configuration)
     }
@@ -104,17 +108,20 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
     private let apiKeyProvider: any XAIAPIKeyProviding
     private let transport: any XAIHTTPTransport
     private let endpoint: URL
+    private let hardDeadline: Duration
 
     public init(
         cache: XNewsFeedCache = XNewsFeedCache(),
         apiKeyProvider: any XAIAPIKeyProviding = XAIAPIKeyStore(),
         transport: any XAIHTTPTransport = URLSessionXAIHTTPTransport(),
-        endpoint: URL = Self.defaultEndpoint
+        endpoint: URL = Self.defaultEndpoint,
+        hardDeadline: Duration = .seconds(URLSessionXAIHTTPTransport.timeout)
     ) {
         self.cache = cache
         self.apiKeyProvider = apiKeyProvider
         self.transport = transport
         self.endpoint = endpoint
+        self.hardDeadline = hardDeadline
     }
 
     public func refresh(now: Date = Date()) async throws -> XNewsFetchResult {
@@ -127,14 +134,14 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
 
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
-        request.timeoutInterval = 180
+        request.timeoutInterval = URLSessionXAIHTTPTransport.timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.httpBody = try requestBody(now: now)
 
         let response: XAIHTTPResponse
         do {
-            response = try await transport.send(request)
+            response = try await sendWithHardDeadline(request)
         } catch let error as XAIResponsesError {
             throw error
         } catch {
@@ -212,7 +219,7 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             ]],
             "tool_choice": "required",
             "parallel_tool_calls": false,
-            "max_turns": 8,
+            "max_turns": 4,
             "max_output_tokens": 12_000,
             "reasoning": ["effort": "low"],
             "store": false,
@@ -227,6 +234,25 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             ],
         ]
         return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+    }
+
+    private func sendWithHardDeadline(_ request: URLRequest) async throws -> XAIHTTPResponse {
+        let transport = self.transport
+        let hardDeadline = self.hardDeadline
+        return try await withThrowingTaskGroup(of: XAIHTTPResponse.self) { group in
+            group.addTask {
+                try await transport.send(request)
+            }
+            group.addTask {
+                try await Task.sleep(for: hardDeadline)
+                throw XAIResponsesError.timedOut
+            }
+            defer { group.cancelAll() }
+            guard let response = try await group.next() else {
+                throw XAIResponsesError.timedOut
+            }
+            return response
+        }
     }
 
     private static func dayString(_ date: Date) -> String {

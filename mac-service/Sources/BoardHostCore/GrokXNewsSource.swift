@@ -242,7 +242,7 @@ public enum GrokXNewsContract {
         - generated_at: \(until)
 
         Hard rules:
-        1) Use the provided X search tool for recent AI and humanoid/robotics posts in this window. Never answer from model memory alone.
+        1) Use the provided X search tool for recent AI and humanoid/robotics posts in this window. Never answer from model memory alone. Use the fewest search turns needed, then write the final JSON immediately.
         2) Drop every post with a timestamp before \(since) or after \(until).
         3) Deduplicate stories. Skip items widely covered before this window unless the cited post contains a new development.
         4) Prefer the original poster, but do not spend turns independently verifying or cross-checking the claim.
