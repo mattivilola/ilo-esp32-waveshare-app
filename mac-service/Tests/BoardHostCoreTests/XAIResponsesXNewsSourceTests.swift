@@ -15,7 +15,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     }
 }
 
-@Test func responsesAPIRequiresXSearchAllowsFourTurnsAndCachesValidatedFeed() async throws {
+@Test func responsesAPIRequiresXSearchAllowsFiveParallelTurnsAndCachesValidatedFeed() async throws {
     let cacheURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("ilo-board-xai-responses-\(UUID().uuidString).json")
     defer { try? FileManager.default.removeItem(at: cacheURL) }
@@ -42,19 +42,17 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(json["store"] as? Bool == false)
     #expect(json["tool_choice"] as? String == "required")
-    #expect(json["max_turns"] as? Int == 4)
+    #expect(json["parallel_tool_calls"] as? Bool == true)
+    #expect(json["max_turns"] as? Int == 5)
     let reasoning = try #require(json["reasoning"] as? [String: Any])
     #expect(reasoning["effort"] as? String == "low")
     let tools = try #require(json["tools"] as? [[String: Any]])
     #expect(tools.count == 1)
     #expect(tools[0]["type"] as? String == "x_search")
-    let text = try #require(json["text"] as? [String: Any])
-    let format = try #require(text["format"] as? [String: Any])
-    #expect(format["strict"] as? Bool == true)
-    let schema = try #require(format["schema"] as? [String: Any])
-    let properties = try #require(schema["properties"] as? [String: Any])
-    let topics = try #require(properties["topics"] as? [String: Any])
-    #expect(topics["minItems"] as? Int == 0)
+    #expect(json["text"] == nil)
+    let input = try #require(json["input"] as? String)
+    #expect(input.contains("The one JSON object must conform exactly to this schema:"))
+    #expect(input.contains(GrokXNewsContract.jsonSchema))
 }
 
 @Test func responsesAPIEnforcesAHardDeadline() async throws {

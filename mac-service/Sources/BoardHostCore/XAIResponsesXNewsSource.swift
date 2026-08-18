@@ -206,8 +206,6 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
     }
 
     private func requestBody(now: Date) throws -> Data {
-        let schemaData = Data(GrokXNewsContract.jsonSchema.utf8)
-        let schema = try JSONSerialization.jsonObject(with: schemaData)
         let since = now.addingTimeInterval(-GrokXNewsContract.maximumAge)
         let body: [String: Any] = [
             "model": Self.model,
@@ -218,20 +216,12 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
                 "to_date": Self.dayString(now),
             ]],
             "tool_choice": "required",
-            "parallel_tool_calls": false,
-            "max_turns": 4,
+            "parallel_tool_calls": true,
+            "max_turns": 5,
             "max_output_tokens": 12_000,
             "reasoning": ["effort": "low"],
             "store": false,
             "include": ["no_inline_citations"],
-            "text": [
-                "format": [
-                    "type": "json_schema",
-                    "name": "ilo_board_x_news",
-                    "schema": schema,
-                    "strict": true,
-                ],
-            ],
         ]
         return try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
     }

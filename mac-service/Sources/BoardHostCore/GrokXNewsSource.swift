@@ -252,6 +252,9 @@ public enum GrokXNewsContract {
         8) Include 1 to 3 sources per topic. Put the primary post first. Every post_url must be a direct URL shaped https://x.com/<handle>/status/<numeric-id>.
         9) Return finished news only. Never include search progress, missing-source notes, generic placeholders, or remaining-work commentary as a topic.
         Profile pages, home pages, search pages, missing citations, invented URLs, and values such as "Placeholder" are forbidden.
+
+        The one JSON object must conform exactly to this schema:
+        \(jsonSchema)
         """
     }
 
