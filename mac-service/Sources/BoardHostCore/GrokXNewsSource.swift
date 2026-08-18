@@ -242,14 +242,14 @@ public enum GrokXNewsContract {
         - generated_at: \(until)
 
         Hard rules:
-        1) Use the provided X search tool for recent AI and humanoid/robotics posts in this window. Never answer from model memory alone. Use the fewest search turns needed, then write the final JSON immediately.
+        1) Use the provided X search tool for recent AI and humanoid/robotics posts in this window. Never answer from model memory alone. Make at most two parallel searches total: one for AI and one for humanoid/robotics. Then write the final JSON immediately.
         2) Drop every post with a timestamp before \(since) or after \(until).
         3) Deduplicate stories. Skip items widely covered before this window unless the cited post contains a new development.
         4) Prefer the original poster, but do not spend turns independently verifying or cross-checking the claim.
         5) Return exactly one JSON object and no markdown or commentary.
         6) Aim for 10 to 15 unique topics. Return fewer only when fewer relevant direct posts exist. If X search is unavailable or fewer than 2 usable direct posts exist, return topics as an empty array instead of placeholders. Category must be exactly AI or Robotics and confidence exactly high or medium.
         7) Include the complete available text of the primary X post in post_text, bounded to \(xNewsMaximumPostCharacters) characters.
-        8) Include 1 to 3 sources per topic. Put the primary post first. Every post_url must be a direct URL shaped https://x.com/<handle>/status/<numeric-id>.
+        8) Prefer exactly one primary source per topic; use a second or third source only when the same X thread is required. Put the primary post first. Every post_url must be a direct URL shaped https://x.com/<handle>/status/<numeric-id>.
         9) Return finished news only. Never include search progress, missing-source notes, generic placeholders, or remaining-work commentary as a topic.
         Profile pages, home pages, search pages, missing citations, invented URLs, and values such as "Placeholder" are forbidden.
 

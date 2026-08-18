@@ -15,7 +15,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     }
 }
 
-@Test func responsesAPIRequiresXSearchAllowsFiveParallelTurnsAndCachesValidatedFeed() async throws {
+@Test func responsesAPIRequiresXSearchAllowsThreeParallelTurnsAndCachesValidatedFeed() async throws {
     let cacheURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("ilo-board-xai-responses-\(UUID().uuidString).json")
     defer { try? FileManager.default.removeItem(at: cacheURL) }
@@ -43,7 +43,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     #expect(json["store"] as? Bool == false)
     #expect(json["tool_choice"] as? String == "required")
     #expect(json["parallel_tool_calls"] as? Bool == true)
-    #expect(json["max_turns"] as? Int == 5)
+    #expect(json["max_turns"] as? Int == 3)
     let reasoning = try #require(json["reasoning"] as? [String: Any])
     #expect(reasoning["effort"] as? String == "low")
     let tools = try #require(json["tools"] as? [[String: Any]])
@@ -51,6 +51,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     #expect(tools[0]["type"] as? String == "x_search")
     #expect(json["text"] == nil)
     let input = try #require(json["input"] as? String)
+    #expect(input.contains("at most two parallel searches total"))
     #expect(input.contains("The one JSON object must conform exactly to this schema:"))
     #expect(input.contains(GrokXNewsContract.jsonSchema))
 }

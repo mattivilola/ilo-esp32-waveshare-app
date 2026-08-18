@@ -28,7 +28,7 @@ public enum XAIResponsesError: Error, LocalizedError, Sendable {
         case .networkFailure:
             "The Mac could not reach the xAI API."
         case .timedOut:
-            "xAI did not finish the X News search within six minutes. Try again later."
+            "xAI did not finish the X News search within ten minutes. Try again later."
         case .malformedResponse:
             "xAI returned an unreadable X News response."
         }
@@ -80,7 +80,7 @@ public protocol XAIHTTPTransport: Sendable {
 }
 
 public struct URLSessionXAIHTTPTransport: XAIHTTPTransport, Sendable {
-    public static let timeout: TimeInterval = 6 * 60
+    public static let timeout: TimeInterval = 10 * 60
     private let session: URLSession
 
     public init() {
@@ -92,11 +92,48 @@ public struct URLSessionXAIHTTPTransport: XAIHTTPTransport, Sendable {
     }
 
     public func send(_ request: URLRequest) async throws -> XAIHTTPResponse {
-        let (data, response) = try await session.data(for: request)
-        guard let response = response as? HTTPURLResponse else {
-            throw XAIResponsesError.malformedResponse
+        let taskBox = URLSessionTaskBox()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let task = session.dataTask(with: request) { data, response, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                        return
+                    }
+                    guard let data, let response = response as? HTTPURLResponse else {
+                        continuation.resume(throwing: XAIResponsesError.malformedResponse)
+                        return
+                    }
+                    continuation.resume(returning: XAIHTTPResponse(data: data, statusCode: response.statusCode))
+                }
+                taskBox.store(task)
+                task.resume()
+            }
+        } onCancel: {
+            taskBox.cancel()
         }
-        return XAIHTTPResponse(data: data, statusCode: response.statusCode)
+    }
+}
+
+private final class URLSessionTaskBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionDataTask?
+    private var isCancelled = false
+
+    func store(_ task: URLSessionDataTask) {
+        lock.lock()
+        self.task = task
+        let shouldCancel = isCancelled
+        lock.unlock()
+        if shouldCancel { task.cancel() }
+    }
+
+    func cancel() {
+        lock.lock()
+        isCancelled = true
+        let task = self.task
+        lock.unlock()
+        task?.cancel()
     }
 }
 
@@ -217,7 +254,7 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             ]],
             "tool_choice": "required",
             "parallel_tool_calls": true,
-            "max_turns": 5,
+            "max_turns": 3,
             "max_output_tokens": 12_000,
             "reasoning": ["effort": "low"],
             "store": false,
