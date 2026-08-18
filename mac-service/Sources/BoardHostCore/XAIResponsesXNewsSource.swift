@@ -210,7 +210,7 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
                 "from_date": Self.dayString(since),
                 "to_date": Self.dayString(now),
             ]],
-            "tool_choice": "auto",
+            "tool_choice": "required",
             "parallel_tool_calls": false,
             "max_turns": 8,
             "max_output_tokens": 12_000,

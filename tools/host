@@ -63,8 +63,8 @@ def screenshot(arguments: argparse.Namespace) -> None:
 
 def x_news(arguments: argparse.Namespace) -> None:
     command = ["run", "ilo-board-host", "x-news", arguments.action]
-    if arguments.allow_grok_tools:
-        command.append("--allow-grok-tools")
+    if arguments.allow_paid_api:
+        command.append("--allow-paid-api")
     if arguments.twice_daily:
         command.append("--twice-daily")
     run(command)
@@ -100,9 +100,11 @@ def parser() -> argparse.ArgumentParser:
         if name == "x-news":
             command.add_argument("action", choices=("status", "refresh", "enable", "disable"))
             command.add_argument(
+                "--allow-paid-api",
                 "--allow-grok-tools",
+                dest="allow_paid_api",
                 action="store_true",
-                help="explicitly allow the authenticated Grok CLI to search X for this refresh",
+                help="explicitly allow the separately billed xAI API request",
             )
             command.add_argument(
                 "--twice-daily",
