@@ -81,21 +81,20 @@ public protocol XAIHTTPTransport: Sendable {
 
 public struct URLSessionXAIHTTPTransport: XAIHTTPTransport, Sendable {
     public static let timeout: TimeInterval = 10 * 60
-    private let session: URLSession
 
-    public init() {
+    public init() {}
+
+    public func send(_ request: URLRequest) async throws -> XAIHTTPResponse {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = Self.timeout
         configuration.timeoutIntervalForResource = Self.timeout
         configuration.httpMaximumConnectionsPerHost = 1
-        session = URLSession(configuration: configuration)
-    }
-
-    public func send(_ request: URLRequest) async throws -> XAIHTTPResponse {
-        let taskBox = URLSessionTaskBox()
+        let session = URLSession(configuration: configuration)
+        let taskBox = URLSessionTaskBox(session: session)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let task = session.dataTask(with: request) { data, response, error in
+                    defer { session.finishTasksAndInvalidate() }
                     if let error {
                         continuation.resume(throwing: error)
                         return
@@ -117,8 +116,13 @@ public struct URLSessionXAIHTTPTransport: XAIHTTPTransport, Sendable {
 
 private final class URLSessionTaskBox: @unchecked Sendable {
     private let lock = NSLock()
+    private let session: URLSession
     private var task: URLSessionDataTask?
     private var isCancelled = false
+
+    init(session: URLSession) {
+        self.session = session
+    }
 
     func store(_ task: URLSessionDataTask) {
         lock.lock()
@@ -134,6 +138,7 @@ private final class URLSessionTaskBox: @unchecked Sendable {
         let task = self.task
         lock.unlock()
         task?.cancel()
+        session.invalidateAndCancel()
     }
 }
 

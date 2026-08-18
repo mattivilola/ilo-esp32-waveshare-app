@@ -16,6 +16,7 @@ Notable ILO Board macOS companion changes are documented here.
 - Cancel the underlying xAI network task cleanly if a refresh has not completed within ten minutes
 - Avoid strict-output mode competing with xAI's server-side X search while retaining the same local schema validation
 - Return from the hard refresh deadline immediately even if URL-session cancellation cleanup is delayed
+- Isolate each refresh in its own URL session so timeout cancellation also terminates the underlying network operation
 
 
 ## 0.1.13 - 2026-08-17
