@@ -2,6 +2,19 @@
 
 Notable ILO Board macOS companion changes are documented here.
 
+## 0.1.14 - 2026-08-18
+
+### Added
+- Preview the board's cached X News feed in the Mac companion with topic and confidence chips
+
+### Changed
+- Require xAI to complete an X search and allow enough turns to produce the 10-15-post brief
+
+### Fixed
+- Show safe structural refresh diagnostics and the reported cost when xAI does not return a usable brief
+- Distinguish an expired cached feed from current news that is eligible to sync to the board
+
+
 ## 0.1.13 - 2026-08-17
 
 ### Changed
