@@ -15,7 +15,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     }
 }
 
-@Test func responsesAPIRequiresXSearchAllowsThreeParallelTurnsAndCachesValidatedFeed() async throws {
+@Test func responsesAPIAutomaticallySearchesWithinThreeParallelTurnsAndCachesValidatedFeed() async throws {
     let cacheURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("ilo-board-xai-responses-\(UUID().uuidString).json")
     defer { try? FileManager.default.removeItem(at: cacheURL) }
@@ -41,7 +41,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     let body = try #require(request.httpBody)
     let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
     #expect(json["store"] as? Bool == false)
-    #expect(json["tool_choice"] as? String == "required")
+    #expect(json["tool_choice"] as? String == "auto")
     #expect(json["parallel_tool_calls"] as? Bool == true)
     #expect(json["max_turns"] as? Int == 3)
     let reasoning = try #require(json["reasoning"] as? [String: Any])

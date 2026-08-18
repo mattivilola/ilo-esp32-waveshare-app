@@ -252,7 +252,7 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
                 "from_date": Self.dayString(since),
                 "to_date": Self.dayString(now),
             ]],
-            "tool_choice": "required",
+            "tool_choice": "auto",
             "parallel_tool_calls": true,
             "max_turns": 3,
             "max_output_tokens": 12_000,
@@ -266,19 +266,24 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
     private func sendWithHardDeadline(_ request: URLRequest) async throws -> XAIHTTPResponse {
         let transport = self.transport
         let hardDeadline = self.hardDeadline
-        return try await withThrowingTaskGroup(of: XAIHTTPResponse.self) { group in
-            group.addTask {
-                try await transport.send(request)
+        return try await withCheckedThrowingContinuation { continuation in
+            let race = XAIHTTPResponseRace(continuation: continuation)
+            let responseTask = Task {
+                do {
+                    race.finish(.success(try await transport.send(request)))
+                } catch {
+                    race.finish(.failure(error))
+                }
             }
-            group.addTask {
-                try await Task.sleep(for: hardDeadline)
-                throw XAIResponsesError.timedOut
+            let timeoutTask = Task {
+                do {
+                    try await Task.sleep(for: hardDeadline)
+                    race.finish(.failure(XAIResponsesError.timedOut))
+                } catch {
+                    // The response won the race and cancelled this timer.
+                }
             }
-            defer { group.cancelAll() }
-            guard let response = try await group.next() else {
-                throw XAIResponsesError.timedOut
-            }
-            return response
+            race.install(responseTask: responseTask, timeoutTask: timeoutTask)
         }
     }
 
@@ -340,6 +345,48 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
         default:
             throw XAIResponsesError.requestRejected
         }
+    }
+}
+
+private final class XAIHTTPResponseRace: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<XAIHTTPResponse, any Error>?
+    private var responseTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
+
+    init(continuation: CheckedContinuation<XAIHTTPResponse, any Error>) {
+        self.continuation = continuation
+    }
+
+    func install(responseTask: Task<Void, Never>, timeoutTask: Task<Void, Never>) {
+        lock.lock()
+        guard continuation != nil else {
+            lock.unlock()
+            responseTask.cancel()
+            timeoutTask.cancel()
+            return
+        }
+        self.responseTask = responseTask
+        self.timeoutTask = timeoutTask
+        lock.unlock()
+    }
+
+    func finish(_ result: Result<XAIHTTPResponse, any Error>) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        let responseTask = self.responseTask
+        let timeoutTask = self.timeoutTask
+        self.responseTask = nil
+        self.timeoutTask = nil
+        lock.unlock()
+
+        responseTask?.cancel()
+        timeoutTask?.cancel()
+        continuation.resume(with: result)
     }
 }
 
