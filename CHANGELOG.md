@@ -8,7 +8,8 @@ Notable ILO Board macOS companion changes are documented here.
 - Preview the board's cached X News feed in the Mac companion with topic and confidence chips
 
 ### Changed
-- Allow xAI to finish after at most two parallel X searches within three balanced turns, while rejecting every response without a completed search
+- Run separate bounded AI and Robotics searches concurrently, then merge up to fifteen locally validated posts into one cache
+- Keep valid news from one category when the other search explicitly finds no usable posts
 
 ### Fixed
 - Show safe structural refresh diagnostics and the reported cost when xAI does not return a usable brief
@@ -17,6 +18,7 @@ Notable ILO Board macOS companion changes are documented here.
 - Avoid strict-output mode competing with xAI's server-side X search while retaining the same local schema validation
 - Return from the hard refresh deadline immediately even if URL-session cancellation cleanup is delayed
 - Isolate each refresh in its own URL session so timeout cancellation also terminates the underlying network operation
+- Recognize xAI's current successful server-side X Search usage metadata while retaining compatibility with earlier response shapes
 
 
 ## 0.1.13 - 2026-08-17
