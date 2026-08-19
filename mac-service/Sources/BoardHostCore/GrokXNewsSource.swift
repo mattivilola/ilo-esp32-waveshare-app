@@ -258,6 +258,33 @@ public enum GrokXNewsContract {
         """
     }
 
+    public static func prompt(now: Date, category: XNewsCategory) -> String {
+        let until = formatDate(now)
+        let since = formatDate(now.addingTimeInterval(-maximumAge))
+        let subject = category == .ai ? "AI" : "humanoid and robotics"
+        return """
+        X news for \(subject) ONLY in this UTC window:
+        - since: \(since)
+        - until: \(until)
+        - generated_at: \(until)
+
+        Hard rules:
+        1) Use the provided X search tool once for recent \(subject) posts in this window. Never answer from model memory alone. After that search, write the final JSON immediately.
+        2) Drop every post with a timestamp before \(since) or after \(until).
+        3) Deduplicate stories. Skip items widely covered before this window unless the cited post contains a new development.
+        4) Prefer the original poster, but do not spend turns independently verifying or cross-checking the claim.
+        5) Return exactly one JSON object and no markdown or commentary.
+        6) Aim for 5 to 8 unique topics. Return fewer only when fewer relevant direct posts exist. If X search is unavailable or fewer than 2 usable direct posts exist, return topics as an empty array instead of placeholders. Category must be exactly \(category.rawValue) and confidence exactly high or medium.
+        7) Include the complete available text of the primary X post in post_text, bounded to \(xNewsMaximumPostCharacters) characters.
+        8) Prefer exactly one primary source per topic; use a second or third source only when the same X thread is required. Put the primary post first. Every post_url must be a direct URL shaped https://x.com/<handle>/status/<numeric-id>.
+        9) Return finished news only. Never include search progress, missing-source notes, generic placeholders, or remaining-work commentary as a topic.
+        Profile pages, home pages, search pages, missing citations, invented URLs, and values such as "Placeholder" are forbidden.
+
+        The one JSON object must conform exactly to this schema:
+        \(jsonSchema)
+        """
+    }
+
     public static let jsonSchema = #"{"type":"object","additionalProperties":false,"required":["window","generated_at","topics"],"properties":{"window":{"type":"object","additionalProperties":false,"required":["since","until"],"properties":{"since":{"type":"string"},"until":{"type":"string"}}},"generated_at":{"type":"string"},"topics":{"type":"array","minItems":0,"maxItems":15,"items":{"type":"object","additionalProperties":false,"required":["category","headline","summary","post_text","confidence","posted_at","sources"],"properties":{"category":{"enum":["AI","Robotics"]},"headline":{"type":"string","minLength":1,"maxLength":70},"summary":{"type":"string","minLength":1,"maxLength":220},"post_text":{"type":"string","minLength":1,"maxLength":1800},"confidence":{"enum":["high","medium"]},"posted_at":{"type":"string"},"sources":{"type":"array","minItems":1,"maxItems":3,"items":{"type":"object","additionalProperties":false,"required":["handle","post_url"],"properties":{"handle":{"type":"string","pattern":"^@[A-Za-z0-9_]{1,15}$"},"post_url":{"type":"string","pattern":"^https://x[.]com/[A-Za-z0-9_]{1,15}/status/[0-9]+$"}}}}}}}}}"#
 
     public static func processArguments(now: Date) -> [String] {

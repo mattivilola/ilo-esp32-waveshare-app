@@ -174,12 +174,98 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             throw XAIResponsesError.missingAPIKey
         }
 
+        let outcomes = await withTaskGroup(of: CategoryOutcome.self, returning: [CategoryOutcome].self) { group in
+            for category in XNewsCategory.allCases {
+                group.addTask {
+                    do {
+                        return .success(try await fetch(category: category, apiKey: apiKey, now: now))
+                    } catch let error as XAIResponseRejectedError {
+                        return .failure(category, .rejected(error))
+                    } catch let error as XAIResponsesError {
+                        return .failure(category, .response(error))
+                    } catch {
+                        return .failure(category, .response(.malformedResponse))
+                    }
+                }
+            }
+            var values = [CategoryOutcome]()
+            for await outcome in group {
+                values.append(outcome)
+            }
+            return values.sorted { Self.categoryIndex($0.category) < Self.categoryIndex($1.category) }
+        }
+
+        let totalCost = Self.exactTotalCost(outcomes)
+        let failures = outcomes.compactMap { outcome -> (XNewsCategory, CategoryFailure)? in
+            guard case let .failure(category, failure) = outcome else { return nil }
+            return (category, failure)
+        }
+        if !failures.isEmpty {
+            if failures.allSatisfy({ if case .response = $0.1 { true } else { false } }),
+               case let .response(error) = failures[0].1 {
+                throw error
+            }
+            let labels = failures.map { $0.0.rawValue }.joined(separator: " + ")
+            let rejectionMessages = failures.compactMap { _, failure -> String? in
+                guard case let .rejected(error) = failure else { return nil }
+                return error.message
+            }
+            let message: String
+            if let first = rejectionMessages.first,
+               rejectionMessages.count == failures.count,
+               rejectionMessages.allSatisfy({ $0 == first }) {
+                message = "\(labels): \(first)"
+            } else {
+                message = "\(labels) X search failed. No cache was changed."
+            }
+            let diagnostics = failures.map { category, failure in
+                switch failure {
+                case let .rejected(error):
+                    "\(category.rawValue):\(error.diagnostic)"
+                case let .response(error):
+                    "\(category.rawValue):\(Self.diagnosticToken(String(describing: error)))"
+                }
+            }.joined(separator: "; ")
+            throw XAIResponseRejectedError(
+                message: message,
+                diagnostic: diagnostics,
+                costInUSDTicks: totalCost
+            )
+        }
+
+        let categoryFeeds = outcomes.compactMap { outcome -> CategoryFetch? in
+            guard case let .success(value) = outcome else { return nil }
+            return value
+        }
+        let candidate = XNewsFeed(
+            generatedAt: now,
+            stories: categoryFeeds.flatMap(\.feed.stories)
+        )
+        let feed: XNewsFeed
+        do {
+            feed = try XNewsRollingFeedMerger.merge(
+                candidate: candidate,
+                previous: try? cache.loadIncludingStale(),
+                now: now
+            )
+        } catch {
+            throw XAIResponseRejectedError(
+                message: Self.rejectedBriefMessage(error),
+                diagnostic: categoryFeeds.map { "\($0.category.rawValue):\($0.diagnostic)" }.joined(separator: "; "),
+                costInUSDTicks: totalCost
+            )
+        }
+        try cache.save(feed)
+        return XNewsFetchResult(feed: feed, costInUSDTicks: totalCost)
+    }
+
+    private func fetch(category: XNewsCategory, apiKey: String, now: Date) async throws -> CategoryFetch {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = URLSessionXAIHTTPTransport.timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try requestBody(now: now)
+        request.httpBody = try requestBody(now: now, category: category)
 
         let response: XAIHTTPResponse
         do {
@@ -238,29 +324,35 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
                 costInUSDTicks: envelope.usage?.costInUSDTicks
             )
         }
-        let feed = try XNewsRollingFeedMerger.merge(
-            candidate: candidate,
-            previous: try? cache.loadIncludingStale(),
-            now: now
+        guard candidate.stories.allSatisfy({ $0.category == category }) else {
+            throw XAIResponseRejectedError(
+                message: "xAI mixed categories in the \(category.rawValue) brief. No cache was changed.",
+                diagnostic: diagnostic,
+                costInUSDTicks: envelope.usage?.costInUSDTicks
+            )
+        }
+        return CategoryFetch(
+            category: category,
+            feed: candidate,
+            diagnostic: diagnostic,
+            costInUSDTicks: envelope.usage?.costInUSDTicks
         )
-        try cache.save(feed)
-        return XNewsFetchResult(feed: feed, costInUSDTicks: envelope.usage?.costInUSDTicks)
     }
 
-    private func requestBody(now: Date) throws -> Data {
+    private func requestBody(now: Date, category: XNewsCategory) throws -> Data {
         let since = now.addingTimeInterval(-GrokXNewsContract.maximumAge)
         let body: [String: Any] = [
             "model": Self.model,
-            "input": GrokXNewsContract.prompt(now: now),
+            "input": GrokXNewsContract.prompt(now: now, category: category),
             "tools": [[
                 "type": "x_search",
                 "from_date": Self.dayString(since),
                 "to_date": Self.dayString(now),
             ]],
             "tool_choice": "auto",
-            "parallel_tool_calls": true,
-            "max_turns": 3,
-            "max_output_tokens": 12_000,
+            "parallel_tool_calls": false,
+            "max_turns": 2,
+            "max_output_tokens": 6_000,
             "reasoning": ["effort": "low"],
             "store": false,
             "include": ["no_inline_citations"],
@@ -331,6 +423,22 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
         }
     }
 
+    private static func categoryIndex(_ category: XNewsCategory) -> Int {
+        XNewsCategory.allCases.firstIndex(of: category) ?? .max
+    }
+
+    private static func exactTotalCost(_ outcomes: [CategoryOutcome]) -> Int64? {
+        guard outcomes.count == XNewsCategory.allCases.count else { return nil }
+        var total: Int64 = 0
+        for outcome in outcomes {
+            guard let cost = outcome.costInUSDTicks else { return nil }
+            let (sum, overflow) = total.addingReportingOverflow(cost)
+            guard !overflow else { return nil }
+            total = sum
+        }
+        return total
+    }
+
     private static func validate(statusCode: Int, data: Data) throws {
         guard !(200..<300).contains(statusCode) else { return }
         switch statusCode {
@@ -349,6 +457,38 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             throw XAIResponsesError.serviceUnavailable
         default:
             throw XAIResponsesError.requestRejected
+        }
+    }
+}
+
+private struct CategoryFetch: Sendable {
+    let category: XNewsCategory
+    let feed: XNewsFeed
+    let diagnostic: String
+    let costInUSDTicks: Int64?
+}
+
+private enum CategoryFailure: Sendable {
+    case response(XAIResponsesError)
+    case rejected(XAIResponseRejectedError)
+}
+
+private enum CategoryOutcome: Sendable {
+    case success(CategoryFetch)
+    case failure(XNewsCategory, CategoryFailure)
+
+    var category: XNewsCategory {
+        switch self {
+        case let .success(fetch): fetch.category
+        case let .failure(category, _): category
+        }
+    }
+
+    var costInUSDTicks: Int64? {
+        switch self {
+        case let .success(fetch): fetch.costInUSDTicks
+        case let .failure(_, .rejected(error)): error.costInUSDTicks
+        case .failure(_, .response): nil
         }
     }
 }
