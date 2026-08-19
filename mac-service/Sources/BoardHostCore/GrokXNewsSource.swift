@@ -362,6 +362,14 @@ public enum GrokXNewsParser {
     }
 
     public static func parse(feedText: String, now: Date = Date()) throws -> XNewsFeed {
+        try parse(feedText: feedText, now: now, allowEmpty: false)
+    }
+
+    static func parseCategoryFeed(feedText: String, now: Date = Date()) throws -> XNewsFeed {
+        try parse(feedText: feedText, now: now, allowEmpty: true)
+    }
+
+    private static func parse(feedText: String, now: Date, allowEmpty: Bool) throws -> XNewsFeed {
         let documents = JSONDocumentScanner.documents(in: feedText)
         guard !documents.isEmpty else {
             throw GrokXNewsError.malformedFeed
@@ -375,7 +383,7 @@ public enum GrokXNewsParser {
                 continue
             }
             do {
-                validFeeds.append(try validate(raw, now: now))
+                validFeeds.append(try validate(raw, now: now, allowEmpty: allowEmpty))
             } catch {
                 firstValidationError = firstValidationError ?? error
             }
@@ -416,7 +424,7 @@ public enum GrokXNewsParser {
         )
     }
 
-    private static func validate(_ raw: RawFeed, now: Date) throws -> XNewsFeed {
+    private static func validate(_ raw: RawFeed, now: Date, allowEmpty: Bool) throws -> XNewsFeed {
         guard let since = parseDate(raw.window.since),
               let until = parseDate(raw.window.until),
               let generatedAt = parseDate(raw.generatedAt),
@@ -427,8 +435,13 @@ public enum GrokXNewsParser {
         else {
             throw GrokXNewsError.invalidFeed("window and generated_at must match the requested rolling 24 hours")
         }
-        guard (GrokXNewsContract.minimumStories...GrokXNewsContract.maximumStories).contains(raw.topics.count) else {
+        let topicCountIsValid = (GrokXNewsContract.minimumStories...GrokXNewsContract.maximumStories)
+            .contains(raw.topics.count)
+        guard topicCountIsValid || (allowEmpty && raw.topics.isEmpty) else {
             throw GrokXNewsError.invalidFeed("expected 2 to \(GrokXNewsContract.maximumStories) stories")
+        }
+        if raw.topics.isEmpty {
+            return XNewsFeed(generatedAt: generatedAt, stories: [])
         }
 
         var seenURLs = Set<String>()

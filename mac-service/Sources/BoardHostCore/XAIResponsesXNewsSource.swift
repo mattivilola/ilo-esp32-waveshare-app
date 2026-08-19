@@ -241,6 +241,13 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             generatedAt: now,
             stories: categoryFeeds.flatMap(\.feed.stories)
         )
+        guard candidate.stories.count >= GrokXNewsContract.minimumStories else {
+            throw XAIResponseRejectedError(
+                message: "xAI returned fewer than two usable X News posts across both searches. No cache was changed.",
+                diagnostic: categoryFeeds.map { "\($0.category.rawValue):\($0.diagnostic)" }.joined(separator: "; "),
+                costInUSDTicks: totalCost
+            )
+        }
         let feed: XNewsFeed
         do {
             feed = try XNewsRollingFeedMerger.merge(
@@ -320,7 +327,7 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
 
         let candidate: XNewsFeed
         do {
-            candidate = try GrokXNewsParser.parse(feedText: text, now: now)
+            candidate = try GrokXNewsParser.parseCategoryFeed(feedText: text, now: now)
         } catch {
             throw XAIResponseRejectedError(
                 message: Self.rejectedBriefMessage(error),

@@ -146,7 +146,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
     #expect(await coordinator.requestManualRefresh(now: apiReferenceNow) == .failed)
     #expect(settingsStore.load().lastCostInUSDTicks == 154_000_000)
     let failure = try #require(await coordinator.failureDescription())
-    #expect(failure.contains("xAI returned an unusable X News brief: expected 2 to 15 stories"))
+    #expect(failure.contains("xAI returned fewer than two usable X News posts across both searches"))
     #expect(failure.contains("AI:status=completed; output=x_search_call:completed,message"))
     #expect(failure.contains("Robotics:status=completed; output=x_search_call:completed,message"))
 }
@@ -193,7 +193,7 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
             ),
             roboticsResponse: XAIHTTPResponse(
                 data: try responsesEnvelope(
-                    includeSearchCall: true,
+                    includeSearchCall: false,
                     costTicks: 22_000_000,
                     feedText: emptyFeedText()
                 ),
@@ -210,6 +210,65 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
         #expect(error.costInUSDTicks == 33_000_000)
     }
     #expect(try cache.load(now: apiReferenceNow) == previous)
+}
+
+@Test func oneExplicitlyEmptyCategoryStillCachesTheOtherCategory() async throws {
+    let cacheURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-xai-empty-category-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: cacheURL) }
+    let source = XAIResponsesXNewsSource(
+        cache: XNewsFeedCache(url: cacheURL),
+        apiKeyProvider: StaticXAIKeyProvider(),
+        transport: CategoryCapturingXAITransport(
+            aiResponse: XAIHTTPResponse(
+                data: try responsesEnvelope(
+                    includeSearchCall: true,
+                    costTicks: 11_000_000,
+                    feedText: try categoryFeedText(.ai)
+                ),
+                statusCode: 200
+            ),
+            roboticsResponse: XAIHTTPResponse(
+                data: try responsesEnvelope(
+                    includeSearchCall: true,
+                    costTicks: 22_000_000,
+                    feedText: emptyFeedText()
+                ),
+                statusCode: 200
+            )
+        )
+    )
+
+    let result = try await source.refresh(now: apiReferenceNow)
+
+    #expect(result.feed.stories.count == 5)
+    #expect(result.feed.stories.allSatisfy { $0.category == .ai })
+    #expect(result.costInUSDTicks == 33_000_000)
+    #expect(try XNewsFeedCache(url: cacheURL).load(now: apiReferenceNow).stories.count == 5)
+}
+
+@Test func twoExplicitlyEmptyCategoriesDoNotCreateAnEmptyCache() async throws {
+    let cacheURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("ilo-board-xai-all-empty-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: cacheURL) }
+    let emptyResponse = XAIHTTPResponse(
+        data: try responsesEnvelope(includeSearchCall: true, costTicks: 22_000_000, feedText: emptyFeedText()),
+        statusCode: 200
+    )
+    let source = XAIResponsesXNewsSource(
+        cache: XNewsFeedCache(url: cacheURL),
+        apiKeyProvider: StaticXAIKeyProvider(),
+        transport: CategoryCapturingXAITransport(aiResponse: emptyResponse, roboticsResponse: emptyResponse)
+    )
+
+    do {
+        _ = try await source.refresh(now: apiReferenceNow)
+        Issue.record("Expected an all-empty refresh to be rejected")
+    } catch let error as XAIResponseRejectedError {
+        #expect(error.message.contains("fewer than two usable"))
+        #expect(error.costInUSDTicks == 44_000_000)
+    }
+    #expect(!FileManager.default.fileExists(atPath: cacheURL.path))
 }
 
 @Test func responsesAPIReturnsActionableAuthenticationFailure() async throws {
