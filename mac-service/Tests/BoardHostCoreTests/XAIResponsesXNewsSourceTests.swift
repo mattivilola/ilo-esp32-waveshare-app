@@ -24,7 +24,9 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
             data: try responsesEnvelope(
                 includeSearchCall: true,
                 costTicks: 100_000_000,
-                feedText: try categoryFeedText(.ai)
+                feedText: try categoryFeedText(.ai),
+                searchCallType: "custom_tool_call",
+                successfulXSearchCalls: 1
             ),
             statusCode: 200
         ),
@@ -32,7 +34,9 @@ private let apiReferenceNow = ISO8601DateFormatter().date(from: "2026-08-17T09:0
             data: try responsesEnvelope(
                 includeSearchCall: true,
                 costTicks: 23_400_000,
-                feedText: try categoryFeedText(.robotics)
+                feedText: try categoryFeedText(.robotics),
+                searchCallType: "custom_tool_call",
+                successfulXSearchCalls: 1
             ),
             statusCode: 200
         )
@@ -369,19 +373,28 @@ private func responsesEnvelope(
     includeSearchCall: Bool,
     costTicks: Int64?,
     status: String = "completed",
-    feedText: String? = nil
+    feedText: String? = nil,
+    searchCallType: String = "x_search_call",
+    successfulXSearchCalls: Int? = nil
 ) throws -> Data {
     var output = [[String: Any]]()
     if includeSearchCall {
-        output.append(["type": "x_search_call", "status": "completed"])
+        output.append(["type": searchCallType, "status": "completed"])
     }
     output.append([
         "type": "message",
         "content": [["type": "output_text", "text": try feedText ?? directFeedText()]],
     ])
     var root: [String: Any] = ["status": status, "output": output]
+    var usage = [String: Any]()
     if let costTicks {
-        root["usage"] = ["cost_in_usd_ticks": costTicks]
+        usage["cost_in_usd_ticks"] = costTicks
+    }
+    if let successfulXSearchCalls {
+        usage["server_side_tool_usage_details"] = ["x_search_calls": successfulXSearchCalls]
+    }
+    if !usage.isEmpty {
+        root["usage"] = usage
     }
     return try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
 }

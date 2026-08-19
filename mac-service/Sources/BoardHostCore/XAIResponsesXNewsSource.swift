@@ -294,7 +294,11 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
                 costInUSDTicks: envelope.usage?.costInUSDTicks
             )
         }
-        guard envelope.output.contains(where: { $0.type == "x_search_call" && $0.status == "completed" }) else {
+        let completedSearchOutput = envelope.output.contains {
+            $0.type == "x_search_call" && $0.status == "completed"
+        }
+        let reportedSuccessfulSearch = (envelope.usage?.serverSideToolUsageDetails?.xSearchCalls ?? 0) > 0
+        guard completedSearchOutput || reportedSuccessfulSearch else {
             throw XAIResponseRejectedError(
                 message: "xAI returned no completed X search. No cache was changed.",
                 diagnostic: diagnostic,
@@ -401,7 +405,9 @@ public struct XAIResponsesXNewsSource: XNewsFeedRefreshing, Sendable {
             return "\(type):\(diagnosticToken(itemStatus))"
         }
         let output = items.isEmpty ? "none" : items.joined(separator: ",")
-        return "status=\(status); output=\(output)"
+        let xSearches = envelope.usage?.serverSideToolUsageDetails?.xSearchCalls
+        let usage = xSearches.map { "; x_searches=\($0)" } ?? ""
+        return "status=\(status); output=\(output)\(usage)"
     }
 
     private static func diagnosticToken(_ value: String) -> String {
@@ -548,10 +554,20 @@ private struct ResponsesEnvelope: Decodable {
     }
 
     struct Usage: Decodable {
+        struct ServerSideToolUsageDetails: Decodable {
+            let xSearchCalls: Int
+
+            enum CodingKeys: String, CodingKey {
+                case xSearchCalls = "x_search_calls"
+            }
+        }
+
         let costInUSDTicks: Int64?
+        let serverSideToolUsageDetails: ServerSideToolUsageDetails?
 
         enum CodingKeys: String, CodingKey {
             case costInUSDTicks = "cost_in_usd_ticks"
+            case serverSideToolUsageDetails = "server_side_tool_usage_details"
         }
     }
 
